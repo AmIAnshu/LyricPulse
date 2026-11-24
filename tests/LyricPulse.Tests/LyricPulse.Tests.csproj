@@ -14,10 +14,13 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\LyricPulse.Core\LyricPulse.Core.csproj" />
     <ProjectReference Include="..\..\src\LyricPulse.Rendering\LyricPulse.Rendering.csproj" />
+    <ProjectReference Include="..\..\src\LyricPulse.App\LyricPulse.App.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" />
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.Win32" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>

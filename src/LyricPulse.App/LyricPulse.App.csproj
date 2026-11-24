@@ -1,11 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
     <EnableAotAnalyzer>true</EnableAotAnalyzer>
     <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="LyricPulse.Tests" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\LyricPulse.Core\LyricPulse.Core.csproj" />
@@ -15,6 +21,11 @@
 
   <ItemGroup>
     <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Skia" />
+    <PackageReference Include="Avalonia.Win32" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Controls.ColorPicker" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
     <PackageReference Include="SkiaSharp.NativeAssets.Win32" />
     <PackageReference Include="HarfBuzzSharp.NativeAssets.Win32" />
     <PackageReference Include="Microsoft.Windows.CsWinRT" />
