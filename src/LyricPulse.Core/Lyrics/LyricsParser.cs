@@ -217,8 +217,12 @@ public sealed partial class LyricsParser : ILyricsParser
             var token = rawTokens[i];
             var wordStart = token.Start < cursor ? cursor : token.Start;
             var wordEnd = ComputeEnhancedWordEnd(token.Text, wordStart, i + 1 < rawTokens.Count ? rawTokens[i + 1].Start : null, nextLineStart, trackDuration);
+            var isSpaceSeparated = i < rawTokens.Count - 1 &&
+                                   (token.SpaceAfter ||
+                                    (WordTimingInterpolator.IsLatinToken(token.Text) &&
+                                     WordTimingInterpolator.IsLatinToken(rawTokens[i + 1].Text)));
 
-            words.Add(new LyricWord(token.Text, wordStart, wordEnd, token.SpaceAfter || i < rawTokens.Count - 1));
+            words.Add(new LyricWord(token.Text, wordStart, wordEnd, isSpaceSeparated));
             cursor = wordEnd;
         }
 

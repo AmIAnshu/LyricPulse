@@ -120,7 +120,7 @@ internal static class LyricTextNormalizationData
             ["dreaming"] = "dream",
             ["chasing"] = "run",
             ["waking"] = "coffee",
-            ["living"] = "skull"
+            ["living"] = "life"
         }.ToFrozenDictionary(StringComparer.Ordinal);
 
     public static bool TryNormalizeToken(ReadOnlySpan<char> raw, Span<char> destination, out int length)

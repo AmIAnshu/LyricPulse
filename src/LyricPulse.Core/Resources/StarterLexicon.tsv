@@ -13,6 +13,7 @@ time	ic_fluent_clock_24_filled	F2D8	⏱️	time|times|clock|clocks|hour|hours|mi
 light	ic_fluent_lightbulb_24_filled	F4D3	💡	light|lights|bright|brighter|brightest|beam|beams|glow|glowing|shine|shining|shone|radiant|radiance|luminous|lamp|lantern|bulb|beacon|illuminate|daylight|flash|spotlight|halo
 dream	ic_fluent_sparkle_24_filled	F6F3	✨	dream|dreams|dreaming|dreamed|dreamt|dreamer|daydream|vision|visions|fantasy|magic|magical|wonder|miracle|sparkle|sparkles|shimmer|glimmer|glitter|enchanted|illusion|utopia
 # --- Love, Emotion & Soul ---
+life	ic_fluent_heart_pulse_24_filled	F47E	🌱	life|live|living|alive|lifeline|birth|born|rebirth|revive|survive|survivor|vital|immortal
 broken_heart	ic_fluent_heart_broken_24_filled	F47B	💔	heartbreak|heartbroken|breakup|shattered|torn|betrayal|betrayed|ache|aching|hurt|hurting|pain|painful|wound|wounded|scar|scars|bleed|bleeding
 kiss	ic_fluent_emoji_smile_slight_24_filled	F3DF	💋	kiss|kisses|kissed|kissing|lips|lip|smack|smooch|embrace|hug|hugs|hold|holding|cuddle|touch|caress|whisper|whispers
 cry	ic_fluent_emoji_sad_24_filled	F3DD	😢	cry|crying|cried|cries|tear|tears|teardrop|teardrops|weep|weeping|sob|sobbing|sad|sadness|sorrow|grief|mourn|lonely|loneliness|alone|melancholy|blue|misery|regret|despair
@@ -76,7 +77,7 @@ coffee	ic_fluent_drink_coffee_24_filled	F3B5	☕	coffee|espresso|latte|cafe|tea|
 wine	ic_fluent_drink_wine_24_filled	F3B8	🍷	wine|champagne|whiskey|bourbon|vodka|tequila|rum|gin|beer|cocktail|drink|drinking|drank|drunk|sober|bottle|bottles|glass|glasses|toast|cheers|bar|tavern|pub|pour|pouring|sip|sipping|poison|venom|elixir|potion|taste|sweet|bitter|sugar|honey|cherry|peach|lemon|candy|chocolate
 rose_petal	ic_fluent_heart_24_filled	F47A	🌹	velvet|silk|satin|lace|ribbon|dress|jacket|coat|shoes|boots|jeans|scarf|hat|glasses|sunglasses|shades|perfume|scent|fragrance
 weapon	ic_fluent_shield_24_filled	F6B7	⚔️	sword|swords|blade|knife|dagger|arrow|arrows|bow|bullet|bullets|gun|guns|trigger|shot|shots|shoot|shooting|war|battle|fight|fighting|fought|fighter|warrior|soldier|army|armor|shield|defend|attack|strike|clash|conquer|surrender|truce|bomb|explode|explosion|dynamite|grenade
-skull	ic_fluent_warning_24_filled	F886	💀	skull|skulls|death|dead|die|dying|died|grave|graves|graveyard|cemetery|coffin|funeral|ashes|dust|mortal|immortal|alive|live|living|life|lifeline|birth|born|rebirth|revive|survive|survivor
+skull	ic_fluent_warning_24_filled	F886	💀	skull|skulls|death|dead|die|dying|died|grave|graves|graveyard|cemetery|coffin|funeral|ashes|dust|mortal
 flag	ic_fluent_flag_24_filled	F417	🚩	flag|flags|banner|signal|sign|signs|red|green|blue|black|white|purple|pink|orange|yellow|gray|grey|dark|darker|darkest|neon|glow|bright|dim|faint|vivid
 compass	ic_fluent_compass_northwest_24_filled	F30B	🧭	lost|lose|losing|found|find|finding|search|searching|seek|seeking|quest|guide|guiding|follow|following|lead|leading|direction|turn|turning|crossroads|maze|labyrinth|choice|chance|luck|lucky|gamble|risk
 balance	ic_fluent_scales_24_filled	F695	⚖️	balance|scale|scales|weight|heavy|lightweight|gravity|fair|unfair|justice|judge|guilty|innocent|karma|equal|broken|fixed|heal|healing|healed|cure|medicine|remedy|repair|mend

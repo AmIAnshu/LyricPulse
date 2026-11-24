@@ -18,13 +18,31 @@ namespace LyricPulse.Core.Lyrics;
 /// </summary>
 public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
 {
+    public const string HttpClientName = "LyricPulse.LrcLib";
     public const string DefaultUserAgent = "LyricPulse/1.0.0 (https://github.com/lyricpulse/lyricpulse)";
 
-    private readonly HttpClient _httpClient;
+    private readonly Func<HttpClient> _httpClientAccessor;
     private readonly ILyricsParser _parser;
     private readonly ITitleNormalizer _normalizer;
     private readonly ILogger<LrcLibLyricsProvider> _logger;
     private readonly ProviderHttpResilience _resilience;
+
+    public LrcLibLyricsProvider(
+        IHttpClientFactory httpClientFactory,
+        ILyricsParser parser,
+        ITitleNormalizer normalizer,
+        ILogger<LrcLibLyricsProvider> logger,
+        Func<DateTimeOffset>? utcNowProvider = null,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
+        : this(
+            () => (httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory))).CreateClient(HttpClientName),
+            parser,
+            normalizer,
+            logger,
+            utcNowProvider,
+            delayAsync)
+    {
+    }
 
     public LrcLibLyricsProvider(
         HttpClient httpClient,
@@ -33,8 +51,26 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
         ILogger<LrcLibLyricsProvider> logger,
         Func<DateTimeOffset>? utcNowProvider = null,
         Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
+        : this(
+            () => httpClient ?? throw new ArgumentNullException(nameof(httpClient)),
+            parser,
+            normalizer,
+            logger,
+            utcNowProvider,
+            delayAsync)
     {
-        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        ArgumentNullException.ThrowIfNull(httpClient);
+    }
+
+    private LrcLibLyricsProvider(
+        Func<HttpClient> httpClientAccessor,
+        ILyricsParser parser,
+        ITitleNormalizer normalizer,
+        ILogger<LrcLibLyricsProvider> logger,
+        Func<DateTimeOffset>? utcNowProvider,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync)
+    {
+        _httpClientAccessor = httpClientAccessor;
         _parser = parser ?? throw new ArgumentNullException(nameof(parser));
         _normalizer = normalizer ?? throw new ArgumentNullException(nameof(normalizer));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -141,7 +177,7 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
     private async Task<HttpFetchResult<LrclibTrackDto?>> FetchTrackDtoAsync(string relativeUri, CancellationToken ct)
     {
         using var response = await _resilience.SendWithResilienceAsync(
-            _httpClient,
+            _httpClientAccessor(),
             () => CreateGetRequest(relativeUri),
             ct).ConfigureAwait(false);
 
@@ -172,7 +208,7 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
     private async Task<HttpFetchResult<ImmutableArray<LrclibTrackDto>>> FetchSearchDtosAsync(string relativeUri, CancellationToken ct)
     {
         using var response = await _resilience.SendWithResilienceAsync(
-            _httpClient,
+            _httpClientAccessor(),
             () => CreateGetRequest(relativeUri),
             ct).ConfigureAwait(false);
 

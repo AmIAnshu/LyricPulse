@@ -49,6 +49,8 @@ public sealed partial class TrackOffsetStore : ITrackOffsetStore, IDisposable
                 return null;
             }
 
+            // Refresh in-memory access timestamp so LRU eviction reflects recency of reads as well as writes.
+            _cachedEntries = entries.SetItem(trackCacheKey, entry with { LastAccessedUtc = _utcNowProvider() });
             return ClampOffset(TimeSpan.FromMilliseconds(entry.OffsetMs));
         }
         finally
@@ -197,9 +199,10 @@ public sealed partial class TrackOffsetStore : ITrackOffsetStore, IDisposable
 /// Positive offset (+500ms / +1000ms) = Lyrics appear LATER;
 /// EffectiveLookupTime = Clamp(InterpolatedPosition - TimingOffset, 0, Duration).
 /// </summary>
-public sealed class TimingOffsetService
+public sealed partial class TimingOffsetService : IDisposable
 {
     private readonly ITrackOffsetStore _store;
+    private readonly SemaphoreSlim _stateLock = new(1, 1);
     private volatile TimingOffsetState _current = new(null, TimeSpan.Zero, false);
 
     public TimingOffsetService(ITrackOffsetStore store)
@@ -210,6 +213,8 @@ public sealed class TimingOffsetService
     public TimingOffsetState Current => _current;
 
     public event EventHandler<TimingOffsetState>? OffsetChanged;
+
+    public void Dispose() => _stateLock.Dispose();
 
     /// <summary>
     /// Computes lookup time in lyric coordinates using the locked sign contract:
@@ -242,17 +247,31 @@ public sealed class TimingOffsetService
         bool enablePerTrackSavedOffsets,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(trackCacheKey) || !enablePerTrackSavedOffsets)
+        TimingOffsetState published;
+        await _stateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            return Publish(new TimingOffsetState(trackCacheKey, TimeSpan.Zero, IsPersistedOverride: false));
+            if (string.IsNullOrWhiteSpace(trackCacheKey) || !enablePerTrackSavedOffsets)
+            {
+                published = new TimingOffsetState(trackCacheKey, TimeSpan.Zero, IsPersistedOverride: false);
+            }
+            else
+            {
+                var saved = await _store.TryGetOffsetAsync(trackCacheKey, cancellationToken).ConfigureAwait(false);
+                published = saved.HasValue && saved.Value != TimeSpan.Zero
+                    ? new TimingOffsetState(trackCacheKey, saved.Value, IsPersistedOverride: true)
+                    : new TimingOffsetState(trackCacheKey, TimeSpan.Zero, IsPersistedOverride: false);
+            }
+
+            _current = published;
+        }
+        finally
+        {
+            _stateLock.Release();
         }
 
-        var saved = await _store.TryGetOffsetAsync(trackCacheKey, cancellationToken).ConfigureAwait(false);
-        var next = saved.HasValue && saved.Value != TimeSpan.Zero
-            ? new TimingOffsetState(trackCacheKey, saved.Value, IsPersistedOverride: true)
-            : new TimingOffsetState(trackCacheKey, TimeSpan.Zero, IsPersistedOverride: false);
-
-        return Publish(next);
+        OffsetChanged?.Invoke(this, published);
+        return published;
     }
 
     public async Task<TimingOffsetState> NudgeAsync(
@@ -260,48 +279,67 @@ public sealed class TimingOffsetService
         bool enablePerTrackSavedOffsets,
         CancellationToken cancellationToken = default)
     {
-        var nudged = _current.WithNudge(delta);
-        var shouldPersist = enablePerTrackSavedOffsets && !string.IsNullOrWhiteSpace(nudged.TrackCacheKey);
-
-        if (shouldPersist)
+        TimingOffsetState published;
+        await _stateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            if (nudged.Offset == TimeSpan.Zero)
+            var nudged = _current.WithNudge(delta);
+            var shouldPersist = enablePerTrackSavedOffsets && !string.IsNullOrWhiteSpace(nudged.TrackCacheKey);
+
+            if (shouldPersist)
             {
-                await _store.RemoveOffsetAsync(nudged.TrackCacheKey!, cancellationToken).ConfigureAwait(false);
-                nudged = nudged with { IsPersistedOverride = false };
+                if (nudged.Offset == TimeSpan.Zero)
+                {
+                    await _store.RemoveOffsetAsync(nudged.TrackCacheKey!, cancellationToken).ConfigureAwait(false);
+                    nudged = nudged with { IsPersistedOverride = false };
+                }
+                else
+                {
+                    await _store.SetOffsetAsync(nudged.TrackCacheKey!, nudged.Offset, cancellationToken).ConfigureAwait(false);
+                    nudged = nudged with { IsPersistedOverride = true };
+                }
             }
             else
             {
-                await _store.SetOffsetAsync(nudged.TrackCacheKey!, nudged.Offset, cancellationToken).ConfigureAwait(false);
-                nudged = nudged with { IsPersistedOverride = true };
+                nudged = nudged with { IsPersistedOverride = false };
             }
+
+            _current = nudged;
+            published = nudged;
         }
-        else
+        finally
         {
-            nudged = nudged with { IsPersistedOverride = false };
+            _stateLock.Release();
         }
 
-        return Publish(nudged);
+        OffsetChanged?.Invoke(this, published);
+        return published;
     }
 
     public async Task<TimingOffsetState> ResetAsync(
         bool enablePerTrackSavedOffsets,
         CancellationToken cancellationToken = default)
     {
-        var reset = _current.WithReset() with { IsPersistedOverride = false };
-
-        if (enablePerTrackSavedOffsets && !string.IsNullOrWhiteSpace(reset.TrackCacheKey))
+        TimingOffsetState published;
+        await _stateLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            await _store.RemoveOffsetAsync(reset.TrackCacheKey, cancellationToken).ConfigureAwait(false);
+            var reset = _current.WithReset() with { IsPersistedOverride = false };
+
+            if (enablePerTrackSavedOffsets && !string.IsNullOrWhiteSpace(reset.TrackCacheKey))
+            {
+                await _store.RemoveOffsetAsync(reset.TrackCacheKey, cancellationToken).ConfigureAwait(false);
+            }
+
+            _current = reset;
+            published = reset;
+        }
+        finally
+        {
+            _stateLock.Release();
         }
 
-        return Publish(reset);
-    }
-
-    private TimingOffsetState Publish(TimingOffsetState state)
-    {
-        _current = state;
-        OffsetChanged?.Invoke(this, state);
-        return state;
+        OffsetChanged?.Invoke(this, published);
+        return published;
     }
 }

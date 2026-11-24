@@ -42,4 +42,10 @@ internal static partial class CoreLogMessages
 
     [LoggerMessage(EventId = 2007, Level = LogLevel.Warning, Message = "Lyrics provider {Provider} threw an unexpected exception")]
     public static partial void LogOrchestratorProviderException(this ILogger logger, Exception ex, string provider);
+
+    [LoggerMessage(EventId = 3001, Level = LogLevel.Warning, Message = "Runtime track load failed unexpectedly for '{TrackTitle}'")]
+    public static partial void LogRuntimeTrackLoadFailed(this ILogger logger, Exception ex, string trackTitle);
+
+    [LoggerMessage(EventId = 3002, Level = LogLevel.Warning, Message = "Runtime album art palette extraction failed unexpectedly")]
+    public static partial void LogRuntimeAlbumArtFailed(this ILogger logger, Exception ex);
 }

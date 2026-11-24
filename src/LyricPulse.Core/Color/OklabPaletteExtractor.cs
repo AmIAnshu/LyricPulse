@@ -24,7 +24,7 @@ public static class OklabPaletteExtractor
         ReadOnlySpan<byte> seedBytes,
         string? sourceAlbumHash = null)
     {
-        if (width <= 0 || height <= 0 || rgbaPixels.Length < width * height * 4)
+        if (width <= 0 || height <= 0 || rgbaPixels.Length < (long)width * height * 4)
         {
             return AlbumAccentPalette.Default with { SourceAlbumHash = sourceAlbumHash };
         }

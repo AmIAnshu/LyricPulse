@@ -1,0 +1,106 @@
+using LyricPulse.Core.Color;
+using LyricPulse.Core.Models;
+
+namespace LyricPulse.Core.Runtime;
+
+/// <summary>
+/// Immutable OKLab palette crossfade descriptor evaluated lock-free on each frame.
+/// </summary>
+public sealed record PaletteMorphState(
+    AlbumAccentPalette FromPalette,
+    AlbumAccentPalette ToPalette,
+    long StartTimestamp,
+    double DurationSeconds)
+{
+    public static PaletteMorphState Static(AlbumAccentPalette palette) =>
+        new(palette, palette, 0, 0.0);
+
+    public AlbumAccentPalette Evaluate(long nowTimestamp, long timestampFrequency)
+    {
+        if (DurationSeconds <= 0.0 || ReferenceEquals(FromPalette, ToPalette) || FromPalette == ToPalette)
+        {
+            return ToPalette;
+        }
+
+        var elapsedSec = Math.Max(0L, nowTimestamp - StartTimestamp) / (double)timestampFrequency;
+        if (elapsedSec >= DurationSeconds)
+        {
+            return ToPalette;
+        }
+
+        return OklabColorMath.MorphPalette(FromPalette, ToPalette, elapsedSec / DurationSeconds);
+    }
+}
+
+/// <summary>
+/// Immutable per-frame runtime state snapshot sampled lock-free by the 60-240 FPS
+/// SkiaSharp render host and observed by System Tray / Gallery UI controllers.
+/// </summary>
+public sealed record OverlayPlaybackSnapshot(
+    TrackIdentity? Track,
+    LyricsDocument? Document,
+    LyricsStatus LyricsStatus,
+    MediaPlaybackState PlaybackState,
+    MediaPlayerKind PlayerKind,
+    string? SourceAppUserModelId,
+    TimeSpan RawPosition,
+    TimeSpan EffectivePosition,
+    ActiveLyricSlice ActiveSlice,
+    AlbumAccentPalette ActivePalette,
+    AlbumAccentPalette TargetPalette,
+    TimingOffsetState TimingOffset,
+    AppSettings Settings,
+    bool IsPlaying,
+    bool IsDemoMode,
+    bool IsFullscreenHidden,
+    DateTimeOffset? PausedSinceUtc,
+    DateTimeOffset? LastOffsetNudgeUtc,
+    long TrackGeneration,
+    long SeekGeneration)
+{
+    public int ActiveLineIndex => ActiveSlice.ActiveLineIndex;
+    public int ActiveWordIndex => ActiveSlice.ActiveWordIndex;
+    public LyricLine? PreviousLine => ActiveSlice.PreviousLine;
+    public LyricLine? CurrentLine => ActiveSlice.CurrentLine;
+    public LyricLine? NextLine => ActiveSlice.NextLine;
+    public double WordProgress => ActiveSlice.WordProgress;
+
+    public bool IsLyricsVisible => Settings.LyricsVisible && !IsFullscreenHidden;
+}
+
+internal sealed record RuntimeStateBox(
+    AppSettings Settings,
+    MediaSessionSnapshot? LiveSession,
+    TrackIdentity? LiveTrack,
+    LyricsDocument? LiveDocument,
+    LyricsStatus LiveLyricsStatus,
+    AlbumAccentPalette LiveTargetPalette,
+    PaletteMorphState PaletteMorph,
+    TimingOffsetState TimingOffset,
+    bool IsDemoMode,
+    long DemoStartTimestamp,
+    LyricsDocument? DemoDocument,
+    bool IsFullscreenHidden,
+    DateTimeOffset? PausedSinceUtc,
+    DateTimeOffset? LastOffsetNudgeUtc,
+    long TrackGeneration,
+    long SeekGeneration)
+{
+    public static RuntimeStateBox Initial { get; } = new(
+        Settings: AppSettings.Default,
+        LiveSession: null,
+        LiveTrack: null,
+        LiveDocument: null,
+        LiveLyricsStatus: LyricsStatus.NotFound,
+        LiveTargetPalette: AlbumAccentPalette.Default,
+        PaletteMorph: PaletteMorphState.Static(AlbumAccentPalette.Default),
+        TimingOffset: new TimingOffsetState(null, TimeSpan.Zero, false),
+        IsDemoMode: false,
+        DemoStartTimestamp: 0,
+        DemoDocument: null,
+        IsFullscreenHidden: false,
+        PausedSinceUtc: null,
+        LastOffsetNudgeUtc: null,
+        TrackGeneration: 0,
+        SeekGeneration: 0);
+}

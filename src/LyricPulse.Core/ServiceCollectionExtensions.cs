@@ -1,14 +1,17 @@
 using LyricPulse.Core.Abstractions;
 using LyricPulse.Core.Lyrics;
 using LyricPulse.Core.Media;
+using LyricPulse.Core.Runtime;
 using LyricPulse.Core.Settings;
 using LyricPulse.Core.Visuals;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace LyricPulse.Core;
 
 /// <summary>
 /// Dependency injection registration extensions for LyricPulse.Core services.
+/// Uses named IHttpClientFactory clients inside singleton providers to avoid captive transient HttpClients.
 /// </summary>
 public static class ServiceCollectionExtensions
 {
@@ -28,21 +31,42 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(sp =>
             new LocalLrcSidecarProvider(sidecarDirectory: null, sp.GetRequiredService<ILyricsParser>()));
 
-        services.AddHttpClient<LrcLibLyricsProvider>(client =>
+        services.AddHttpClient(LrcLibLyricsProvider.HttpClientName, client =>
         {
             client.BaseAddress = new Uri("https://lrclib.net");
             client.Timeout = TimeSpan.FromSeconds(10);
         });
-        services.AddHttpClient<NetEaseLyricsProvider>(client =>
+        services.AddHttpClient(NetEaseLyricsProvider.HttpClientName, client =>
         {
             client.BaseAddress = new Uri("https://music.163.com");
             client.Timeout = TimeSpan.FromSeconds(10);
         });
 
+        services.AddSingleton(sp => new LrcLibLyricsProvider(
+            sp.GetRequiredService<IHttpClientFactory>(),
+            sp.GetRequiredService<ILyricsParser>(),
+            sp.GetRequiredService<ITitleNormalizer>(),
+            sp.GetRequiredService<ILogger<LrcLibLyricsProvider>>()));
+        services.AddSingleton(sp => new NetEaseLyricsProvider(
+            sp.GetRequiredService<IHttpClientFactory>(),
+            sp.GetRequiredService<ILyricsParser>(),
+            sp.GetRequiredService<ITitleNormalizer>(),
+            sp.GetRequiredService<ILogger<NetEaseLyricsProvider>>()));
+
         services.AddSingleton<ILyricsProvider>(sp => sp.GetRequiredService<LrcLibLyricsProvider>());
         services.AddSingleton<ILyricsProvider>(sp => sp.GetRequiredService<NetEaseLyricsProvider>());
         services.AddSingleton<ILyricsOrchestrator, LyricsOrchestrator>();
         services.AddSingleton<IMediaSessionProvider, WindowsGsmtcSessionProvider>();
+        services.AddSingleton(sp => new OverlayRuntimeController(
+            sp.GetRequiredService<IMediaSessionProvider>(),
+            sp.GetRequiredService<ILyricsOrchestrator>(),
+            sp.GetRequiredService<IWordVisualMatcher>(),
+            sp.GetRequiredService<ISettingsStore>(),
+            sp.GetRequiredService<TimingOffsetService>(),
+            sp.GetRequiredService<DemoSongProvider>(),
+            sp.GetService<IAlbumColorExtractor>(),
+            sp.GetService<IFullscreenDetector>(),
+            sp.GetService<ILogger<OverlayRuntimeController>>()));
 
         return services;
     }

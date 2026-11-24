@@ -3,6 +3,7 @@ using LyricPulse.Core;
 using LyricPulse.Core.Abstractions;
 using LyricPulse.Core.Lyrics;
 using LyricPulse.Core.Models;
+using LyricPulse.Core.Runtime;
 using LyricPulse.Core.Visuals;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -30,6 +31,7 @@ public sealed class CoreInfrastructureTests
         provider.GetRequiredService<ILyricsCache>().Should().BeOfType<DiskLyricsCache>();
         provider.GetRequiredService<ILyricsOrchestrator>().Should().BeOfType<LyricsOrchestrator>();
         provider.GetRequiredService<IMediaSessionProvider>().Should().NotBeNull();
+        provider.GetRequiredService<OverlayRuntimeController>().Should().NotBeNull();
         provider.GetServices<ILyricsProvider>().Should().HaveCount(2);
     }
 

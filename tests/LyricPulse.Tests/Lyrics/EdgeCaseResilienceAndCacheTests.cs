@@ -182,7 +182,7 @@ public sealed class EdgeCaseResilienceAndCacheTests : IDisposable
         lrcRes.Document!.TimingKind.Should().Be(TimingKind.WordInterpolated);
 
         mode = "nolyric";
-        (await provider.FetchAsync(track)).Status.Should().Be(LyricsStatus.NotFound);
+        (await provider.FetchAsync(track)).Status.Should().Be(LyricsStatus.Instrumental);
 
         mode = "badjson";
         (await provider.FetchAsync(track)).Status.Should().Be(LyricsStatus.NotFound);

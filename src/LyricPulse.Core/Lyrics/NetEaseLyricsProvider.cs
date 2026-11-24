@@ -17,14 +17,32 @@ namespace LyricPulse.Core.Lyrics;
 /// </summary>
 public sealed partial class NetEaseLyricsProvider : ILyricsProvider, IDisposable
 {
+    public const string HttpClientName = "LyricPulse.NetEase";
     private const string BrowserUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-    private readonly HttpClient _httpClient;
+    private readonly Func<HttpClient> _httpClientAccessor;
     private readonly ILyricsParser _parser;
     private readonly ITitleNormalizer _normalizer;
     private readonly ILogger<NetEaseLyricsProvider> _logger;
     private readonly ProviderHttpResilience _resilience;
+
+    public NetEaseLyricsProvider(
+        IHttpClientFactory httpClientFactory,
+        ILyricsParser parser,
+        ITitleNormalizer normalizer,
+        ILogger<NetEaseLyricsProvider> logger,
+        Func<DateTimeOffset>? utcNowProvider = null,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
+        : this(
+            () => (httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory))).CreateClient(HttpClientName),
+            parser,
+            normalizer,
+            logger,
+            utcNowProvider,
+            delayAsync)
+    {
+    }
 
     public NetEaseLyricsProvider(
         HttpClient httpClient,
@@ -33,8 +51,26 @@ public sealed partial class NetEaseLyricsProvider : ILyricsProvider, IDisposable
         ILogger<NetEaseLyricsProvider> logger,
         Func<DateTimeOffset>? utcNowProvider = null,
         Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
+        : this(
+            () => httpClient ?? throw new ArgumentNullException(nameof(httpClient)),
+            parser,
+            normalizer,
+            logger,
+            utcNowProvider,
+            delayAsync)
     {
-        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        ArgumentNullException.ThrowIfNull(httpClient);
+    }
+
+    private NetEaseLyricsProvider(
+        Func<HttpClient> httpClientAccessor,
+        ILyricsParser parser,
+        ITitleNormalizer normalizer,
+        ILogger<NetEaseLyricsProvider> logger,
+        Func<DateTimeOffset>? utcNowProvider,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync)
+    {
+        _httpClientAccessor = httpClientAccessor;
         _parser = parser ?? throw new ArgumentNullException(nameof(parser));
         _normalizer = normalizer ?? throw new ArgumentNullException(nameof(normalizer));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -84,7 +120,17 @@ public sealed partial class NetEaseLyricsProvider : ILyricsProvider, IDisposable
         }
 
         var lyricDto = lyricFetch.Value;
-        if (lyricDto is null || lyricDto.Code != 200 || lyricDto.NoLyric == true || lyricDto.Uncollected == true)
+        if (lyricDto is null || lyricDto.Code != 200)
+        {
+            return new LyricsResult(LyricsStatus.NotFound, null);
+        }
+
+        if (lyricDto.NoLyric == true)
+        {
+            return new LyricsResult(LyricsStatus.Instrumental, null);
+        }
+
+        if (lyricDto.Uncollected == true)
         {
             return new LyricsResult(LyricsStatus.NotFound, null);
         }
@@ -122,7 +168,7 @@ public sealed partial class NetEaseLyricsProvider : ILyricsProvider, IDisposable
         var body = $"s={Uri.EscapeDataString(query)}&type=1&limit=15&offset=0&total=true";
 
         using var response = await _resilience.SendWithResilienceAsync(
-            _httpClient,
+            _httpClientAccessor(),
             () => CreateSearchPostRequest(body),
             ct).ConfigureAwait(false);
 
@@ -193,7 +239,7 @@ public sealed partial class NetEaseLyricsProvider : ILyricsProvider, IDisposable
         var uri = $"/api/song/lyric/v1?id={songId}&lv=1&tv=-1&kv=1&yv=1";
 
         using var response = await _resilience.SendWithResilienceAsync(
-            _httpClient,
+            _httpClientAccessor(),
             () => CreateGetRequest(uri),
             ct).ConfigureAwait(false);
 

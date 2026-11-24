@@ -144,9 +144,27 @@ public sealed class MediaSessionCoordinator
             return null;
         }
 
-        var track = selected.ItemKind == MediaItemKind.Music && !string.IsNullOrWhiteSpace(selected.Title)
-            ? _normalizer.CreateIdentity(selected.Title, selected.Artist, selected.AlbumTitle, selected.EndTime)
-            : null;
+        var isChangingHysteresis =
+            previous is not null &&
+            previous.Track is not null &&
+            selected.SourceAppUserModelId.Equals(previous.SourceAppUserModelId, StringComparison.OrdinalIgnoreCase) &&
+            selected.PlaybackState == MediaPlaybackState.Changing &&
+            string.IsNullOrWhiteSpace(selected.Title);
+
+        var track = isChangingHysteresis
+            ? previous!.Track
+            : selected.ItemKind == MediaItemKind.Music && !string.IsNullOrWhiteSpace(selected.Title)
+                ? _normalizer.CreateIdentity(selected.Title, selected.Artist, selected.AlbumTitle, selected.EndTime)
+                : null;
+
+        var trackChanged = !isChangingHysteresis &&
+                           !string.Equals(previous?.Track?.CacheKey, track?.CacheKey, StringComparison.Ordinal);
+
+        if (trackChanged)
+        {
+            // Clear stale previous-track album art before building the new track's initial snapshot.
+            _cachedAlbumArt = null;
+        }
 
         var clockUpdate = _clock.UpdateFromTimeline(
             trackKey: track?.CacheKey ?? selected.SourceAppUserModelId,
@@ -170,7 +188,6 @@ public sealed class MediaSessionCoordinator
             LastUpdatedUtc: selected.LastUpdatedUtc,
             AlbumArtHash: _cachedAlbumArt?.Sha256Hash);
 
-        var trackChanged = !string.Equals(previous?.Track?.CacheKey, track?.CacheKey, StringComparison.Ordinal);
         _currentSession = snapshot;
 
         if (previous != snapshot)
