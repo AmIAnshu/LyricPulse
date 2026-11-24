@@ -28,6 +28,8 @@
     <PackageReference Include="Avalonia.Fonts.Inter" />
     <PackageReference Include="SkiaSharp.NativeAssets.Win32" />
     <PackageReference Include="HarfBuzzSharp.NativeAssets.Win32" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
     <PackageReference Include="Microsoft.Windows.CsWinRT" />
     <PackageReference Include="Avalonia.Diagnostics" Condition="'$(Configuration)' == 'Debug'" />
   </ItemGroup>

@@ -1,4 +1,5 @@
 using LyricPulse.Core.Models;
+using LyricPulse.Core.Runtime;
 using LyricPulse.Rendering.Fonts;
 using LyricPulse.Rendering.Legibility;
 using LyricPulse.Rendering.Shaders;
@@ -48,7 +49,9 @@ public sealed record FrameRenderPacket(
     float BaseFontSizeDip,
     AlbumAccentPalette Palette,
     OverlayBoundsConfig BoundsConfig,
-    LyricSceneSnapshot SceneSnapshot)
+    LyricSceneSnapshot SceneSnapshot,
+    OverlayPlaybackSnapshot? PlaybackSnapshot = null,
+    DateTimeOffset? UtcNow = null)
 {
     public static FrameRenderPacket CreateDefault(
         float viewportWidthDip,
@@ -73,7 +76,9 @@ public sealed record FrameRenderPacket(
             BaseFontSizeDip: (float)defaults.ComputeEffectiveFontSizeDip(),
             Palette: AlbumAccentPalette.Default,
             BoundsConfig: OverlayBoundsConfig.FromAnchorZone(defaults.AnchorZone, defaults.SafeMarginPx),
-            SceneSnapshot: LyricSceneSnapshot.Empty);
+            SceneSnapshot: LyricSceneSnapshot.Empty,
+            PlaybackSnapshot: null,
+            UtcNow: DateTimeOffset.UtcNow);
     }
 }
 

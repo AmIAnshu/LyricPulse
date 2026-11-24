@@ -4,6 +4,7 @@ using LyricPulse.Rendering.Fonts;
 using LyricPulse.Rendering.Host;
 using LyricPulse.Rendering.Legibility;
 using LyricPulse.Rendering.Shaders;
+using LyricPulse.Rendering.Styles;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace LyricPulse.Rendering;
@@ -23,7 +24,11 @@ public static class RenderingServiceCollectionExtensions
         services.AddSingleton<IAlbumColorExtractor, SkiaAlbumColorExtractor>();
         services.AddTransient<OffscreenSurfacePool>();
         services.AddTransient<LegibilityPipeline>();
-        services.AddTransient<ILyricSceneRenderer, SolidDiagnosticSceneRenderer>();
+        services.AddTransient<PlaybackLifecycleChoreographer>();
+        services.AddTransient<IKineticStyleRenderer, FisheyeStyleRenderer>();
+        services.AddTransient<IKineticStyleRenderer, CodestyleStyleRenderer>();
+        services.AddTransient<IKineticStyleRenderer, VisualStackStyleRenderer>();
+        services.AddTransient<ILyricSceneRenderer, LyricStyleRouter>();
 
         return services;
     }
