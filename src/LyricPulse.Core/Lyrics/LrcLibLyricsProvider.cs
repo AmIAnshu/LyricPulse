@@ -70,8 +70,13 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
 
         // Step 1A: Exact /api/get with raw title, artist, album, and integer seconds duration.
         var exactUri = BuildExactGetUri(track.RawTitle, track.RawArtist, track.AlbumTitle, track.Duration);
-        var exactDto = await FetchTrackDtoAsync(exactUri, cancellationToken).ConfigureAwait(false);
-        var exactResult = EvaluateTrackDto(track, exactDto, ref plainFallback);
+        var exactFetch = await FetchTrackDtoAsync(exactUri, cancellationToken).ConfigureAwait(false);
+        if (exactFetch.IsTransientError)
+        {
+            return new LyricsResult(LyricsStatus.Error, null, "LRCLIB request failed transiently.");
+        }
+
+        var exactResult = EvaluateTrackDto(track, exactFetch.Value, ref plainFallback);
         if (exactResult is not null)
         {
             return exactResult;
@@ -87,8 +92,13 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
         if (normalizedChanged && !string.IsNullOrWhiteSpace(track.PrimaryArtist))
         {
             var normUri = BuildExactGetUri(track.NormalizedTitle, track.PrimaryArtist, albumName: null, duration: TimeSpan.Zero);
-            var normDto = await FetchTrackDtoAsync(normUri, cancellationToken).ConfigureAwait(false);
-            var normResult = EvaluateTrackDto(track, normDto, ref plainFallback);
+            var normFetch = await FetchTrackDtoAsync(normUri, cancellationToken).ConfigureAwait(false);
+            if (normFetch.IsTransientError)
+            {
+                return plainFallback ?? new LyricsResult(LyricsStatus.Error, null, "LRCLIB request failed transiently.");
+            }
+
+            var normResult = EvaluateTrackDto(track, normFetch.Value, ref plainFallback);
             if (normResult is not null)
             {
                 return normResult;
@@ -97,13 +107,17 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
 
         // Step 1C: Fuzzy /api/search with deterministic 0..115 candidate scorer.
         var searchUri = BuildSearchUri(track.NormalizedTitle, track.PrimaryArtist);
-        var candidates = await FetchSearchDtosAsync(searchUri, cancellationToken).ConfigureAwait(false);
+        var searchFetch = await FetchSearchDtosAsync(searchUri, cancellationToken).ConfigureAwait(false);
+        var hadTransientError = searchFetch.IsTransientError;
+        var candidates = searchFetch.Value;
 
-        if (candidates.IsDefaultOrEmpty)
+        if (!hadTransientError && candidates.IsDefaultOrEmpty)
         {
             var combinedQuery = $"{track.NormalizedTitle} {track.PrimaryArtist}".Trim();
             var fallbackSearchUri = $"/api/search?q={Uri.EscapeDataString(combinedQuery)}";
-            candidates = await FetchSearchDtosAsync(fallbackSearchUri, cancellationToken).ConfigureAwait(false);
+            var fallbackFetch = await FetchSearchDtosAsync(fallbackSearchUri, cancellationToken).ConfigureAwait(false);
+            hadTransientError = fallbackFetch.IsTransientError;
+            candidates = fallbackFetch.Value;
         }
 
         var scoredResult = SelectBestSearchCandidate(track, candidates, ref plainFallback);
@@ -112,62 +126,87 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
             return scoredResult;
         }
 
-        return plainFallback ?? new LyricsResult(LyricsStatus.NotFound, null);
+        if (plainFallback is not null)
+        {
+            return plainFallback;
+        }
+
+        return hadTransientError
+            ? new LyricsResult(LyricsStatus.Error, null, "LRCLIB request failed transiently.")
+            : new LyricsResult(LyricsStatus.NotFound, null);
     }
 
     public void Dispose() => _resilience.Dispose();
 
-    private async Task<LrclibTrackDto?> FetchTrackDtoAsync(string relativeUri, CancellationToken ct)
+    private async Task<HttpFetchResult<LrclibTrackDto?>> FetchTrackDtoAsync(string relativeUri, CancellationToken ct)
     {
         using var response = await _resilience.SendWithResilienceAsync(
             _httpClient,
             () => CreateGetRequest(relativeUri),
             ct).ConfigureAwait(false);
 
-        if (response is null || response.StatusCode != HttpStatusCode.OK)
+        if (response is null || IsTransientFailureStatus(response.StatusCode))
         {
-            return null;
+            return new HttpFetchResult<LrclibTrackDto?>(null, IsTransientError: true);
+        }
+
+        if (response.StatusCode != HttpStatusCode.OK)
+        {
+            return new HttpFetchResult<LrclibTrackDto?>(null, IsTransientError: false);
         }
 
         try
         {
             await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            return await JsonSerializer.DeserializeAsync(stream, LyricPulseJsonContext.Default.LrclibTrackDto, ct)
+            var dto = await JsonSerializer.DeserializeAsync(stream, LyricPulseJsonContext.Default.LrclibTrackDto, ct)
                 .ConfigureAwait(false);
+            return new HttpFetchResult<LrclibTrackDto?>(dto, IsTransientError: false);
         }
         catch (JsonException ex)
         {
             _logger.LogProviderMalformedJson(ex, Name, "/api/get");
-            return null;
+            return new HttpFetchResult<LrclibTrackDto?>(null, IsTransientError: false);
         }
     }
 
-    private async Task<ImmutableArray<LrclibTrackDto>> FetchSearchDtosAsync(string relativeUri, CancellationToken ct)
+    private async Task<HttpFetchResult<ImmutableArray<LrclibTrackDto>>> FetchSearchDtosAsync(string relativeUri, CancellationToken ct)
     {
         using var response = await _resilience.SendWithResilienceAsync(
             _httpClient,
             () => CreateGetRequest(relativeUri),
             ct).ConfigureAwait(false);
 
-        if (response is null || response.StatusCode != HttpStatusCode.OK)
+        if (response is null || IsTransientFailureStatus(response.StatusCode))
         {
-            return ImmutableArray<LrclibTrackDto>.Empty;
+            return new HttpFetchResult<ImmutableArray<LrclibTrackDto>>(ImmutableArray<LrclibTrackDto>.Empty, IsTransientError: true);
+        }
+
+        if (response.StatusCode != HttpStatusCode.OK)
+        {
+            return new HttpFetchResult<ImmutableArray<LrclibTrackDto>>(ImmutableArray<LrclibTrackDto>.Empty, IsTransientError: false);
         }
 
         try
         {
             await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            return await JsonSerializer.DeserializeAsync(
+            var results = await JsonSerializer.DeserializeAsync(
                 stream,
                 LyricPulseJsonContext.Default.ImmutableArrayLrclibTrackDto,
                 ct).ConfigureAwait(false);
+            return new HttpFetchResult<ImmutableArray<LrclibTrackDto>>(results, IsTransientError: false);
         }
         catch (JsonException ex)
         {
             _logger.LogProviderMalformedJson(ex, Name, "/api/search");
-            return ImmutableArray<LrclibTrackDto>.Empty;
+            return new HttpFetchResult<ImmutableArray<LrclibTrackDto>>(ImmutableArray<LrclibTrackDto>.Empty, IsTransientError: false);
         }
     }
+
+    private static bool IsTransientFailureStatus(HttpStatusCode statusCode) =>
+        statusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.RequestTimeout ||
+        (int)statusCode >= 500;
+
+    private readonly record struct HttpFetchResult<T>(T Value, bool IsTransientError);
 
     private LyricsResult? EvaluateTrackDto(TrackIdentity track, LrclibTrackDto? dto, ref LyricsResult? plainFallback)
     {

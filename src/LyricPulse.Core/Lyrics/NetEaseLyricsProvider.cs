@@ -66,13 +66,24 @@ public sealed partial class NetEaseLyricsProvider : ILyricsProvider, IDisposable
             return new LyricsResult(LyricsStatus.NotFound, null);
         }
 
-        var songId = await SearchBestSongIdAsync(track, cancellationToken).ConfigureAwait(false);
-        if (!songId.HasValue)
+        var searchFetch = await SearchBestSongIdAsync(track, cancellationToken).ConfigureAwait(false);
+        if (searchFetch.IsTransientError)
+        {
+            return new LyricsResult(LyricsStatus.Error, null, "NetEase search request failed transiently.");
+        }
+
+        if (!searchFetch.Value.HasValue)
         {
             return new LyricsResult(LyricsStatus.NotFound, null);
         }
 
-        var lyricDto = await FetchSongLyricsAsync(songId.Value, cancellationToken).ConfigureAwait(false);
+        var lyricFetch = await FetchSongLyricsAsync(searchFetch.Value.Value, cancellationToken).ConfigureAwait(false);
+        if (lyricFetch.IsTransientError)
+        {
+            return new LyricsResult(LyricsStatus.Error, null, "NetEase lyric request failed transiently.");
+        }
+
+        var lyricDto = lyricFetch.Value;
         if (lyricDto is null || lyricDto.Code != 200 || lyricDto.NoLyric == true || lyricDto.Uncollected == true)
         {
             return new LyricsResult(LyricsStatus.NotFound, null);
@@ -105,7 +116,7 @@ public sealed partial class NetEaseLyricsProvider : ILyricsProvider, IDisposable
 
     public void Dispose() => _resilience.Dispose();
 
-    private async Task<long?> SearchBestSongIdAsync(TrackIdentity track, CancellationToken ct)
+    private async Task<HttpFetchResult<long?>> SearchBestSongIdAsync(TrackIdentity track, CancellationToken ct)
     {
         var query = $"{track.NormalizedTitle} {track.PrimaryArtist}".Trim();
         var body = $"s={Uri.EscapeDataString(query)}&type=1&limit=15&offset=0&total=true";
@@ -115,9 +126,14 @@ public sealed partial class NetEaseLyricsProvider : ILyricsProvider, IDisposable
             () => CreateSearchPostRequest(body),
             ct).ConfigureAwait(false);
 
-        if (response is null || response.StatusCode != HttpStatusCode.OK)
+        if (response is null || IsTransientFailureStatus(response.StatusCode))
         {
-            return null;
+            return new HttpFetchResult<long?>(null, IsTransientError: true);
+        }
+
+        if (response.StatusCode != HttpStatusCode.OK)
+        {
+            return new HttpFetchResult<long?>(null, IsTransientError: false);
         }
 
         NetEaseSearchResponseDto? searchDto;
@@ -132,12 +148,12 @@ public sealed partial class NetEaseLyricsProvider : ILyricsProvider, IDisposable
         catch (JsonException ex)
         {
             _logger.LogProviderMalformedJson(ex, Name, "/api/search/get");
-            return null;
+            return new HttpFetchResult<long?>(null, IsTransientError: false);
         }
 
         if (searchDto is null || searchDto.Code != 200 || searchDto.Result?.Songs is null)
         {
-            return null;
+            return new HttpFetchResult<long?>(null, IsTransientError: false);
         }
 
         long? bestId = null;
@@ -169,10 +185,10 @@ public sealed partial class NetEaseLyricsProvider : ILyricsProvider, IDisposable
             }
         }
 
-        return bestId;
+        return new HttpFetchResult<long?>(bestId, IsTransientError: false);
     }
 
-    private async Task<NetEaseLyricResponseDto?> FetchSongLyricsAsync(long songId, CancellationToken ct)
+    private async Task<HttpFetchResult<NetEaseLyricResponseDto?>> FetchSongLyricsAsync(long songId, CancellationToken ct)
     {
         var uri = $"/api/song/lyric/v1?id={songId}&lv=1&tv=-1&kv=1&yv=1";
 
@@ -181,25 +197,37 @@ public sealed partial class NetEaseLyricsProvider : ILyricsProvider, IDisposable
             () => CreateGetRequest(uri),
             ct).ConfigureAwait(false);
 
-        if (response is null || response.StatusCode != HttpStatusCode.OK)
+        if (response is null || IsTransientFailureStatus(response.StatusCode))
         {
-            return null;
+            return new HttpFetchResult<NetEaseLyricResponseDto?>(null, IsTransientError: true);
+        }
+
+        if (response.StatusCode != HttpStatusCode.OK)
+        {
+            return new HttpFetchResult<NetEaseLyricResponseDto?>(null, IsTransientError: false);
         }
 
         try
         {
             await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            return await JsonSerializer.DeserializeAsync(
+            var dto = await JsonSerializer.DeserializeAsync(
                 stream,
                 LyricPulseJsonContext.Default.NetEaseLyricResponseDto,
                 ct).ConfigureAwait(false);
+            return new HttpFetchResult<NetEaseLyricResponseDto?>(dto, IsTransientError: false);
         }
         catch (JsonException ex)
         {
             _logger.LogProviderMalformedJson(ex, Name, "/api/song/lyric/v1");
-            return null;
+            return new HttpFetchResult<NetEaseLyricResponseDto?>(null, IsTransientError: false);
         }
     }
+
+    private static bool IsTransientFailureStatus(HttpStatusCode statusCode) =>
+        statusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.RequestTimeout ||
+        (int)statusCode >= 500;
+
+    private readonly record struct HttpFetchResult<T>(T Value, bool IsTransientError);
 
     private static HttpRequestMessage CreateSearchPostRequest(string formBody)
     {
