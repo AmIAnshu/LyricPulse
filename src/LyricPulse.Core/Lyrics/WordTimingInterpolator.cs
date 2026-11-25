@@ -142,8 +142,10 @@ public static class WordTimingInterpolator
                 ? trackDuration - startTime
                 : DefaultFinalLineDuration;
 
-        var maxNaturalSec = Math.Clamp(1.1 + (totalSyllables * 0.42) + punctPauseSec, 1.5, 9.0);
-        var activeMs = Math.Min(gap.TotalMilliseconds * 0.96, maxNaturalSec * 1000.0);
+        var maxNaturalSec = Math.Clamp(1.75 + (totalSyllables * 0.58) + punctPauseSec, 2.4, 12.0);
+        var activeMs = gap.TotalSeconds <= 8.5
+            ? gap.TotalMilliseconds * 0.94
+            : Math.Min(gap.TotalMilliseconds * 0.94, maxNaturalSec * 1000.0);
 
         return activeMs < tokenCount * 10.0
             ? Math.Max(gap.TotalMilliseconds, tokenCount * 20.0)

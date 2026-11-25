@@ -112,13 +112,13 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
             return new LyricsResult(LyricsStatus.Error, null, "LRCLIB request failed transiently.");
         }
 
-        var exactResult = EvaluateTrackDto(track, exactFetch.Value, ref plainFallback);
+        var exactResult = EvaluateTrackDto(track, exactFetch.Value, ref plainFallback, enforceDurationGuard: true);
         if (exactResult is not null)
         {
             return exactResult;
         }
 
-        // Step 1B: Retry /api/get with normalized title + primary artist (no album/duration constraint).
+        // Step 1B: Retry /api/get with normalized title + primary artist (no album/duration constraint, duration guarded after).
         var normalizedChanged =
             !track.NormalizedTitle.Equals(track.RawTitle, StringComparison.OrdinalIgnoreCase) ||
             !track.PrimaryArtist.Equals(track.RawArtist, StringComparison.OrdinalIgnoreCase) ||
@@ -134,7 +134,7 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
                 return plainFallback ?? new LyricsResult(LyricsStatus.Error, null, "LRCLIB request failed transiently.");
             }
 
-            var normResult = EvaluateTrackDto(track, normFetch.Value, ref plainFallback);
+            var normResult = EvaluateTrackDto(track, normFetch.Value, ref plainFallback, enforceDurationGuard: true);
             if (normResult is not null)
             {
                 return normResult;
@@ -244,9 +244,17 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
 
     private readonly record struct HttpFetchResult<T>(T Value, bool IsTransientError);
 
-    private LyricsResult? EvaluateTrackDto(TrackIdentity track, LrclibTrackDto? dto, ref LyricsResult? plainFallback)
+    private LyricsResult? EvaluateTrackDto(TrackIdentity track, LrclibTrackDto? dto, ref LyricsResult? plainFallback, bool enforceDurationGuard = false)
     {
         if (dto is null)
+        {
+            return null;
+        }
+
+        if (enforceDurationGuard &&
+            track.Duration > TimeSpan.Zero &&
+            dto.Duration is > 0 &&
+            Math.Abs(dto.Duration.Value - track.Duration.TotalSeconds) > 8.0)
         {
             return null;
         }

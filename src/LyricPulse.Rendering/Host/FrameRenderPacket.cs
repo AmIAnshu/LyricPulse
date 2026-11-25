@@ -1,3 +1,4 @@
+using LyricPulse.Core.Audio;
 using LyricPulse.Core.Models;
 using LyricPulse.Core.Runtime;
 using LyricPulse.Rendering.Fonts;
@@ -71,8 +72,11 @@ public sealed record FrameRenderPacket(
     bool ShowFollowingDot = true,
     bool ShowColorSweepLayer = true,
     SecondaryLineMode SecondaryLineMode = SecondaryLineMode.Off,
-    OverlayStyleId? StyleOverride = null)
+    OverlayStyleId? StyleOverride = null,
+    AudioFrameMetrics? AudioMetrics = null,
+    bool BottomFadeToBlack = false)
 {
+    public AudioFrameMetrics EffectiveAudioMetrics => AudioMetrics ?? AudioFrameMetrics.Silent;
     public OverlayStyleId EffectiveStyle => StyleOverride ?? ActiveStyle;
 
     public bool IsCompactCard => SurfaceMode == StageRenderSurfaceMode.GalleryCard;

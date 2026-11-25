@@ -19,6 +19,8 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
     private readonly IKineticStyleRenderer _fallbackStyle;
     private readonly PlaybackLifecycleChoreographer _lifecycle;
     private readonly StageBackdropRenderer _backdrop;
+    private readonly AudioVisualizerRenderer _visualizer;
+    private readonly EdgeGlowRenderer _edgeGlow;
     private readonly Lock _sync = new();
 
     private OverlayStyleId _lastRoutedStyle = OverlayStyleId.Fisheye;
@@ -31,10 +33,14 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
     public LyricStyleRouter(
         IEnumerable<IKineticStyleRenderer>? renderers = null,
         PlaybackLifecycleChoreographer? lifecycle = null,
-        StageBackdropRenderer? backdrop = null)
+        StageBackdropRenderer? backdrop = null,
+        AudioVisualizerRenderer? visualizer = null,
+        EdgeGlowRenderer? edgeGlow = null)
     {
         _lifecycle = lifecycle ?? new PlaybackLifecycleChoreographer();
         _backdrop = backdrop ?? new StageBackdropRenderer();
+        _visualizer = visualizer ?? new AudioVisualizerRenderer();
+        _edgeGlow = edgeGlow ?? new EdgeGlowRenderer();
         _styles = new Dictionary<OverlayStyleId, IKineticStyleRenderer>();
 
         if (renderers is not null)
@@ -138,16 +144,23 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
 
             var canvas = context.Canvas;
-            canvas.Clear(SKColors.Transparent);
+            var packet = context.Packet;
+            if (!packet.ShouldDrawStageBackdrop)
+            {
+                canvas.Clear(SKColors.Transparent);
+            }
 
             var lifecycle = _lastLifecycle;
-            var packet = context.Packet;
 
             // Stage Canvas / Gallery Card backdrop (automatically skipped on transparent DesktopOverlay!)
             if (packet.ShouldDrawStageBackdrop)
             {
                 _backdrop.Render(in context);
             }
+
+            // Layer 0.5: Audio-reactive background visualizer + perimeter Edges Glow
+            _visualizer.Render(in context);
+            _edgeGlow.Render(in context);
 
             if (lifecycle.ShouldRenderLyrics)
             {
@@ -195,6 +208,8 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
             }
 
             _styles.Clear();
+            _visualizer.Dispose();
+            _edgeGlow.Dispose();
             _backdrop.Dispose();
             _lifecycle.Dispose();
         }

@@ -19,8 +19,8 @@ public sealed record ActiveLyricSlice(
     TimeSpan? TimeUntilNextLine,
     bool IsPostSongOutro = false)
 {
-    public static readonly TimeSpan InstrumentalGapThreshold = TimeSpan.FromSeconds(4.0);
-    public static readonly TimeSpan PostLineLingerDuration = TimeSpan.FromSeconds(0.9);
+    public static readonly TimeSpan InstrumentalGapThreshold = TimeSpan.FromSeconds(5.5);
+    public static readonly TimeSpan PostLineLingerDuration = TimeSpan.FromSeconds(1.15);
     public static readonly TimeSpan MinRemainingOutroDuration = TimeSpan.FromSeconds(1.0);
     public static readonly TimeSpan UnboundedOutroThreshold = TimeSpan.FromSeconds(2.5);
 

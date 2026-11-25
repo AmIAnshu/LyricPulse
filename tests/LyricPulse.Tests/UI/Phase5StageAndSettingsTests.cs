@@ -253,4 +253,58 @@ public sealed class Phase5StageAndSettingsTests
 
         vm.IsReducedMotionToggleEnabled.Should().BeTrue();
     }
+
+    [Fact]
+    public async Task StageViewModel_V2VisualizerEdgeGlow_AlbumArt_AudioStatus_AndReducedMotionPreviewLabel()
+    {
+        await using var runtime = await CreateStartedControllerAsync();
+        using var vm = new StageViewModel(runtime);
+        vm.ApplySnapshot(runtime.SampleFrame());
+
+        // Visualizer flyout opens cleanly
+        vm.ToggleFlyoutCommand.Execute(StageFlyoutKind.Visualizer);
+        vm.IsVisualizerFlyoutOpen.Should().BeTrue();
+        vm.AudioStatusLabel.Should().Be("Beat Sync");
+
+        // EdgeGlow modes & intensity
+        vm.SelectEdgeGlowModeCommand.Execute(EdgeGlowMode.NeonRim);
+        await Task.Delay(60);
+        vm.ApplySnapshot(runtime.SampleFrame());
+        vm.EdgeGlowMode.Should().Be(EdgeGlowMode.NeonRim);
+        vm.IsEdgeGlowNeonRim.Should().BeTrue();
+
+        vm.EdgeGlowIntensityPercent = 135;
+        await Task.Delay(60);
+        vm.ApplySnapshot(runtime.SampleFrame());
+        vm.EdgeGlowIntensityPercent.Should().Be(135);
+
+        // AudioVisualizer modes & intensity
+        vm.SelectAudioVisualizerModeCommand.Execute(AudioVisualizerMode.FluidWave);
+        await Task.Delay(60);
+        vm.ApplySnapshot(runtime.SampleFrame());
+        vm.AudioVisualizerMode.Should().Be(AudioVisualizerMode.FluidWave);
+        vm.IsVisFluidWave.Should().BeTrue();
+
+        vm.AudioVisualizerIntensityPercent = 120;
+        await Task.Delay(60);
+        vm.ApplySnapshot(runtime.SampleFrame());
+        vm.AudioVisualizerIntensityPercent.Should().Be(120);
+
+        // SelectStyleByIndexCommand updates active style by 0-based index
+        vm.SelectStyleByIndexCommand.Execute(5); // Constellation
+        await Task.Delay(60);
+        vm.ApplySnapshot(runtime.SampleFrame());
+        vm.ActiveStyle.Should().Be(OverlayStyleId.Constellation);
+
+        // AlbumArt decode guard handles arbitrary bytes gracefully in headless tests without throwing
+        var snapWithArt = vm.CurrentSnapshot with { AlbumArt = new AlbumArtPayload("hash123", new byte[] { 1, 2, 3, 4 }) };
+        vm.ApplySnapshot(snapWithArt);
+
+        // UX6-07: Reduced Motion disables preview pause button and reports clear label
+        vm.ReducedMotion = true;
+        await Task.Delay(60);
+        vm.ApplySnapshot(runtime.SampleFrame());
+        vm.IsPreviewsToggleEnabled.Should().BeFalse();
+        vm.PausePreviewsLabel.Should().Be("Paused (Reduced Motion)");
+    }
 }

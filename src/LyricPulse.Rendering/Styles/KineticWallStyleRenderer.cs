@@ -8,24 +8,23 @@ using SkiaSharp;
 namespace LyricPulse.Rendering.Styles;
 
 /// <summary>
-/// Style #9 — Kinetic Wall: energetic 3D-tilted perspective typography wall using a zero-allocation
-/// 3D homography <see cref="SKMatrix"/> (pitch <c>+6.5°</c>, dynamic yaw <c>±11°</c>, roll <c>±1.5°</c>,
-/// focal length <c>1100</c>), critically damped <c>Spring.CameraDrift</c> tracking, and bold Z-slam word
-/// landings (<c>Spring.WordEnter</c>). Flattens to crisp 2D editorial rows (0° tilt) under Reduced Motion.
+/// Style #9 — Kinetic Wall / Ship (Verci-inspired): organic staggered word cascade floating on a
+/// 3D-tilted pinhole perspective plane (<see cref="SKMatrix"/> homography), depth-drifting ghost lines,
+/// inverted tilted Verci paper cutout highlights on focal words, and word-locked beat dot.
 /// </summary>
 public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
 {
-    public const float RestingPitchDegrees = 6.5f;
-    public const float MaxYawDegrees = 11.0f;
+    public const float RestingPitchDegrees = 5.5f;
+    public const float MaxYawDegrees = 10.0f;
     public const float MaxRollDegrees = 1.5f;
-    public const float PerspectiveFocalLength = 1100f;
+    public const float PerspectiveFocalLength = 1150f;
 
     private readonly AestheticsOverlayRenderer _aesthetics = new();
     private readonly SKPaint _accentRulePaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
 
     private SpringState _cameraX = SpringState.AtRest(0f);
     private SpringState _cameraY = SpringState.AtRest(0f);
-    private SpringState _cameraYawDeg = SpringState.AtRest(-7.5f);
+    private SpringState _cameraYawDeg = SpringState.AtRest(-6.5f);
     private SpringState _wordSlamScale = SpringState.AtRest(1.0f);
     private float _highlightFade = 1.0f;
     private (int LineIndex, int WordIndex) _lastWordKey = (-1, -1);
@@ -38,7 +37,7 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
     {
         _cameraX = SpringState.AtRest(0f);
         _cameraY = SpringState.AtRest(0f);
-        _cameraYawDeg = SpringState.AtRest(-7.5f);
+        _cameraYawDeg = SpringState.AtRest(-6.5f);
         _wordSlamScale = SpringState.AtRest(1.0f);
         _highlightFade = 1.0f;
         _lastWordKey = (-1, -1);
@@ -67,7 +66,7 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
 
         var wordFrac = wordCount <= 1 ? 0.5f : (activeIdx / (float)(wordCount - 1));
         var targetYaw = ((wordFrac - 0.5f) * 2f) * MaxYawDegrees * Math.Clamp(packet.SafePartyEnergy, 0.7f, 1.25f);
-        var targetCamX = (0.5f - wordFrac) * Math.Min(packet.ViewportWidthDip * 0.14f, 110f);
+        var targetCamX = (0.5f - wordFrac) * Math.Min(packet.ViewportWidthDip * 0.12f, 95f);
 
         var key = (slice.ActiveLineIndex, activeIdx);
         if (key != _lastWordKey)
@@ -83,7 +82,7 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
             }
             else
             {
-                var slamStart = 1.22f + ((packet.SafePartyEnergy - 1.0f) * 0.12f);
+                var slamStart = 1.20f + ((packet.SafePartyEnergy - 1.0f) * 0.12f);
                 _wordSlamScale = new SpringState(Value: slamStart, Velocity: 0f, Target: 1.00f);
                 _highlightFade = 0f;
             }
@@ -110,11 +109,20 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
         _cameraYawDeg = _cameraYawDeg.WithTarget(Math.Clamp(targetYaw, -MaxYawDegrees, MaxYawDegrees)).Step(SpringTokens.CameraDrift, dt);
         _wordSlamScale = _wordSlamScale.Step(SpringTokens.WordEnter.WithTempoCompression(_lastWordDurationSec), dt);
 
+        var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet, 0.50f, 0.50f);
+        var fontSize = StyleLayoutHelper.ResolveStyleFontSize(packet, styleMultiplier: 0.78f);
+        var rowSpreadX = packet.ViewportWidthDip * (packet.IsCompactCard ? 0.22f : 0.14f);
+        var staggerFrac = ComputeCascadeOffsetFrac(activeIdx, slice.ActiveLineIndex);
+        var approxX = anchorX + (staggerFrac * rowSpreadX) + _cameraX.Value;
+        var approxY = anchorY + (fontSize * 0.6f);
+        var dotActive = packet.ShowFollowingDot && _aesthetics.AdvanceDot(key, approxX, approxY, dt, reducedMotion: false, _lastWordDurationSec);
+
         var isPlaying = packet.PlaybackSnapshot?.IsPlaying ?? true;
         return !_cameraX.IsAtRest ||
                !_cameraY.IsAtRest ||
                !_cameraYawDeg.IsAtRest ||
                !_wordSlamScale.IsAtRest ||
+               dotActive ||
                _highlightFade < 0.999f ||
                isPlaying;
     }
@@ -131,16 +139,15 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
         }
 
         var fontId = packet.ActiveFontId;
-        var fontSize = StyleLayoutHelper.ResolveStyleFontSize(packet, styleMultiplier: 0.94f);
+        var fontSize = StyleLayoutHelper.ResolveStyleFontSize(packet, styleMultiplier: 0.78f);
         var font = context.Fonts.GetOrCreateFont(fontId, fontSize, enforceMinOverlayFloor: !packet.IsCompactCard);
-        var lineLeading = fontSize * 1.12f;
-
         var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet, 0.50f, 0.50f);
+
         var scrimRect = new SKRect(
-            anchorX - (packet.ViewportWidthDip * 0.40f),
-            anchorY - (packet.ViewportHeightDip * 0.30f),
-            anchorX + (packet.ViewportWidthDip * 0.40f),
-            anchorY + (packet.ViewportHeightDip * 0.30f));
+            anchorX - (packet.ViewportWidthDip * 0.42f),
+            anchorY - (packet.ViewportHeightDip * 0.34f),
+            anchorX + (packet.ViewportWidthDip * 0.42f),
+            anchorY + (packet.ViewportHeightDip * 0.34f));
 
         context.Legibility.DrawAmbientScrim(
             context.Canvas,
@@ -167,22 +174,7 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
                 context.Canvas.Translate(_cameraX.Value, _cameraY.Value);
             }
 
-            var maxRowWidth = packet.ViewportWidthDip * (packet.IsCompactCard ? 0.86f : 0.78f);
-
-            // Row -1: Past line with spatial depth falloff
-            if (slice.PreviousLine is not null)
-            {
-                DrawWallContextLine(in context, font, fontId, slice.PreviousLine.RawText, anchorX, anchorY - lineLeading, maxRowWidth, opacity: 0.52f);
-            }
-
-            // Row +1: Faint upcoming preview row
-            if (slice.NextLine is not null)
-            {
-                DrawWallContextLine(in context, font, fontId, slice.NextLine.RawText, anchorX, anchorY + lineLeading, maxRowWidth, opacity: 0.34f);
-            }
-
-            // Row 0: Active slamming line
-            DrawActiveWallLine(in context, font, fontId, slice, anchorX, anchorY, maxRowWidth);
+            DrawScatteredWordCascade(in context, font, fontId, slice, anchorX, anchorY);
         }
         finally
         {
@@ -193,7 +185,7 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
             in context,
             slice.CurrentLine,
             anchorX,
-            anchorY + (lineLeading * 1.90f),
+            anchorY + (fontSize * 2.8f),
             fontSize);
     }
 
@@ -209,11 +201,6 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
         _accentRulePaint.Dispose();
     }
 
-    /// <summary>
-    /// Computes an exact zero-allocation 2D projective homography <see cref="SKMatrix"/> for a 3D plane
-    /// rotated around (<paramref name="originX"/>, <paramref name="originY"/>) by Euler pitch/yaw/roll
-    /// viewed through a pinhole camera of focal length <paramref name="focalLength"/>.
-    /// </summary>
     internal static SKMatrix Create3DPerspectiveMatrix(
         float pitchDeg,
         float yawDeg,
@@ -234,7 +221,6 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
         var cz = MathF.Cos(rz);
         var sz = MathF.Sin(rz);
 
-        // R = Rz * Ry * Rx applied to plane point (x, y, 0)
         var r00 = cz * cy;
         var r01 = (cz * sy * sx) - (sz * cx);
         var r10 = sz * cy;
@@ -255,14 +241,13 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
         return SKMatrix.Concat(fromOrigin, SKMatrix.Concat(homography, toOrigin));
     }
 
-    private void DrawActiveWallLine(
+    private void DrawScatteredWordCascade(
         in StyleRenderContext context,
         SKFont font,
         LyricFontId fontId,
         Core.Runtime.ActiveLyricSlice slice,
         float centerX,
-        float centerY,
-        float maxRowWidth)
+        float centerY)
     {
         var packet = context.Packet;
         var line = slice.CurrentLine!;
@@ -275,13 +260,13 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
         if (words.IsEmpty)
         {
             var measured = TextShaperService.MeasureWidth(line.RawText, font, context.Fonts);
-            var fit = TextShaperService.ComputeAutoFitScale(measured, maxRowWidth, 0.94f);
+            var fit = TextShaperService.ComputeAutoFitScale(measured, packet.ViewportWidthDip * 0.80f, 0.94f);
             var save = context.Canvas.Save();
             try
             {
                 context.Canvas.Translate(centerX, centerY);
                 context.Canvas.Scale(fit, fit);
-                context.Legibility.DrawLegibleText(context.Canvas, line.RawText, 0f, baselineOffset, SKTextAlign.Center, font, fontId, packet.Palette.AccentColor1, 1f, packet.Palette.AccentColor2, fonts: context.Fonts);
+                context.Legibility.DrawLegibleText(context.Canvas, line.RawText, 0f, baselineOffset, SKTextAlign.Center, font, fontId, SKColors.White.ToRgb(), 1f, packet.Palette.AccentColor2, fonts: context.Fonts);
             }
             finally
             {
@@ -291,67 +276,106 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
             return;
         }
 
+        // Show up to 5 visible cascade words centered around active word (inspired by Verci's "Ship": hum / when / you / [walk] / in)
         var activeIdx = Math.Clamp(slice.ActiveWordIndex, 0, words.Length - 1);
-        var spaceW = TextShaperService.MeasureWidth(" ", font, context.Fonts);
-        var totalW = 0f;
-        Span<float> widths = words.Length <= 32 ? stackalloc float[words.Length] : new float[words.Length];
-        for (var i = 0; i < words.Length; i++)
+        var windowRadius = packet.IsCompactCard ? 1 : 2;
+        var startIdx = Math.Max(0, activeIdx - 3);
+        var endIdx = Math.Min(words.Length - 1, activeIdx + windowRadius);
+        var visibleCount = (endIdx - startIdx) + 1;
+        var slotPitch = font.Size * (packet.IsCompactCard ? 1.18f : 1.28f);
+        var spreadX = packet.ViewportWidthDip * (packet.IsCompactCard ? 0.14f : 0.12f);
+
+        // Soft ghosted previous line floating at upper-right
+        if (!packet.IsCompactCard && slice.PreviousLine is not null)
         {
-            widths[i] = TextShaperService.MeasureWidth(words[i].Text, font, context.Fonts);
-            totalW += widths[i];
-            if (i > 0 && words[i].IsSpaceSeparated)
+            var ghostSave = context.Canvas.Save();
+            try
             {
-                totalW += spaceW;
+                context.Canvas.Translate(centerX + (spreadX * 0.9f), centerY - (slotPitch * 2.2f));
+                context.Canvas.Scale(0.55f, 0.55f);
+                context.Legibility.DrawLegibleText(
+                    context.Canvas,
+                    slice.PreviousLine.RawText,
+                    0f,
+                    baselineOffset,
+                    SKTextAlign.Center,
+                    font,
+                    fontId,
+                    packet.Palette.AccentColor3,
+                    opacity: 0.24f,
+                    fonts: context.Fonts);
+            }
+            finally
+            {
+                context.Canvas.RestoreToCount(ghostSave);
             }
         }
 
-        var rowFit = TextShaperService.ComputeAutoFitScale(totalW, maxRowWidth, 0.94f);
-        var cursorX = centerX - (totalW * rowFit * 0.5f);
         var dotX = centerX;
+        var dotY = centerY;
 
-        for (var i = 0; i < words.Length; i++)
+        for (var i = startIdx; i <= endIdx; i++)
         {
-            if (i > 0 && words[i].IsSpaceSeparated)
-            {
-                cursorX += spaceW * rowFit;
-            }
+            var word = words[i];
+            var relRow = (i - startIdx) - (visibleCount - 1) * 0.5f;
+            var offsetFrac = ComputeCascadeOffsetFrac(i, line.Index);
+            var wordX = centerX + (offsetFrac * spreadX);
+            var wordY = centerY + (relRow * slotPitch);
 
-            var wScaled = widths[i] * rowFit;
-            var wordCenterX = cursorX + (wScaled * 0.5f);
             var isActive = i == activeIdx;
             var isPast = i < activeIdx;
-
             var opacity = isActive
-                ? (packet.ReducedMotion ? (0.90f + (0.10f * highlightEased)) : 1.0f)
-                : isPast ? 0.78f : 0.34f;
-            var color = isActive
-                ? StyleLayoutHelper.BlendSrgb(packet.Palette.AccentColor3, packet.Palette.AccentColor1, highlightEased)
-                : isPast ? packet.Palette.AccentColor1 : packet.Palette.AccentColor3;
-            var scale = rowFit * (isActive && !packet.ReducedMotion ? _wordSlamScale.Value : 1.0f);
+                ? (packet.ReducedMotion ? (0.92f + (0.08f * highlightEased)) : 1.0f)
+                : isPast ? 0.72f : 0.34f;
+            var scale = isActive && !packet.ReducedMotion ? _wordSlamScale.Value : (isPast ? 0.92f : 0.86f);
+            var measured = TextShaperService.MeasureWidth(word.Text, font, context.Fonts);
+            var fit = TextShaperService.ComputeAutoFitScale(measured * scale, packet.ViewportWidthDip * 0.74f, 1.0f);
+            var finalScale = scale * fit;
+            var clampedX = Math.Clamp(wordX, (measured * finalScale * 0.5f) + 18f, Math.Max((measured * finalScale * 0.5f) + 18f, packet.ViewportWidthDip - (measured * finalScale * 0.5f) - 18f));
 
             if (isActive)
             {
-                dotX = cursorX + (wScaled * (float)Math.Clamp(slice.WordProgress, 0.0, 1.0));
+                dotX = clampedX - (measured * finalScale * 0.5f) + (measured * finalScale * (float)Math.Clamp(slice.WordProgress, 0.0, 1.0));
+                dotY = wordY + (font.Size * finalScale * 0.62f);
+
                 if (packet.ShowColorSweepLayer)
                 {
-                    var sweepRect = new SKRect(cursorX, centerY - (font.Size * rowFit * 0.54f), cursorX + wScaled, centerY + (font.Size * rowFit * 0.54f));
+                    var sweepRect = new SKRect(clampedX - (measured * finalScale * 0.5f), wordY - (font.Size * finalScale * 0.52f), clampedX + (measured * finalScale * 0.5f), wordY + (font.Size * finalScale * 0.52f));
                     _aesthetics.DrawWordColorSweep(context.Canvas, sweepRect, slice.WordProgress, packet, opacity);
                 }
-
-                // Hairline 2px active accent rule sweeping cleanly beneath word
-                var ruleW = Math.Max(4f, wScaled * (float)Math.Clamp(slice.WordProgress, 0.12, 1.0));
-                _accentRulePaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha(0.90f * opacity);
-                context.Canvas.DrawRect(cursorX, centerY + (font.Size * rowFit * 0.56f), ruleW, 2.2f, _accentRulePaint);
             }
+
+            var useCutout = isActive && (word.Visual is not null || word.Text.Length >= 4);
+            if (useCutout)
+            {
+                var tilt = ((i % 2 == 0) ? -1.8f : 1.8f);
+                var cutoutSave = context.Canvas.Save();
+                try
+                {
+                    context.Canvas.Translate(clampedX, wordY);
+                    context.Canvas.Scale(finalScale, finalScale);
+                    _aesthetics.DrawInvertedCutoutWord(context.Canvas, in context, font, word.Text, 0f, 0f, measured, tilt, opacity);
+                }
+                finally
+                {
+                    context.Canvas.RestoreToCount(cutoutSave);
+                }
+
+                continue;
+            }
+
+            var color = isActive
+                ? StyleLayoutHelper.BlendSrgb(packet.Palette.AccentColor1, SKColors.White.ToRgb(), 0.45f * highlightEased)
+                : isPast ? packet.Palette.AccentColor1 : packet.Palette.AccentColor3;
 
             var wordSave = context.Canvas.Save();
             try
             {
-                context.Canvas.Translate(wordCenterX, centerY);
-                context.Canvas.Scale(scale, scale);
+                context.Canvas.Translate(clampedX, wordY);
+                context.Canvas.Scale(finalScale, finalScale);
                 context.Legibility.DrawLegibleText(
                     context.Canvas,
-                    words[i].Text,
+                    word.Text,
                     0f,
                     baselineOffset,
                     SKTextAlign.Center,
@@ -366,53 +390,17 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
             {
                 context.Canvas.RestoreToCount(wordSave);
             }
-
-            cursorX += wScaled;
         }
 
-        _aesthetics.DrawFollowingDot(context.Canvas, packet, dotX, centerY + (font.Size * rowFit * 0.72f), Math.Clamp(font.Size * rowFit * 0.10f, 3.0f, 7.0f));
+        _aesthetics.DrawFollowingDot(context.Canvas, packet, dotX, dotY, Math.Clamp(font.Size * 0.12f, 3.0f, 6.8f));
     }
 
-    private static void DrawWallContextLine(
-        in StyleRenderContext context,
-        SKFont font,
-        LyricFontId fontId,
-        string text,
-        float centerX,
-        float centerY,
-        float maxRowWidth,
-        float opacity)
-    {
-        if (string.IsNullOrWhiteSpace(text))
+    private static float ComputeCascadeOffsetFrac(int wordIdx, int lineIdx) =>
+        ((wordIdx + lineIdx) % 4) switch
         {
-            return;
-        }
-
-        var measured = TextShaperService.MeasureWidth(text, font, context.Fonts);
-        var fit = TextShaperService.ComputeAutoFitScale(measured, maxRowWidth, 0.90f) * 0.84f;
-        font.GetFontMetrics(out var metrics);
-        var baselineOffset = -((metrics.Ascent + metrics.Descent) * 0.5f);
-
-        var save = context.Canvas.Save();
-        try
-        {
-            context.Canvas.Translate(centerX, centerY);
-            context.Canvas.Scale(fit, fit);
-            context.Legibility.DrawLegibleText(
-                context.Canvas,
-                text,
-                0f,
-                baselineOffset,
-                SKTextAlign.Center,
-                font,
-                fontId,
-                context.Packet.Palette.AccentColor3,
-                opacity: opacity,
-                fonts: context.Fonts);
-        }
-        finally
-        {
-            context.Canvas.RestoreToCount(save);
-        }
-    }
+            0 => -0.78f,
+            1 => 0.64f,
+            2 => -0.18f,
+            _ => 0.82f
+        };
 }

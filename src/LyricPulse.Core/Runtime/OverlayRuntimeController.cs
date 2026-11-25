@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using LyricPulse.Core.Abstractions;
+using LyricPulse.Core.Audio;
 using LyricPulse.Core.Lyrics;
 using LyricPulse.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -24,6 +25,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
     private readonly DemoSongProvider _demoSongProvider;
     private readonly IAlbumColorExtractor? _albumColorExtractor;
     private readonly IFullscreenDetector? _fullscreenDetector;
+    private readonly IAudioSpectrumProvider? _audioSpectrumProvider;
     private readonly ILogger<OverlayRuntimeController> _logger;
     private readonly Func<long> _timestampProvider;
     private readonly long _timestampFrequency;
@@ -52,7 +54,8 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         ILogger<OverlayRuntimeController>? logger = null,
         Func<long>? timestampProvider = null,
         long? timestampFrequency = null,
-        Func<DateTimeOffset>? utcNowProvider = null)
+        Func<DateTimeOffset>? utcNowProvider = null,
+        IAudioSpectrumProvider? audioSpectrumProvider = null)
     {
         _mediaProvider = mediaProvider ?? throw new ArgumentNullException(nameof(mediaProvider));
         _lyricsOrchestrator = lyricsOrchestrator ?? throw new ArgumentNullException(nameof(lyricsOrchestrator));
@@ -62,6 +65,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         _demoSongProvider = demoSongProvider ?? throw new ArgumentNullException(nameof(demoSongProvider));
         _albumColorExtractor = albumColorExtractor;
         _fullscreenDetector = fullscreenDetector;
+        _audioSpectrumProvider = audioSpectrumProvider;
         _logger = logger ?? NullLogger<OverlayRuntimeController>.Instance;
         _timestampProvider = timestampProvider ?? Stopwatch.GetTimestamp;
         _timestampFrequency = timestampFrequency is > 0 ? timestampFrequency.Value : Stopwatch.Frequency;
@@ -95,6 +99,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         _mediaProvider.SeekDetected += OnMediaSeekDetected;
         _started = true;
 
+        _audioSpectrumProvider?.StartCapture();
         await _mediaProvider.StartAsync(cancellationToken).ConfigureAwait(false);
 
         if (_fullscreenDetector is not null)
@@ -129,6 +134,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         _mediaProvider.TrackChanged -= OnMediaTrackChanged;
         _mediaProvider.SeekDetected -= OnMediaSeekDetected;
 
+        _audioSpectrumProvider?.StopCapture();
         CancelInFlightTrackLoad();
         await _mediaProvider.StopAsync(cancellationToken).ConfigureAwait(false);
     }
@@ -170,6 +176,18 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
 
     public Task SetFullscreenStageScaleAsync(float scale, CancellationToken cancellationToken = default) =>
         UpdateSettingsAsync(s => s with { FullscreenStageScale = scale }, cancellationToken);
+
+    public Task SetEdgeGlowModeAsync(EdgeGlowMode mode, CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { EdgeGlowMode = mode }, cancellationToken);
+
+    public Task SetEdgeGlowIntensityAsync(float intensity, CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { EdgeGlowIntensity = intensity }, cancellationToken);
+
+    public Task SetAudioVisualizerModeAsync(AudioVisualizerMode mode, CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { AudioVisualizerMode = mode }, cancellationToken);
+
+    public Task SetAudioVisualizerIntensityAsync(float intensity, CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { AudioVisualizerIntensity = intensity }, cancellationToken);
 
     public void SetStageWindowOpen(bool isOpen)
     {
@@ -546,6 +564,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
                 LiveMoodVisual = null,
                 LiveLyricsStatus = track is null ? LyricsStatus.NotFound : LyricsStatus.Loading,
                 LiveTargetPalette = nextTargetPalette,
+                LiveAlbumArt = null,
                 PaletteMorph = morph,
                 TimingOffset = s.IsDemoMode ? s.TimingOffset : new TimingOffsetState(track?.CacheKey, TimeSpan.Zero, false),
                 HasUserNudgedInCurrentTrack = s.IsDemoMode && s.HasUserNudgedInCurrentTrack,
@@ -599,16 +618,16 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
             // Hydrate per-track saved offset immediately without waiting on remote HTTP fetches.
             var offsetTask = HydrateTrackOffsetAsync(track.CacheKey, generation, settings.EnablePerTrackSavedOffsets, ct);
             var lyricsTask = FetchAndAnnotateLyricsAsync(track, settings.VisualPreference, forceRefresh, ct);
-            var paletteTask = ExtractAlbumPaletteAsync(ct);
+            var artTask = FetchAlbumArtAndPaletteAsync(ct);
 
-            await Task.WhenAll(offsetTask, lyricsTask, paletteTask).ConfigureAwait(false);
+            await Task.WhenAll(offsetTask, lyricsTask, artTask).ConfigureAwait(false);
             if (ct.IsCancellationRequested)
             {
                 return;
             }
 
             var (status, document, moodVisual) = await lyricsTask.ConfigureAwait(false);
-            var extractedPalette = await paletteTask.ConfigureAwait(false);
+            var (albumArt, extractedPalette) = await artTask.ConfigureAwait(false);
             var nowTicks = _timestampProvider();
 
             RuntimeStateBox? published = null;
@@ -630,6 +649,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
                     LiveDocument = document,
                     LiveMoodVisual = moodVisual,
                     LiveTargetPalette = targetPalette,
+                    LiveAlbumArt = albumArt,
                     PaletteMorph = morph
                 };
                 published = _state;
@@ -710,17 +730,18 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         return (result.Status, annotated, mood);
     }
 
-    private async Task<AlbumAccentPalette?> ExtractAlbumPaletteAsync(CancellationToken ct)
+    private async Task<(AlbumArtPayload? Art, AlbumAccentPalette? Palette)> FetchAlbumArtAndPaletteAsync(CancellationToken ct)
     {
-        if (_albumColorExtractor is null)
-        {
-            return null;
-        }
-
         try
         {
             var art = await _mediaProvider.GetCurrentAlbumArtAsync(ct).ConfigureAwait(false);
-            return art is null || ct.IsCancellationRequested ? null : _albumColorExtractor.Extract(art);
+            if (art is null || ct.IsCancellationRequested)
+            {
+                return (null, null);
+            }
+
+            var palette = _albumColorExtractor?.Extract(art);
+            return (art, palette);
         }
         catch (OperationCanceledException)
         {
@@ -729,7 +750,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         catch (Exception ex)
         {
             _logger.LogRuntimeAlbumArtFailed(ex);
-            return null;
+            return (null, null);
         }
     }
 
@@ -739,7 +760,10 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
             nowTimestamp,
             _timestampFrequency,
             GetOrCreateAnnotatedDemoDocument,
-            _mediaProvider.GetInterpolatedPosition);
+            _mediaProvider.GetInterpolatedPosition,
+            _audioSpectrumProvider is null
+                ? null
+                : _audioSpectrumProvider.GetCurrentMetrics);
 
     private LyricsDocument GetOrCreateAnnotatedDemoDocument(VisualPreference preference)
     {

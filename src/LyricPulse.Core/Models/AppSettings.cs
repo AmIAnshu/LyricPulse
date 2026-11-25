@@ -41,6 +41,24 @@ public enum StageBackdropMode
     TransparentOverlay = 2
 }
 
+public enum EdgeGlowMode
+{
+    Off = 0,
+    SoftAmbient = 1,
+    BeatPulse = 2,
+    NeonRim = 3
+}
+
+public enum AudioVisualizerMode
+{
+    None = 0,
+    SpectrumBars = 1,
+    RadialHalo = 2,
+    FluidWave = 3,
+    ParticleField = 4,
+    BassHorizon = 5
+}
+
 public enum HotkeyAction
 {
     ToggleLyrics = 0,
@@ -89,6 +107,12 @@ public sealed record AppSettings
     public const float MinFullscreenStageScale = 1.2f;
     public const float MaxFullscreenStageScale = 2.6f;
     public const float DefaultFullscreenStageScale = 1.85f;
+    public const float MinGlowIntensity = 0.2f;
+    public const float MaxGlowIntensity = 1.5f;
+    public const float DefaultEdgeGlowIntensity = 0.80f;
+    public const float MinVisualizerIntensity = 0.2f;
+    public const float MaxVisualizerIntensity = 1.5f;
+    public const float DefaultVisualizerIntensity = 0.75f;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     public OverlayStyleId ActiveStyle { get; init; } = OverlayStyleId.Fisheye;
@@ -142,6 +166,10 @@ public sealed record AppSettings
     public float PartyEnergyLevel { get; init; } = DefaultPartyEnergyLevel;
     public float FullscreenStageScale { get; init; } = DefaultFullscreenStageScale;
     public bool DesktopOverlayEnabled { get; init; }
+    public EdgeGlowMode EdgeGlowMode { get; init; } = EdgeGlowMode.BeatPulse;
+    public float EdgeGlowIntensity { get; init; } = DefaultEdgeGlowIntensity;
+    public AudioVisualizerMode AudioVisualizerMode { get; init; } = AudioVisualizerMode.RadialHalo;
+    public float AudioVisualizerIntensity { get; init; } = DefaultVisualizerIntensity;
 
     [JsonIgnore]
     public MediaSourcePolicy SourcePolicy =>
@@ -184,6 +212,18 @@ public sealed record AppSettings
         var normalizedBackdrop = Enum.IsDefined(StageBackdropMode)
             ? StageBackdropMode
             : StageBackdropMode.AmbientPartyMesh;
+        var normalizedEdgeGlowMode = Enum.IsDefined(EdgeGlowMode)
+            ? EdgeGlowMode
+            : EdgeGlowMode.BeatPulse;
+        var normalizedEdgeGlowIntensity = float.IsFinite(EdgeGlowIntensity)
+            ? Math.Clamp(EdgeGlowIntensity, MinGlowIntensity, MaxGlowIntensity)
+            : DefaultEdgeGlowIntensity;
+        var normalizedVisualizerMode = Enum.IsDefined(AudioVisualizerMode)
+            ? AudioVisualizerMode
+            : AudioVisualizerMode.RadialHalo;
+        var normalizedVisualizerIntensity = float.IsFinite(AudioVisualizerIntensity)
+            ? Math.Clamp(AudioVisualizerIntensity, MinVisualizerIntensity, MaxVisualizerIntensity)
+            : DefaultVisualizerIntensity;
         var normalizedFont = string.IsNullOrWhiteSpace(FontFamily) ? "Jost" : FontFamily.Trim();
         var pinned = PinnedStyles.IsDefaultOrEmpty
             ? Default.PinnedStyles
@@ -208,6 +248,10 @@ public sealed record AppSettings
             StageBackdropMode = normalizedBackdrop,
             PartyEnergyLevel = normalizedEnergy,
             FullscreenStageScale = normalizedStageScale,
+            EdgeGlowMode = normalizedEdgeGlowMode,
+            EdgeGlowIntensity = normalizedEdgeGlowIntensity,
+            AudioVisualizerMode = normalizedVisualizerMode,
+            AudioVisualizerIntensity = normalizedVisualizerIntensity,
             PerDisplayBounds = bounds,
             DisabledDisplays = disabled,
             BlockedAppIds = blocked,

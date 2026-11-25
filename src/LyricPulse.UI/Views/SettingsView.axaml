@@ -221,6 +221,66 @@
 
         <Border Height="1" Background="{DynamicResource LpBorderDefaultBrush}"/>
 
+        <!-- 2B. Audio Visualizer & Edges Glow -->
+        <StackPanel Spacing="10">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Audio Visualizer &amp; Edges Glow" VerticalAlignment="Center" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+            <Border Grid.Column="1" Padding="8,3" CornerRadius="999" Background="{DynamicResource LpAccentSoftBgBrush}" BorderBrush="{DynamicResource LpAccentBorderBrush}" BorderThickness="1">
+              <TextBlock Text="{Binding AudioStatusLabel}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource LpAccentTextBrush}"/>
+            </Border>
+          </Grid>
+
+          <TextBlock Text="Background Audio Visualizer" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
+          <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto" ColumnSpacing="6" RowSpacing="6">
+            <Button Classes="seg" Classes.active="{Binding IsVisNone}" Grid.Row="0" Grid.Column="0" Content="Off" FontSize="11" Padding="6,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectAudioVisualizerModeCommand}" CommandParameter="{x:Static m:AudioVisualizerMode.None}"/>
+            <Button Classes="seg" Classes.active="{Binding IsVisSpectrumBars}" Grid.Row="0" Grid.Column="1" Content="Spectrum" FontSize="11" Padding="6,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectAudioVisualizerModeCommand}" CommandParameter="{x:Static m:AudioVisualizerMode.SpectrumBars}"/>
+            <Button Classes="seg" Classes.active="{Binding IsVisRadialHalo}" Grid.Row="0" Grid.Column="2" Content="Halo" FontSize="11" Padding="6,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectAudioVisualizerModeCommand}" CommandParameter="{x:Static m:AudioVisualizerMode.RadialHalo}"/>
+            <Button Classes="seg" Classes.active="{Binding IsVisFluidWave}" Grid.Row="1" Grid.Column="0" Content="Fluid Wave" FontSize="11" Padding="6,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectAudioVisualizerModeCommand}" CommandParameter="{x:Static m:AudioVisualizerMode.FluidWave}"/>
+            <Button Classes="seg" Classes.active="{Binding IsVisParticleField}" Grid.Row="1" Grid.Column="1" Content="Particles" FontSize="11" Padding="6,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectAudioVisualizerModeCommand}" CommandParameter="{x:Static m:AudioVisualizerMode.ParticleField}"/>
+            <Button Classes="seg" Classes.active="{Binding IsVisBassHorizon}" Grid.Row="1" Grid.Column="2" Content="Horizon" FontSize="11" Padding="6,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectAudioVisualizerModeCommand}" CommandParameter="{x:Static m:AudioVisualizerMode.BassHorizon}"/>
+          </Grid>
+
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Visualizer Intensity" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+            <TextBlock Grid.Column="1" Text="{Binding AudioVisualizerIntensityPercent, StringFormat='{}{0}%'}"
+                       FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="12"
+                       Foreground="{DynamicResource LpAccentTextBrush}"/>
+          </Grid>
+          <Slider Minimum="20" Maximum="150" TickFrequency="5" IsSnapToTickEnabled="True"
+                  Value="{Binding AudioVisualizerIntensityPercent}"
+                  AutomationProperties.Name="Audio visualizer intensity"/>
+
+          <TextBlock Text="Edges Glow" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
+          <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="6">
+            <Button Classes="seg" Classes.active="{Binding IsEdgeGlowOff}" Grid.Column="0" Content="Off" FontSize="11" Padding="4,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectEdgeGlowModeCommand}" CommandParameter="{x:Static m:EdgeGlowMode.Off}"/>
+            <Button Classes="seg" Classes.active="{Binding IsEdgeGlowSoftAmbient}" Grid.Column="1" Content="Ambient" FontSize="11" Padding="4,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectEdgeGlowModeCommand}" CommandParameter="{x:Static m:EdgeGlowMode.SoftAmbient}"/>
+            <Button Classes="seg" Classes.active="{Binding IsEdgeGlowBeatPulse}" Grid.Column="2" Content="Pulse" FontSize="11" Padding="4,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectEdgeGlowModeCommand}" CommandParameter="{x:Static m:EdgeGlowMode.BeatPulse}"/>
+            <Button Classes="seg" Classes.active="{Binding IsEdgeGlowNeonRim}" Grid.Column="3" Content="Neon Rim" FontSize="11" Padding="4,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectEdgeGlowModeCommand}" CommandParameter="{x:Static m:EdgeGlowMode.NeonRim}"/>
+          </Grid>
+
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Edges Glow Intensity" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+            <TextBlock Grid.Column="1" Text="{Binding EdgeGlowIntensityPercent, StringFormat='{}{0}%'}"
+                       FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="12"
+                       Foreground="{DynamicResource LpAccentTextBrush}"/>
+          </Grid>
+          <Slider Minimum="0" Maximum="150" TickFrequency="5" IsSnapToTickEnabled="True"
+                  Value="{Binding EdgeGlowIntensityPercent}"
+                  AutomationProperties.Name="Edges glow intensity"/>
+        </StackPanel>
+
+        <Border Height="1" Background="{DynamicResource LpBorderDefaultBrush}"/>
+
         <!-- 3. Screen, Desktop Overlay & Displays -->
         <StackPanel Spacing="10">
           <Grid ColumnDefinitions="*,Auto">

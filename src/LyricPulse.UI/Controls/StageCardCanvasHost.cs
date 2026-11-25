@@ -36,6 +36,9 @@ public sealed class StageCardCanvasHost : ContentControl, IDisposable
     public static readonly StyledProperty<StageBackdropMode?> StageBackdropOverrideProperty =
         AvaloniaProperty.Register<StageCardCanvasHost, StageBackdropMode?>(nameof(StageBackdropOverride));
 
+    public static readonly StyledProperty<bool> BottomFadeToBlackProperty =
+        AvaloniaProperty.Register<StageCardCanvasHost, bool>(nameof(BottomFadeToBlack), false);
+
     private static LyricsDocument? s_fallbackDemoDoc;
     private static readonly Lock s_demoLock = new();
 
@@ -108,7 +111,15 @@ public sealed class StageCardCanvasHost : ContentControl, IDisposable
         set => SetValue(StageBackdropOverrideProperty, value);
     }
 
+    public bool BottomFadeToBlack
+    {
+        get => GetValue(BottomFadeToBlackProperty);
+        set => SetValue(BottomFadeToBlackProperty, value);
+    }
+
     public void RequestWake() => _canvas.RequestWake();
+
+    public void ReleaseGpuResources() => _canvas.ReleaseGpuResources();
 
     public void Dispose()
     {
@@ -138,7 +149,6 @@ public sealed class StageCardCanvasHost : ContentControl, IDisposable
     {
         base.OnUnloaded(e);
         _canvas.IsPaused = true;
-        _canvas.ReleaseGpuResources();
     }
 
     protected override void OnLoaded(RoutedEventArgs e)
@@ -199,7 +209,8 @@ public sealed class StageCardCanvasHost : ContentControl, IDisposable
             deltaSeconds: dt,
             surfaceMode: mode,
             stageBackdropOverride: StageBackdropOverride,
-            styleOverride: StyleOverride);
+            styleOverride: StyleOverride,
+            bottomFadeToBlack: BottomFadeToBlack);
     }
 
     private static LyricsDocument GetFallbackDemoDocument()

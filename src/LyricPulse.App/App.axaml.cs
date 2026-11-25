@@ -529,6 +529,11 @@ public sealed class App : Application, IDisposable
             var dict = new Dictionary<HotkeyAction, string>();
             foreach (var (action, gesture) in settings.GlobalHotkeys)
             {
+                if (string.IsNullOrWhiteSpace(gesture))
+                {
+                    continue;
+                }
+
                 if (!_hotkeys.TryRegister(action, gesture, out var err) && err is not null)
                 {
                     dict[action] = err;
@@ -610,6 +615,7 @@ public sealed class App : Application, IDisposable
             _stageWindow.Close();
             _stageWindow = null;
         }
+        _stageViewModel?.Dispose();
         _stageViewModel = null;
 
         if (_overlayCoordinator is not null)

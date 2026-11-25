@@ -8,24 +8,27 @@ using SkiaSharp;
 namespace LyricPulse.Rendering.Styles;
 
 /// <summary>
-/// Style #8 — Node Line: smooth cubic Bezier melody ribbon drawing progressively across the viewport
-/// (<c>LineProgress</c>), lighting glowing milestone nodes with alternating exterior above/below
-/// word labels, expanding pulse rings, and silky <c>Spring.CameraDrift</c> horizontal panning on long lines.
+/// Style #8 — Node Line / Branches (Verci-inspired): undulating botanical cubic-Bezier spine
+/// drawing smoothly across the viewport, sprouting curved upper/lower branch stems with illuminated
+/// milestone blossoms, word-locked pulse dot (zero running jitter), and wrapping long lines cleanly
+/// under Reduced Motion.
 /// </summary>
 public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
 {
     public const float RippleDurationSeconds = 0.32f;
 
     private readonly AestheticsOverlayRenderer _aesthetics = new();
-    private readonly SKPaint _guidePathPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.6f, StrokeCap = SKStrokeCap.Round };
+    private readonly SKPaint _guidePathPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.4f, StrokeCap = SKStrokeCap.Round };
     private readonly SKPaint _progressGlowPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 8.0f, StrokeCap = SKStrokeCap.Round };
-    private readonly SKPaint _progressPathPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 3.0f, StrokeCap = SKStrokeCap.Round };
+    private readonly SKPaint _progressPathPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 2.6f, StrokeCap = SKStrokeCap.Round };
+    private readonly SKPaint _stemPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f, StrokeCap = SKStrokeCap.Round };
     private readonly SKPaint _nodeFillPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
-    private readonly SKPaint _nodeRingPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.6f };
+    private readonly SKPaint _nodeRingPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f };
     private readonly SKPath _splinePath = new();
     private readonly SKPath _activePath = new();
+    private readonly SKPath _stemPath = new();
     private readonly SKImageFilter _glowBlur = SKImageFilter.CreateBlur(8.0f, 8.0f);
-    private readonly List<TimelineNode> _nodes = new(16);
+    private readonly List<BranchNode> _nodes = new(16);
 
     private SpringState _cameraPanX = SpringState.AtRest(0f);
     private SpringState _activeWordScale = SpringState.AtRest(1.06f);
@@ -87,7 +90,7 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
                     _cameraPanX = SpringState.AtRest(0f);
                 }
 
-                _activeWordScale = new SpringState(Value: 0.90f, Velocity: 0f, Target: 1.06f + ((packet.SafePartyEnergy - 1f) * 0.08f));
+                _activeWordScale = new SpringState(Value: 0.90f, Velocity: 0f, Target: 1.08f + ((packet.SafePartyEnergy - 1f) * 0.08f));
                 _rippleElapsedSec = 0f;
                 _highlightFade = 0f;
             }
@@ -108,9 +111,8 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
             return _highlightFade < 0.999f;
         }
 
-        // Long-line camera drift keeps active node comfortably centered for >8-word lines
         var targetPan = wordCount > 8
-            ? -Math.Max(0f, (activeIdx - 3) * (packet.ViewportWidthDip * 0.085f))
+            ? -Math.Max(0f, (activeIdx - 3) * (packet.ViewportWidthDip * 0.075f))
             : 0f;
         _cameraPanX = _cameraPanX.WithTarget(targetPan).Step(SpringTokens.CameraDrift, dt);
         _activeWordScale = _activeWordScale.Step(SpringTokens.WordSnap.WithTempoCompression(_lastWordDurationSec), dt);
@@ -120,9 +122,17 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
             _rippleElapsedSec = Math.Min(RippleDurationSeconds, _rippleElapsedSec + dt);
         }
 
+        var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet, 0.50f, 0.52f);
+        var spanW = Math.Clamp(packet.ViewportWidthDip * (packet.IsCompactCard ? 0.84f : 0.76f), 140f, packet.SurfaceMode == StageRenderSurfaceMode.StageCanvas ? 1520f : 1180f);
+        var tFrac = wordCount <= 1 ? 0.5f : (activeIdx / (float)(wordCount - 1));
+        var approxDotX = anchorX - (spanW * 0.5f) + (tFrac * spanW) + _cameraPanX.Value;
+        var approxDotY = anchorY;
+        var dotActive = packet.ShowFollowingDot && _aesthetics.AdvanceDot(key, approxDotX, approxDotY, dt, reducedMotion: false, _lastWordDurationSec);
+
         var isPlaying = packet.PlaybackSnapshot?.IsPlaying ?? true;
         return !_cameraPanX.IsAtRest ||
                !_activeWordScale.IsAtRest ||
+               dotActive ||
                _rippleElapsedSec < RippleDurationSeconds ||
                _highlightFade < 0.999f ||
                isPlaying;
@@ -140,14 +150,14 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
         }
 
         var fontId = packet.ActiveFontId;
-        var fontSize = StyleLayoutHelper.ResolveStyleFontSize(packet, styleMultiplier: 0.64f);
+        var fontSize = StyleLayoutHelper.ResolveStyleFontSize(packet, styleMultiplier: 0.62f);
         var font = context.Fonts.GetOrCreateFont(fontId, fontSize, enforceMinOverlayFloor: !packet.IsCompactCard);
 
-        var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet, 0.50f, 0.54f);
-        var spanW = Math.Clamp(packet.ViewportWidthDip * (packet.IsCompactCard ? 0.84f : 0.74f), 140f, packet.SurfaceMode == StageRenderSurfaceMode.StageCanvas ? 1480f : 1180f);
-        var waveAmp = packet.IsCompactCard ? 9f : Math.Clamp(fontSize * 0.42f, 12f, 26f);
+        var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet, 0.50f, 0.52f);
+        var spanW = Math.Clamp(packet.ViewportWidthDip * (packet.IsCompactCard ? 0.84f : 0.76f), 140f, packet.SurfaceMode == StageRenderSurfaceMode.StageCanvas ? 1520f : 1180f);
+        var waveAmp = packet.IsCompactCard ? 10f : Math.Clamp(fontSize * 0.48f, 14f, 30f);
 
-        BuildTimelineNodes(slice.CurrentLine, anchorX, anchorY, spanW, waveAmp, font, context.Fonts, _nodes);
+        BuildBranchNodes(slice.CurrentLine, anchorX, anchorY, spanW, waveAmp, font, context.Fonts, packet.ReducedMotion, _nodes);
         if (_nodes.Count == 0)
         {
             return;
@@ -156,7 +166,7 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
         var activeIdx = Math.Clamp(slice.ActiveWordIndex, 0, _nodes.Count - 1);
         var panX = packet.ReducedMotion ? 0f : _cameraPanX.Value;
 
-        var scrimRect = new SKRect(anchorX - (spanW * 0.52f), anchorY - (fontSize * 2.1f), anchorX + (spanW * 0.52f), anchorY + (fontSize * 2.1f));
+        var scrimRect = new SKRect(anchorX - (spanW * 0.54f), anchorY - (fontSize * 2.5f), anchorX + (spanW * 0.54f), anchorY + (fontSize * 2.5f));
         context.Legibility.DrawAmbientScrim(
             context.Canvas,
             scrimRect,
@@ -170,16 +180,16 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
         {
             context.Canvas.Translate(panX, 0f);
 
-            // 1. Base guide spline across all nodes
+            // 1. Undulating main botanical vine guide
             BuildSmoothCubicPath(_nodes, _nodes.Count - 1, 1.0f, _splinePath);
-            _guidePathPaint.Color = packet.Palette.AccentColor3.ToSkColorWithAlpha(0.28f);
+            _guidePathPaint.Color = packet.Palette.AccentColor3.ToSkColorWithAlpha(0.24f);
             context.Canvas.DrawPath(_splinePath, _guidePathPaint);
 
-            // 2. Illuminated active progress spline
+            // 2. Illuminated progress vine traced smoothly to current node
             var segProgress = packet.ReducedMotion ? 1.0f : (float)Math.Clamp(slice.WordProgress, 0.0, 1.0);
             var cometPos = BuildSmoothCubicPath(_nodes, activeIdx, segProgress, _activePath);
 
-            _progressGlowPaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha(0.36f);
+            _progressGlowPaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha(0.38f);
             _progressGlowPaint.ImageFilter = _glowBlur;
             try
             {
@@ -190,10 +200,10 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
                 _progressGlowPaint.ImageFilter = null;
             }
 
-            _progressPathPaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha(0.95f);
+            _progressPathPaint.Color = packet.Palette.AccentColor1.ToSkColorWithAlpha(0.92f);
             context.Canvas.DrawPath(_activePath, _progressPathPaint);
 
-            // 3. Milestone nodes & alternating exterior labels
+            // 3. Curved sprouting side-branches + blossom nodes + upright word labels
             var highlightEased = Ease.Highlight(_highlightFade);
             for (var i = 0; i < _nodes.Count; i++)
             {
@@ -201,6 +211,29 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
                 var isActive = i == activeIdx;
                 var isPast = i < activeIdx;
 
+                // Curved botanical tendril from spine joint (X, Y) -> tip blossom (TipX, TipY)
+                _stemPath.Rewind();
+                _stemPath.MoveTo(node.X, node.Y);
+                var ctrlY = node.Y + ((node.TipY - node.Y) * 0.65f);
+                _stemPath.QuadTo(node.X, ctrlY, node.TipX, node.TipY);
+
+                _stemPaint.StrokeWidth = isActive ? 2.1f : (isPast ? 1.4f : 0.95f);
+                _stemPaint.Color = isActive
+                    ? packet.Palette.AccentColor1.ToSkColorWithAlpha(0.92f)
+                    : isPast
+                        ? packet.Palette.AccentColor2.ToSkColorWithAlpha(0.62f)
+                        : packet.Palette.AccentColor3.ToSkColorWithAlpha(0.22f);
+                context.Canvas.DrawPath(_stemPath, _stemPaint);
+
+                // Spine joint bead
+                _nodeFillPaint.Color = isActive
+                    ? SKColors.White
+                    : isPast
+                        ? packet.Palette.AccentColor1.ToSkColorWithAlpha(0.85f)
+                        : packet.Palette.AccentColor3.ToSkColorWithAlpha(0.38f);
+                context.Canvas.DrawCircle(node.X, node.Y, isActive ? (packet.IsCompactCard ? 3.2f : 4.6f) : (packet.IsCompactCard ? 1.8f : 2.8f), _nodeFillPaint);
+
+                // Blossom tip orb
                 if (isActive)
                 {
                     if (!packet.ReducedMotion && _rippleElapsedSec < RippleDurationSeconds)
@@ -208,52 +241,44 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
                         var rt = Ease.Enter(_rippleElapsedSec / RippleDurationSeconds);
                         var ringR = (packet.IsCompactCard ? 5f : 7f) + ((packet.IsCompactCard ? 10f : 16f) * rt * packet.SafePartyEnergy);
                         _nodeRingPaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha(0.68f * (1f - rt));
-                        context.Canvas.DrawCircle(node.X, node.Y, ringR, _nodeRingPaint);
+                        context.Canvas.DrawCircle(node.TipX, node.TipY, ringR, _nodeRingPaint);
                     }
 
-                    _nodeFillPaint.Color = packet.Palette.AccentColor1.ToSkColorWithAlpha(1.0f);
-                    context.Canvas.DrawCircle(node.X, node.Y, packet.IsCompactCard ? 4.5f : 7.0f, _nodeFillPaint);
+                    _nodeFillPaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha(0.95f);
+                    context.Canvas.DrawCircle(node.TipX, node.TipY, packet.IsCompactCard ? 4.2f : 6.2f, _nodeFillPaint);
                     _nodeFillPaint.Color = SKColors.White;
-                    context.Canvas.DrawCircle(node.X, node.Y, packet.IsCompactCard ? 2.0f : 3.2f, _nodeFillPaint);
-                }
-                else if (isPast)
-                {
-                    _nodeFillPaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha(0.88f);
-                    context.Canvas.DrawCircle(node.X, node.Y, packet.IsCompactCard ? 3.2f : 5.0f, _nodeFillPaint);
+                    context.Canvas.DrawCircle(node.TipX, node.TipY, packet.IsCompactCard ? 1.8f : 2.8f, _nodeFillPaint);
                 }
                 else
                 {
-                    _nodeRingPaint.Color = packet.Palette.AccentColor3.ToSkColorWithAlpha(0.48f);
-                    context.Canvas.DrawCircle(node.X, node.Y, packet.IsCompactCard ? 2.8f : 4.2f, _nodeRingPaint);
+                    _nodeFillPaint.Color = (isPast ? packet.Palette.AccentColor2 : packet.Palette.AccentColor3).ToSkColorWithAlpha(isPast ? 0.72f : 0.35f);
+                    context.Canvas.DrawCircle(node.TipX, node.TipY, packet.IsCompactCard ? 2.2f : 3.2f, _nodeFillPaint);
                 }
 
-                var isAbove = (i % 2) == 0;
-                var lift = isActive && !packet.ReducedMotion ? 6.0f : 0f;
-                var labelY = isAbove
-                    ? node.Y - (font.Size * 0.78f) - lift
-                    : node.Y + (font.Size * 1.12f) + lift;
-
+                var labelY = node.IsUpperBranch
+                    ? node.TipY - (font.Size * 0.58f)
+                    : node.TipY + (font.Size * 1.05f);
                 var labelScale = isActive
                     ? (packet.ReducedMotion ? 1.0f : _activeWordScale.Value)
                     : isPast ? 0.94f : 0.88f;
                 var labelOpacity = isActive
                     ? (packet.ReducedMotion ? (0.90f + (0.10f * highlightEased)) : 1.0f)
-                    : isPast ? 0.76f : 0.36f;
+                    : isPast ? 0.76f : 0.34f;
                 var labelColor = isActive
-                    ? StyleLayoutHelper.BlendSrgb(packet.Palette.AccentColor3, packet.Palette.AccentColor1, highlightEased)
+                    ? StyleLayoutHelper.BlendSrgb(packet.Palette.AccentColor1, SKColors.White.ToRgb(), 0.40f * highlightEased)
                     : packet.Palette.AccentColor3;
 
                 if (isActive && packet.ShowColorSweepLayer)
                 {
                     var scaledW = node.MeasuredWidth * labelScale;
-                    var sweepRect = new SKRect(node.X - (scaledW * 0.5f), labelY - (font.Size * 0.85f * labelScale), node.X + (scaledW * 0.5f), labelY + (font.Size * 0.16f * labelScale));
+                    var sweepRect = new SKRect(node.TipX - (scaledW * 0.5f), labelY - (font.Size * 0.85f * labelScale), node.TipX + (scaledW * 0.5f), labelY + (font.Size * 0.16f * labelScale));
                     _aesthetics.DrawWordColorSweep(context.Canvas, sweepRect, slice.WordProgress, packet, labelOpacity);
                 }
 
                 var wordSave = context.Canvas.Save();
                 try
                 {
-                    context.Canvas.Translate(node.X, labelY);
+                    context.Canvas.Translate(node.TipX, labelY);
                     context.Canvas.Scale(labelScale, labelScale);
                     context.Legibility.DrawLegibleText(
                         context.Canvas,
@@ -274,8 +299,7 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
                 }
             }
 
-            // Following Pulse Dot glides cleanly along the spline comet head!
-            _aesthetics.DrawFollowingDot(context.Canvas, packet, cometPos.X, cometPos.Y, Math.Clamp(fontSize * 0.14f, 3.2f, 7.5f));
+            _aesthetics.DrawFollowingDot(context.Canvas, packet, _nodes[activeIdx].X, _nodes[activeIdx].Y, Math.Clamp(fontSize * 0.14f, 3.0f, 6.8f));
         }
         finally
         {
@@ -286,7 +310,7 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
             in context,
             slice.CurrentLine,
             anchorX,
-            anchorY + waveAmp + (fontSize * 1.95f),
+            anchorY + waveAmp + (fontSize * 2.25f),
             fontSize * 1.15f);
     }
 
@@ -302,14 +326,16 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
         _guidePathPaint.Dispose();
         _progressGlowPaint.Dispose();
         _progressPathPaint.Dispose();
+        _stemPaint.Dispose();
         _nodeFillPaint.Dispose();
         _nodeRingPaint.Dispose();
         _splinePath.Dispose();
         _activePath.Dispose();
+        _stemPath.Dispose();
         _glowBlur.Dispose();
     }
 
-    private static void BuildTimelineNodes(
+    private static void BuildBranchNodes(
         LyricLine line,
         float centerX,
         float baseY,
@@ -317,7 +343,8 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
         float waveAmp,
         SKFont font,
         FontAssetRegistry fonts,
-        List<TimelineNode> destination)
+        bool reducedMotion,
+        List<BranchNode> destination)
     {
         destination.Clear();
         var words = line.Words;
@@ -327,15 +354,14 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
             return;
         }
 
-        var left = centerX - (spanW * 0.5f);
+        var seed = StyleLayoutHelper.DeterministicHash(line.Index, line.RawText);
         if (count == 1)
         {
             var singleText = words.IsEmpty ? line.RawText : words[0].Text;
-            destination.Add(new TimelineNode(singleText, centerX, baseY, TextShaperService.MeasureWidth(singleText, font, fonts)));
+            destination.Add(new BranchNode(singleText, centerX, baseY, centerX + 12f, baseY - waveAmp, true, TextShaperService.MeasureWidth(singleText, font, fonts)));
             return;
         }
 
-        // Lightly weight horizontal spacing by word length so long words enjoy wider horizontal clearance
         var totalWeight = 0f;
         Span<float> weights = count <= 32 ? stackalloc float[count] : new float[count];
         for (var i = 0; i < count; i++)
@@ -345,8 +371,12 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
             totalWeight += weights[i];
         }
 
-        var effectiveSpan = count > 8 ? spanW * (count / 8f) : spanW;
+        // Clamp span cleanly inside viewport when ReducedMotion disables camera pan (UI-16)
+        var effectiveSpan = !reducedMotion && count > 8 ? spanW * (count / 8f) : spanW;
+        var left = centerX - (effectiveSpan * 0.5f);
         var cursorWeight = 0f;
+        var stepX = effectiveSpan / Math.Max(count, 1);
+
         for (var i = 0; i < count; i++)
         {
             var text = words[i].Text;
@@ -355,12 +385,17 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
 
             var t = Math.Clamp(centerWeight / Math.Max(totalWeight, 1f), 0.04f, 0.96f);
             var x = left + (t * effectiveSpan);
-            var y = baseY + ((i % 2 == 0) ? -waveAmp : +waveAmp);
-            destination.Add(new TimelineNode(text, x, y, TextShaperService.MeasureWidth(text, font, fonts)));
+            var spineY = baseY + (MathF.Sin((t * MathF.Tau) + (line.Index * 0.9f)) * waveAmp * 0.45f);
+            var isUpper = (i % 2) == 0;
+            var reachY = waveAmp * (1.15f + ((((seed >> (i % 16)) & 0x7) / 7f) * 0.55f));
+            var tipY = spineY + (isUpper ? -reachY : +reachY);
+            var tipX = x + ((i % 2 == 0 ? 1f : -1f) * Math.Min(stepX * 0.24f, 28f));
+
+            destination.Add(new BranchNode(text, x, spineY, tipX, tipY, isUpper, TextShaperService.MeasureWidth(text, font, fonts)));
         }
     }
 
-    private static SKPoint BuildSmoothCubicPath(List<TimelineNode> nodes, int upToIndex, float segProgress, SKPath path)
+    private static SKPoint BuildSmoothCubicPath(List<BranchNode> nodes, int upToIndex, float segProgress, SKPath path)
     {
         path.Rewind();
         if (nodes.Count == 0)
@@ -391,7 +426,6 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
             var p3 = new SKPoint(b.X, b.Y);
 
             var t = Math.Clamp(segProgress, 0f, 1f);
-            // De Casteljau split for exact partial cubic Bezier trace
             var q0 = Lerp(p0, p1, t);
             var q1 = Lerp(p1, p2, t);
             var q2 = Lerp(p2, p3, t);
@@ -408,5 +442,5 @@ public sealed class NodeLineStyleRenderer : IKineticStyleRenderer
     private static SKPoint Lerp(SKPoint a, SKPoint b, float t) =>
         new(a.X + ((b.X - a.X) * t), a.Y + ((b.Y - a.Y) * t));
 
-    private readonly record struct TimelineNode(string Text, float X, float Y, float MeasuredWidth);
+    private readonly record struct BranchNode(string Text, float X, float Y, float TipX, float TipY, bool IsUpperBranch, float MeasuredWidth);
 }

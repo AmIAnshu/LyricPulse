@@ -23,7 +23,8 @@ public static class OverlayFrameAdapter
         StageRenderSurfaceMode surfaceMode = StageRenderSurfaceMode.DesktopOverlay,
         StageBackdropMode? stageBackdropOverride = null,
         OverlayStyleId? styleOverride = null,
-        float? heroScaleOverride = null)
+        float? heroScaleOverride = null,
+        bool bottomFadeToBlack = false)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
@@ -74,7 +75,9 @@ public static class OverlayFrameAdapter
             ShowFollowingDot: settings.ShowFollowingDot,
             ShowColorSweepLayer: settings.ShowColorSweepLayer,
             SecondaryLineMode: settings.SecondaryLineMode,
-            StyleOverride: styleOverride);
+            StyleOverride: styleOverride,
+            AudioMetrics: snapshot.EffectiveAudioMetrics,
+            BottomFadeToBlack: bottomFadeToBlack);
     }
 
     public static float ComputeRecommendedHeroScale(

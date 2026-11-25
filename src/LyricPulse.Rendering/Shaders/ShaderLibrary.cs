@@ -305,7 +305,9 @@ public sealed class ShaderLibrary : IDisposable
         AlbumAccentPalette palette,
         bool isGpuBackend = true,
         bool reducedMotion = false,
-        bool allowCpuForTesting = false)
+        bool allowCpuForTesting = false,
+        float bassEnergy = 0f,
+        bool bottomFadeToBlack = false)
     {
         ArgumentNullException.ThrowIfNull(targetCanvas);
         ArgumentNullException.ThrowIfNull(palette);
@@ -358,6 +360,15 @@ public sealed class ShaderLibrary : IDisposable
             _partyMeshUniforms["iColor1"] = (ReadOnlySpan<float>)c1;
             _partyMeshUniforms["iColor2"] = (ReadOnlySpan<float>)c2;
             _partyMeshUniforms["iColor3"] = (ReadOnlySpan<float>)c3;
+            if (_partyMeshUniforms.Contains("iBass"))
+            {
+                _partyMeshUniforms["iBass"] = float.IsFinite(bassEnergy) ? Math.Clamp(bassEnergy, 0f, 1f) : 0f;
+            }
+
+            if (_partyMeshUniforms.Contains("iBottomFade"))
+            {
+                _partyMeshUniforms["iBottomFade"] = bottomFadeToBlack ? 1.0f : 0.0f;
+            }
 
             using var runtimeShader = _partyMeshEffect.ToShader(_partyMeshUniforms);
             if (runtimeShader is null)

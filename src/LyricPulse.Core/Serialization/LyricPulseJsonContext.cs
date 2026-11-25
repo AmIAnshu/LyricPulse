@@ -16,6 +16,8 @@ namespace LyricPulse.Core.Serialization;
     UseStringEnumConverter = true)]
 [JsonSerializable(typeof(AppSettings))]
 [JsonSerializable(typeof(StageBackdropMode))]
+[JsonSerializable(typeof(EdgeGlowMode))]
+[JsonSerializable(typeof(AudioVisualizerMode))]
 [JsonSerializable(typeof(OverlayBoundsConfig))]
 [JsonSerializable(typeof(RgbColor))]
 [JsonSerializable(typeof(TrackOffsetsEnvelopeDto))]

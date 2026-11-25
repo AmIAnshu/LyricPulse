@@ -3,6 +3,7 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Windows.Input;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using LyricPulse.Core.Abstractions;
 using LyricPulse.Core.Models;
 using LyricPulse.Core.Runtime;
@@ -18,7 +19,8 @@ public enum StageFlyoutKind
     Font = 2,
     Screen = 3,
     Aesthetics = 4,
-    Diagnostics = 5
+    Diagnostics = 5,
+    Visualizer = 6
 }
 
 public enum MediaHealthKind
@@ -43,7 +45,7 @@ public enum ObsChromaKeyMode
 /// Floating Top Pill Flyouts, 10-card Live Gallery Strip, Inline/Overlay Settings Drawer,
 /// and OBS Broadcast Chroma-Key Window.
 /// </summary>
-public sealed class StageViewModel : ViewModelBase
+public sealed class StageViewModel : ViewModelBase, IDisposable
 {
     private readonly OverlayRuntimeController _runtime;
     private readonly Func<HotkeyAction, string, (bool Ok, string? Error)>? _hotkeyValidator;
@@ -63,6 +65,9 @@ public sealed class StageViewModel : ViewModelBase
     private bool _isResetConfirmArmed;
     private string _styleFilter = "All";
     private HotkeyAction? _recordingHotkey;
+    private Bitmap? _albumArtBitmap;
+    private string? _albumArtHash;
+    private bool _disposed;
 
     private OverlayPlaybackSnapshot _snapshot;
 
@@ -239,6 +244,39 @@ public sealed class StageViewModel : ViewModelBase
                 _ = SafeRunAsync(() => _runtime.UpdateSettingsAsync(st => st with { SecondaryLineMode = parsed }));
             }
         });
+        SelectEdgeGlowModeCommand = new RelayCommand(p =>
+        {
+            if (p is EdgeGlowMode eg)
+            {
+                _ = SafeRunAsync(() => _runtime.SetEdgeGlowModeAsync(eg));
+            }
+            else if (p is string s && Enum.TryParse<EdgeGlowMode>(s, ignoreCase: true, out var parsed))
+            {
+                _ = SafeRunAsync(() => _runtime.SetEdgeGlowModeAsync(parsed));
+            }
+        });
+        SelectAudioVisualizerModeCommand = new RelayCommand(p =>
+        {
+            if (p is AudioVisualizerMode vmMode)
+            {
+                _ = SafeRunAsync(() => _runtime.SetAudioVisualizerModeAsync(vmMode));
+            }
+            else if (p is string s && Enum.TryParse<AudioVisualizerMode>(s, ignoreCase: true, out var parsed))
+            {
+                _ = SafeRunAsync(() => _runtime.SetAudioVisualizerModeAsync(parsed));
+            }
+        });
+        SelectStyleByIndexCommand = new RelayCommand(p =>
+        {
+            if (p is int idx && idx >= 0 && idx < StyleCatalog.All.Length)
+            {
+                _ = SafeRunAsync(() => _runtime.SetActiveStyleAsync(StyleCatalog.All[idx].StyleId));
+            }
+            else if (p is OverlayStyleId sid)
+            {
+                _ = SafeRunAsync(() => _runtime.SetActiveStyleAsync(sid));
+            }
+        });
         ApplyColorPresetCommand = new RelayCommand(p =>
         {
             if (p is ColorPresetOption preset)
@@ -331,6 +369,9 @@ public sealed class StageViewModel : ViewModelBase
     public ICommand SelectThemeVariantCommand { get; }
     public ICommand SelectScrimIntensityCommand { get; }
     public ICommand SelectSecondaryLineCommand { get; }
+    public ICommand SelectEdgeGlowModeCommand { get; }
+    public ICommand SelectAudioVisualizerModeCommand { get; }
+    public ICommand SelectStyleByIndexCommand { get; }
     public ICommand ApplyColorPresetCommand { get; }
     public ICommand SetStyleFilterCommand { get; }
     public ICommand ArmResetCommand { get; }
@@ -362,6 +403,7 @@ public sealed class StageViewModel : ViewModelBase
                 OnPropertyChanged(nameof(IsScreenFlyoutOpen));
                 OnPropertyChanged(nameof(IsAestheticsFlyoutOpen));
                 OnPropertyChanged(nameof(IsDiagnosticsFlyoutOpen));
+                OnPropertyChanged(nameof(IsVisualizerFlyoutOpen));
                 OnPropertyChanged(nameof(TopBarOpacity));
                 OnPropertyChanged(nameof(IsTopBarInteractive));
             }
@@ -374,6 +416,7 @@ public sealed class StageViewModel : ViewModelBase
     public bool IsScreenFlyoutOpen => ActiveFlyout == StageFlyoutKind.Screen;
     public bool IsAestheticsFlyoutOpen => ActiveFlyout == StageFlyoutKind.Aesthetics;
     public bool IsDiagnosticsFlyoutOpen => ActiveFlyout == StageFlyoutKind.Diagnostics;
+    public bool IsVisualizerFlyoutOpen => ActiveFlyout == StageFlyoutKind.Visualizer;
 
     public bool IsSettingsDrawerOpen
     {
@@ -465,7 +508,10 @@ public sealed class StageViewModel : ViewModelBase
     }
 
     public bool EffectivePreviewsPaused => PreviewsPaused || _snapshot.IsEffectiveReducedMotion;
-    public string PausePreviewsLabel => EffectivePreviewsPaused ? "Play previews" : "Pause previews";
+    public bool IsPreviewsToggleEnabled => !_snapshot.IsEffectiveReducedMotion;
+    public string PausePreviewsLabel => _snapshot.IsEffectiveReducedMotion
+        ? "Paused (Reduced Motion)"
+        : EffectivePreviewsPaused ? "Play previews" : "Pause previews";
 
     public bool IsObsWindowOpen
     {
@@ -746,6 +792,55 @@ public sealed class StageViewModel : ViewModelBase
     public bool IsSecondaryTranslation => SecondaryLineMode == SecondaryLineMode.Translation;
     public bool IsSecondaryRomanization => SecondaryLineMode == SecondaryLineMode.Romanization;
 
+    public EdgeGlowMode EdgeGlowMode => _snapshot.Settings.EdgeGlowMode;
+    public bool IsEdgeGlowOff => EdgeGlowMode == EdgeGlowMode.Off;
+    public bool IsEdgeGlowSoftAmbient => EdgeGlowMode == EdgeGlowMode.SoftAmbient;
+    public bool IsEdgeGlowBeatPulse => EdgeGlowMode == EdgeGlowMode.BeatPulse;
+    public bool IsEdgeGlowNeonRim => EdgeGlowMode == EdgeGlowMode.NeonRim;
+
+    public int EdgeGlowIntensityPercent
+    {
+        get => (int)Math.Round(_snapshot.Settings.EdgeGlowIntensity * 100f);
+        set
+        {
+            var clamped = Math.Clamp(value, 0, 150) / 100f;
+            if (Math.Abs(_snapshot.Settings.EdgeGlowIntensity - clamped) > 0.01f)
+            {
+                _ = SafeRunAsync(() => _runtime.SetEdgeGlowIntensityAsync(clamped));
+            }
+        }
+    }
+
+    public AudioVisualizerMode AudioVisualizerMode => _snapshot.Settings.AudioVisualizerMode;
+    public bool IsVisNone => AudioVisualizerMode == AudioVisualizerMode.None;
+    public bool IsVisSpectrumBars => AudioVisualizerMode == AudioVisualizerMode.SpectrumBars;
+    public bool IsVisRadialHalo => AudioVisualizerMode == AudioVisualizerMode.RadialHalo;
+    public bool IsVisFluidWave => AudioVisualizerMode == AudioVisualizerMode.FluidWave;
+    public bool IsVisParticleField => AudioVisualizerMode == AudioVisualizerMode.ParticleField;
+    public bool IsVisBassHorizon => AudioVisualizerMode == AudioVisualizerMode.BassHorizon;
+
+    public int AudioVisualizerIntensityPercent
+    {
+        get => (int)Math.Round(_snapshot.Settings.AudioVisualizerIntensity * 100f);
+        set
+        {
+            var clamped = Math.Clamp(value, 20, 150) / 100f;
+            if (Math.Abs(_snapshot.Settings.AudioVisualizerIntensity - clamped) > 0.01f)
+            {
+                _ = SafeRunAsync(() => _runtime.SetAudioVisualizerIntensityAsync(clamped));
+            }
+        }
+    }
+
+    public bool IsLiveSystemAudioActive => _snapshot.EffectiveAudioMetrics.IsLiveAudioActive;
+    public string AudioStatusLabel => IsLiveSystemAudioActive ? "System Audio Live" : "Beat Sync";
+    public string DiagnosticAudioLine => IsLiveSystemAudioActive
+        ? $"WASAPI Loopback FFT active (Level {(int)Math.Round(_snapshot.EffectiveAudioMetrics.OverallLevel * 100f)}%)"
+        : "Using lyric-synced beat pulse (silent or audio fallback)";
+
+    public Bitmap? AlbumArtBitmap => _albumArtBitmap;
+    public bool HasAlbumArt => _albumArtBitmap is not null;
+
     public bool IsReducedMotionToggleEnabled => !_snapshot.IsOsReducedMotion;
     public IBrush MediaHealthDotBrush => MediaHealth switch
     {
@@ -957,6 +1052,7 @@ public sealed class StageViewModel : ViewModelBase
         OnPropertyChanged(nameof(ReducedMotion));
         OnPropertyChanged(nameof(IsOsReducedMotion));
         OnPropertyChanged(nameof(EffectivePreviewsPaused));
+        OnPropertyChanged(nameof(IsPreviewsToggleEnabled));
         OnPropertyChanged(nameof(PausePreviewsLabel));
         OnPropertyChanged(nameof(HighContrastScrim));
         OnPropertyChanged(nameof(UniversalPlayerMode));
@@ -980,6 +1076,23 @@ public sealed class StageViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsSecondaryOff));
         OnPropertyChanged(nameof(IsSecondaryTranslation));
         OnPropertyChanged(nameof(IsSecondaryRomanization));
+        OnPropertyChanged(nameof(EdgeGlowMode));
+        OnPropertyChanged(nameof(IsEdgeGlowOff));
+        OnPropertyChanged(nameof(IsEdgeGlowSoftAmbient));
+        OnPropertyChanged(nameof(IsEdgeGlowBeatPulse));
+        OnPropertyChanged(nameof(IsEdgeGlowNeonRim));
+        OnPropertyChanged(nameof(EdgeGlowIntensityPercent));
+        OnPropertyChanged(nameof(AudioVisualizerMode));
+        OnPropertyChanged(nameof(IsVisNone));
+        OnPropertyChanged(nameof(IsVisSpectrumBars));
+        OnPropertyChanged(nameof(IsVisRadialHalo));
+        OnPropertyChanged(nameof(IsVisFluidWave));
+        OnPropertyChanged(nameof(IsVisParticleField));
+        OnPropertyChanged(nameof(IsVisBassHorizon));
+        OnPropertyChanged(nameof(AudioVisualizerIntensityPercent));
+        OnPropertyChanged(nameof(IsLiveSystemAudioActive));
+        OnPropertyChanged(nameof(AudioStatusLabel));
+        OnPropertyChanged(nameof(DiagnosticAudioLine));
         OnPropertyChanged(nameof(IsReducedMotionToggleEnabled));
         OnPropertyChanged(nameof(IsDemoMode));
         OnPropertyChanged(nameof(IsLoadingLyrics));
@@ -994,8 +1107,56 @@ public sealed class StageViewModel : ViewModelBase
         OnPropertyChanged(nameof(DiagnosticGsmtcLine));
         OnPropertyChanged(nameof(DiagnosticLyricsLine));
         OnPropertyChanged(nameof(DiagnosticDisplaysLine));
+
+        UpdateAlbumArtBitmap(snapshot.AlbumArt);
+
         NudgeOffsetCommand.RaiseCanExecuteChanged();
         ResetOffsetCommand.RaiseCanExecuteChanged();
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        var prev = _albumArtBitmap;
+        _albumArtBitmap = null;
+        _albumArtHash = null;
+        prev?.Dispose();
+    }
+
+    private void UpdateAlbumArtBitmap(AlbumArtPayload? art)
+    {
+        var incomingHash = art is { ImageBytes.IsEmpty: false } ? art.Sha256Hash : null;
+        if (string.Equals(_albumArtHash, incomingHash, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        Bitmap? nextBitmap = null;
+        if (art is { ImageBytes.IsEmpty: false } validArt)
+        {
+            try
+            {
+                using var ms = new MemoryStream(validArt.ImageBytes.ToArray(), writable: false);
+                nextBitmap = Bitmap.DecodeToWidth(ms, 64);
+            }
+            catch (Exception ex)
+            {
+                LogAlbumArtDecodeError(_logger, ex);
+                nextBitmap = null;
+            }
+        }
+
+        var oldBitmap = _albumArtBitmap;
+        _albumArtBitmap = nextBitmap;
+        _albumArtHash = incomingHash;
+        OnPropertyChanged(nameof(AlbumArtBitmap));
+        OnPropertyChanged(nameof(HasAlbumArt));
+        oldBitmap?.Dispose();
     }
 
     public void UpdateDisplays(IReadOnlyList<DisplayMonitorInfo> monitors)
@@ -1231,6 +1392,12 @@ public sealed class StageViewModel : ViewModelBase
             LogLevel.Error,
             new EventId(1, nameof(SafeRunAsync)),
             "Unhandled async error in StageViewModel operation.");
+
+    private static readonly Action<ILogger, Exception?> LogAlbumArtDecodeError =
+        LoggerMessage.Define(
+            LogLevel.Debug,
+            new EventId(2, nameof(UpdateAlbumArtBitmap)),
+            "Unable to decode album art thumbnail bitmap.");
 
     private static Color ToAvaloniaColor(RgbColor c) => Color.FromArgb(c.A, c.R, c.G, c.B);
     private static RgbColor FromAvaloniaColor(Color c) => new(c.R, c.G, c.B, c.A);

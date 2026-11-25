@@ -29,10 +29,10 @@ public sealed class MonotonicPlaybackClockTests
     }
 
     [Fact]
-    public void UpdateFromTimeline_AppliesStalenessOnlyWithinZeroToFiveSeconds()
+    public void UpdateFromTimeline_AppliesStalenessWithinFifteenMinutesAndRejectsOutOfRange()
     {
         long nowTicks = 100 * Frequency;
-        var utc = new DateTimeOffset(2026, 11, 25, 12, 0, 10, TimeSpan.Zero);
+        var utc = new DateTimeOffset(2026, 11, 25, 12, 20, 0, TimeSpan.Zero);
         var clock = new MonotonicPlaybackClock(() => nowTicks, Frequency, () => utc);
 
         // Valid 2s staleness -> compensates +2s
@@ -46,15 +46,26 @@ public sealed class MonotonicPlaybackClockTests
             utc.AddSeconds(-2));
         clock.GetInterpolatedPosition().Should().BeCloseTo(TimeSpan.FromSeconds(12), TimeSpan.FromMilliseconds(1));
 
-        // Corrupt/stale 12s timestamp -> uses raw reported position without extrapolation
+        // Valid 45s Spotify GSMTC timeline staleness -> compensates +45s seamlessly!
         clock.UpdateFromTimeline(
-            "track-2",
+            "track-spotify",
             TimeSpan.FromSeconds(20),
             TimeSpan.Zero,
             TimeSpan.FromMinutes(3),
             1.0,
             true,
-            utc.AddSeconds(-12));
+            utc.AddSeconds(-45));
+        clock.GetInterpolatedPosition().Should().BeCloseTo(TimeSpan.FromSeconds(65), TimeSpan.FromMilliseconds(1));
+
+        // Corrupt/stale 16-minute timestamp -> uses raw reported position without extrapolation
+        clock.UpdateFromTimeline(
+            "track-2",
+            TimeSpan.FromSeconds(20),
+            TimeSpan.Zero,
+            TimeSpan.FromMinutes(30),
+            1.0,
+            true,
+            utc.AddMinutes(-16));
         clock.GetInterpolatedPosition().Should().BeCloseTo(TimeSpan.FromSeconds(20), TimeSpan.FromMilliseconds(1));
 
         // MinValue timestamp -> uses raw reported position
@@ -67,6 +78,24 @@ public sealed class MonotonicPlaybackClockTests
             true,
             DateTimeOffset.MinValue);
         clock.GetInterpolatedPosition().Should().BeCloseTo(TimeSpan.FromSeconds(5), TimeSpan.FromMilliseconds(1));
+    }
+
+    [Fact]
+    public void UpdateFromTimeline_DeduplicatesRepeatedSpotifyGsmtcSamples()
+    {
+        long nowTicks = 100 * Frequency;
+        var utc = new DateTimeOffset(2026, 11, 25, 12, 0, 10, TimeSpan.Zero);
+        var timelineUpdatedUtc = utc.AddSeconds(-12);
+        var clock = new MonotonicPlaybackClock(() => nowTicks, Frequency, () => utc);
+
+        clock.UpdateFromTimeline("track-sp", TimeSpan.FromSeconds(30), TimeSpan.Zero, TimeSpan.FromMinutes(4), 1.0, true, timelineUpdatedUtc);
+        nowTicks += 5 * Frequency;
+        utc = utc.AddSeconds(5);
+
+        // Spotify re-emits exact same (30s, timelineUpdatedUtc) tuple 5s later: must ignore without snapping backward
+        var dup = clock.UpdateFromTimeline("track-sp", TimeSpan.FromSeconds(30), TimeSpan.Zero, TimeSpan.FromMinutes(4), 1.0, true, timelineUpdatedUtc);
+        dup.Kind.Should().Be(ClockUpdateKind.IgnoredJitter);
+        clock.GetInterpolatedPosition().Should().BeCloseTo(TimeSpan.FromSeconds(47), TimeSpan.FromMilliseconds(1));
     }
 
     [Fact]

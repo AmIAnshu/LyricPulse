@@ -24,7 +24,7 @@ public sealed class MonotonicPlaybackClock
 {
     public static readonly TimeSpan JitterDeadzone = TimeSpan.FromMilliseconds(40);
     public static readonly TimeSpan MaxSmoothSlewDrift = TimeSpan.FromMilliseconds(250);
-    public static readonly TimeSpan MaxTrustedStaleness = TimeSpan.FromSeconds(5);
+    public static readonly TimeSpan MaxTrustedStaleness = TimeSpan.FromMinutes(15);
     public static readonly TimeSpan LiveStreamStallGuard = TimeSpan.FromMinutes(15);
 
     private const double SlewTimeConstantSeconds = 0.08;
@@ -87,9 +87,22 @@ public sealed class MonotonicPlaybackClock
         var sameTrack = current.HasAnchor &&
                         string.Equals(current.TrackKey, trackKey, StringComparison.Ordinal);
 
+        // Windows GSMTC (especially Spotify Desktop) often re-emits the exact same
+        // (reportedPosition, LastUpdatedTime) tuple on unrelated SessionsChanged or metadata pings.
+        // Deduplicate unchanged active timeline samples so we never snap or jitter backward.
+        if (sameTrack &&
+            current.IsPlaying &&
+            isPlaying &&
+            timelineLastUpdatedUtc.Year >= 2000 &&
+            reportedPosition == current.LastReportedPosition &&
+            timelineLastUpdatedUtc == current.LastTimelineUpdatedUtc)
+        {
+            return new ClockUpdateResult(ClockUpdateKind.IgnoredJitter, currentEst, currentEst);
+        }
+
         if (!sameTrack)
         {
-            WriteAnchor(trackKey, reportedNow, nowTicks, rate, safeStart, safeEnd, isPlaying, TimeSpan.Zero);
+            WriteAnchor(trackKey, reportedNow, nowTicks, rate, safeStart, safeEnd, isPlaying, TimeSpan.Zero, reportedPosition, timelineLastUpdatedUtc);
             return new ClockUpdateResult(ClockUpdateKind.HardSnap, currentEst, reportedNow);
         }
 
@@ -97,14 +110,14 @@ public sealed class MonotonicPlaybackClock
         if (current.IsPlaying && !isPlaying)
         {
             var frozen = ClampPosition(currentEst, safeStart, safeEnd);
-            WriteAnchor(trackKey, frozen, nowTicks, rate, safeStart, safeEnd, isPlaying: false, TimeSpan.Zero);
+            WriteAnchor(trackKey, frozen, nowTicks, rate, safeStart, safeEnd, isPlaying: false, TimeSpan.Zero, reportedPosition, timelineLastUpdatedUtc);
             return new ClockUpdateResult(ClockUpdateKind.PausedFreeze, currentEst, frozen);
         }
 
         // Transition Paused -> Playing or still Paused with new position.
         if (!current.IsPlaying)
         {
-            WriteAnchor(trackKey, reportedNow, nowTicks, rate, safeStart, safeEnd, isPlaying, TimeSpan.Zero);
+            WriteAnchor(trackKey, reportedNow, nowTicks, rate, safeStart, safeEnd, isPlaying, TimeSpan.Zero, reportedPosition, timelineLastUpdatedUtc);
             return new ClockUpdateResult(ClockUpdateKind.HardSnap, currentEst, reportedNow);
         }
 
@@ -118,11 +131,11 @@ public sealed class MonotonicPlaybackClock
 
         if (absDrift <= MaxSmoothSlewDrift)
         {
-            WriteAnchor(trackKey, currentEst, nowTicks, rate, safeStart, safeEnd, isPlaying: true, pendingDrift: drift);
+            WriteAnchor(trackKey, currentEst, nowTicks, rate, safeStart, safeEnd, isPlaying: true, pendingDrift: drift, reportedPosition, timelineLastUpdatedUtc);
             return new ClockUpdateResult(ClockUpdateKind.SmoothSlew, currentEst, reportedNow);
         }
 
-        WriteAnchor(trackKey, reportedNow, nowTicks, rate, safeStart, safeEnd, isPlaying: true, pendingDrift: TimeSpan.Zero);
+        WriteAnchor(trackKey, reportedNow, nowTicks, rate, safeStart, safeEnd, isPlaying: true, pendingDrift: TimeSpan.Zero, reportedPosition, timelineLastUpdatedUtc);
         return new ClockUpdateResult(ClockUpdateKind.SeekSnap, currentEst, reportedNow);
     }
 
@@ -189,7 +202,9 @@ public sealed class MonotonicPlaybackClock
         TimeSpan startTime,
         TimeSpan endTime,
         bool isPlaying,
-        TimeSpan pendingDrift)
+        TimeSpan pendingDrift,
+        TimeSpan lastReportedPosition,
+        DateTimeOffset lastTimelineUpdatedUtc)
     {
         Volatile.Write(
             ref _anchor,
@@ -202,7 +217,9 @@ public sealed class MonotonicPlaybackClock
                 StartTime: startTime,
                 EndTime: endTime,
                 IsPlaying: isPlaying,
-                PendingDrift: pendingDrift));
+                PendingDrift: pendingDrift,
+                LastReportedPosition: lastReportedPosition,
+                LastTimelineUpdatedUtc: lastTimelineUpdatedUtc));
     }
 
     private static TimeSpan ClampPosition(TimeSpan position, TimeSpan startTime, TimeSpan endTime)
@@ -229,7 +246,9 @@ public sealed class MonotonicPlaybackClock
         TimeSpan StartTime,
         TimeSpan EndTime,
         bool IsPlaying,
-        TimeSpan PendingDrift)
+        TimeSpan PendingDrift,
+        TimeSpan LastReportedPosition,
+        DateTimeOffset LastTimelineUpdatedUtc)
     {
         public static ClockAnchorBox Empty { get; } = new(
             HasAnchor: false,
@@ -240,6 +259,8 @@ public sealed class MonotonicPlaybackClock
             StartTime: TimeSpan.Zero,
             EndTime: TimeSpan.Zero,
             IsPlaying: false,
-            PendingDrift: TimeSpan.Zero);
+            PendingDrift: TimeSpan.Zero,
+            LastReportedPosition: TimeSpan.Zero,
+            LastTimelineUpdatedUtc: DateTimeOffset.MinValue);
     }
 }

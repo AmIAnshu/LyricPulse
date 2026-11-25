@@ -1,3 +1,4 @@
+using LyricPulse.Core.Audio;
 using LyricPulse.Core.Lyrics;
 using LyricPulse.Core.Models;
 
@@ -16,7 +17,8 @@ internal static class OverlaySnapshotBuilder
         long nowTimestamp,
         long timestampFrequency,
         Func<VisualPreference, LyricsDocument> demoDocumentResolver,
-        Func<TimeSpan> livePositionResolver)
+        Func<TimeSpan> livePositionResolver,
+        Func<double, bool, float, AudioFrameMetrics>? audioMetricsResolver = null)
     {
         var targetPalette = ResolveTargetPalette(state);
         var activePalette = state.Settings.AutoSyncColors
@@ -24,8 +26,8 @@ internal static class OverlaySnapshotBuilder
             : targetPalette;
 
         return state.IsDemoMode
-            ? BuildDemoSnapshot(state, nowTimestamp, timestampFrequency, demoDocumentResolver, activePalette, targetPalette)
-            : BuildLiveSnapshot(state, livePositionResolver, activePalette, targetPalette);
+            ? BuildDemoSnapshot(state, nowTimestamp, timestampFrequency, demoDocumentResolver, activePalette, targetPalette, audioMetricsResolver)
+            : BuildLiveSnapshot(state, nowTimestamp, timestampFrequency, livePositionResolver, activePalette, targetPalette, audioMetricsResolver);
     }
 
     public static bool CanAdjustTimingOffset(RuntimeStateBox state)
@@ -77,7 +79,8 @@ internal static class OverlaySnapshotBuilder
         long timestampFrequency,
         Func<VisualPreference, LyricsDocument> demoDocumentResolver,
         AlbumAccentPalette activePalette,
-        AlbumAccentPalette targetPalette)
+        AlbumAccentPalette targetPalette,
+        Func<double, bool, float, AudioFrameMetrics>? audioMetricsResolver)
     {
         var demoDoc = state.DemoDocument ?? demoDocumentResolver(state.Settings.VisualPreference);
         var elapsedSec = Math.Max(0L, nowTimestamp - state.DemoStartTimestamp) / (double)timestampFrequency;
@@ -85,6 +88,10 @@ internal static class OverlaySnapshotBuilder
         var rawPos = TimeSpan.FromSeconds(loopSec);
         var effectivePos = TimingOffsetService.ComputeEffectiveLookupTime(rawPos, state.TimingOffset.Offset, DemoSongProvider.LoopDuration);
         var slice = ActiveLyricSlice.Resolve(demoDoc, effectivePos, DemoSongProvider.LoopDuration);
+        var audioMetrics = state.IsEffectiveReducedMotion
+            ? AudioFrameMetrics.Silent
+            : audioMetricsResolver?.Invoke(elapsedSec, true, state.Settings.PartyEnergyLevel)
+              ?? AudioSpectrumAnalyzer.ComputeSyntheticPulse(elapsedSec, true, state.Settings.PartyEnergyLevel);
 
         return new OverlayPlaybackSnapshot(
             Track: demoDoc.Track,
@@ -110,20 +117,31 @@ internal static class OverlaySnapshotBuilder
             IsOsReducedMotion: state.IsOsReducedMotion,
             OffsetGeneration: state.OffsetGeneration,
             IsStageWindowOpen: state.IsStageWindowOpen,
-            TrackMoodVisual: state.DemoMoodVisual);
+            TrackMoodVisual: state.DemoMoodVisual,
+            AlbumArt: null,
+            AudioMetrics: audioMetrics);
     }
 
     private static OverlayPlaybackSnapshot BuildLiveSnapshot(
         RuntimeStateBox state,
+        long nowTimestamp,
+        long timestampFrequency,
         Func<TimeSpan> livePositionResolver,
         AlbumAccentPalette activePalette,
-        AlbumAccentPalette targetPalette)
+        AlbumAccentPalette targetPalette,
+        Func<double, bool, float, AudioFrameMetrics>? audioMetricsResolver)
     {
         var session = state.LiveSession;
         var rawLivePos = livePositionResolver();
         var duration = state.LiveTrack?.Duration ?? session?.EndTime ?? TimeSpan.Zero;
         var effectiveLivePos = TimingOffsetService.ComputeEffectiveLookupTime(rawLivePos, state.TimingOffset.Offset, duration);
         var liveSlice = ActiveLyricSlice.Resolve(state.LiveDocument, effectiveLivePos, duration);
+        var isPlaying = session?.PlaybackState == MediaPlaybackState.Playing;
+        var timeSec = nowTimestamp / (double)timestampFrequency;
+        var audioMetrics = state.IsEffectiveReducedMotion
+            ? AudioFrameMetrics.Silent
+            : audioMetricsResolver?.Invoke(timeSec, isPlaying, state.Settings.PartyEnergyLevel)
+              ?? AudioSpectrumAnalyzer.ComputeSyntheticPulse(timeSec, isPlaying, state.Settings.PartyEnergyLevel);
 
         return new OverlayPlaybackSnapshot(
             Track: state.LiveTrack,
@@ -139,7 +157,7 @@ internal static class OverlaySnapshotBuilder
             TargetPalette: targetPalette,
             TimingOffset: state.TimingOffset,
             Settings: state.Settings,
-            IsPlaying: session?.PlaybackState == MediaPlaybackState.Playing,
+            IsPlaying: isPlaying,
             IsDemoMode: false,
             IsFullscreenHidden: state.IsFullscreenHidden,
             PausedSinceUtc: state.PausedSinceUtc,
@@ -149,6 +167,8 @@ internal static class OverlaySnapshotBuilder
             IsOsReducedMotion: state.IsOsReducedMotion,
             OffsetGeneration: state.OffsetGeneration,
             IsStageWindowOpen: state.IsStageWindowOpen,
-            TrackMoodVisual: state.LiveMoodVisual);
+            TrackMoodVisual: state.LiveMoodVisual,
+            AlbumArt: state.LiveAlbumArt,
+            AudioMetrics: audioMetrics);
     }
 }

@@ -148,10 +148,9 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
         }
 
         var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet);
-        var dotProgress = (float)Math.Clamp(slice.WordProgress, 0.0, 1.0);
-        var dotTargetX = anchorX + ((dotProgress - 0.5f) * Math.Min(packet.ViewportWidthDip * 0.28f, fontSize * 3.0f));
+        var dotTargetX = anchorX;
         var dotTargetY = anchorY + (fontSize * 0.62f);
-        var dotActive = packet.ShowFollowingDot && _aesthetics.AdvanceDot(dotTargetX, dotTargetY, dt, reducedMotion: false, _lastWordDurationSec);
+        var dotActive = packet.ShowFollowingDot && _aesthetics.AdvanceDot(wordKey, dotTargetX, dotTargetY, dt, reducedMotion: false, _lastWordDurationSec);
 
         return !_scrollOffsetY.IsAtRest ||
                !_activeScale.IsAtRest ||
@@ -325,8 +324,7 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
         }
 
         // Following Pulse Dot & optional bilingual sub-line rendered crisply above lens pass
-        var activeW = TextShaperService.MeasureWidth(activeWord.Text, font, context.Fonts) * fitScale;
-        var fallbackDotX = destRect.MidX + (((float)Math.Clamp(slice.WordProgress, 0.0, 1.0) - 0.5f) * activeW);
+        var fallbackDotX = destRect.MidX;
         var fallbackDotY = destRect.MidY + (fontSize * fitScale * 0.62f);
         _aesthetics.DrawFollowingDot(context.Canvas, packet, fallbackDotX, fallbackDotY, Math.Clamp(fontSize * 0.09f, 3.2f, 8f));
 
@@ -386,6 +384,9 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
                 glowColor: null);
         }
 
+        var prevShiftX = (_lastWordKey.WordIndex % 2 == 0 ? -1f : 1f) * Math.Min(font.Size * 0.24f, 16f);
+        var nextShiftX = -prevShiftX * 0.85f;
+
         if (prevWord is not null)
         {
             DrawWordSlot(
@@ -394,7 +395,7 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
                 font,
                 fontId,
                 prevWord.Text,
-                centerX,
+                centerX + prevShiftX,
                 centerY - slotPitch + scrollY,
                 ContextWordScale * fitScale,
                 packet.Palette.AccentColor3,
@@ -410,7 +411,7 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
                 font,
                 fontId,
                 nextWord.Text,
-                centerX,
+                centerX + nextShiftX,
                 centerY + slotPitch + scrollY,
                 ContextWordScale * fitScale,
                 packet.Palette.AccentColor3,
@@ -419,9 +420,8 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
         }
 
         var activeScale = (reducedMotion ? 1.00f : _activeScale.Value) * fitScale;
-        // Under Reduced Motion, keep active word opacity >= 0.90f so it never dips below previous word (0.54f)
         var activeOpacity = reducedMotion ? (0.90f + (0.10f * highlightEased)) : 1.0f;
-        var activeColor = StyleLayoutHelper.BlendSrgb(packet.Palette.AccentColor3, packet.Palette.AccentColor1, highlightEased);
+        var activeColor = StyleLayoutHelper.BlendSrgb(packet.Palette.AccentColor1, SKColors.White.ToRgb(), 0.42f * highlightEased);
 
         var activeMeasuredW = TextShaperService.MeasureWidth(activeWord.Text, font, context.Fonts) * activeScale;
         var activeH = font.Size * activeScale * 1.05f;
@@ -432,9 +432,36 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
             centerY + scrollY + (activeH * 0.5f));
         _aesthetics.DrawWordColorSweep(canvas, sweepRect, wordProgress, packet, activeOpacity);
 
-        var tiltDeg = !reducedMotion && packet.SafePartyEnergy > 1.05f
-            ? ((_lastWordKey.WordIndex % 2 == 0 ? 1f : -1f) * (packet.SafePartyEnergy - 1.0f) * 3.4f)
+        var tiltDeg = !reducedMotion && packet.SafePartyEnergy > 1.02f
+            ? ((_lastWordKey.WordIndex % 2 == 0 ? 1f : -1f) * Math.Max(1.6f, (packet.SafePartyEnergy - 1.0f) * 3.4f))
             : 0f;
+
+        var useCutout = !reducedMotion && !packet.IsCompactCard && packet.ShowColorSweepLayer && activeWord.Text.Length >= 4 && (_lastWordKey.WordIndex % 3 == 1);
+        if (useCutout)
+        {
+            var cutSave = canvas.Save();
+            try
+            {
+                canvas.Translate(centerX, centerY + scrollY);
+                canvas.Scale(activeScale, activeScale);
+                _aesthetics.DrawInvertedCutoutWord(
+                    canvas,
+                    in context,
+                    font,
+                    activeWord.Text,
+                    0f,
+                    0f,
+                    TextShaperService.MeasureWidth(activeWord.Text, font, context.Fonts),
+                    tiltDeg == 0f ? -1.8f : tiltDeg,
+                    activeOpacity);
+            }
+            finally
+            {
+                canvas.RestoreToCount(cutSave);
+            }
+
+            return;
+        }
 
         DrawWordSlot(
             canvas,

@@ -138,10 +138,9 @@ public sealed class FisheyeVisualStyleRenderer : IKineticStyleRenderer
         }
 
         var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet);
-        var dotProgress = (float)Math.Clamp(slice.WordProgress, 0.0, 1.0);
-        var dotTargetX = anchorX + ((dotProgress - 0.5f) * Math.Min(packet.ViewportWidthDip * 0.28f, fontSize * 3.2f));
+        var dotTargetX = anchorX;
         var dotTargetY = anchorY + (fontSize * 0.66f);
-        var dotActive = packet.ShowFollowingDot && _aesthetics.AdvanceDot(dotTargetX, dotTargetY, dt, reducedMotion: false, _lastWordDurationSec);
+        var dotActive = packet.ShowFollowingDot && _aesthetics.AdvanceDot(wordKey, dotTargetX, dotTargetY, dt, reducedMotion: false, _lastWordDurationSec);
 
         return !_scrollOffsetY.IsAtRest ||
                !_activeScale.IsAtRest ||
@@ -314,8 +313,7 @@ public sealed class FisheyeVisualStyleRenderer : IKineticStyleRenderer
                 AllowCpuShadersForTesting);
         }
 
-        var activeW = TextShaperService.MeasureWidth(activeWord.Text, font, context.Fonts) * fitScale;
-        var dotX = destRect.MidX + (((float)Math.Clamp(slice.WordProgress, 0.0, 1.0) - 0.5f) * activeW);
+        var dotX = destRect.MidX;
         var dotY = destRect.MidY + (fontSize * fitScale * 0.68f);
         _aesthetics.DrawFollowingDot(context.Canvas, packet, dotX, dotY, Math.Clamp(fontSize * 0.09f, 3.0f, 8.0f));
 
@@ -359,6 +357,8 @@ public sealed class FisheyeVisualStyleRenderer : IKineticStyleRenderer
         var packet = context.Packet;
         var scrollY = reducedMotion ? 0f : _scrollOffsetY.Value;
         var highlightEased = Ease.Highlight(_highlightFade);
+        var prevShiftX = reducedMotion ? 0f : -Math.Clamp(slotPitch * 0.42f, 16f, 44f) * fitScale;
+        var nextShiftX = reducedMotion ? 0f : Math.Clamp(slotPitch * 0.48f, 18f, 48f) * fitScale;
 
         if (prevWord is not null)
         {
@@ -370,7 +370,7 @@ public sealed class FisheyeVisualStyleRenderer : IKineticStyleRenderer
                 prevWord.Text,
                 prevWord.Visual,
                 iconOnLeft: ((activeWordIndex - 1) & 1) != 0,
-                centerX,
+                centerX + prevShiftX,
                 centerY - slotPitch + scrollY,
                 ContextWordScale * fitScale,
                 iconScaleMultiplier: 0.78f,
@@ -393,7 +393,7 @@ public sealed class FisheyeVisualStyleRenderer : IKineticStyleRenderer
                 nextWord.Text,
                 nextWord.Visual,
                 iconOnLeft: ((activeWordIndex + 1) & 1) != 0,
-                centerX,
+                centerX + nextShiftX,
                 centerY + slotPitch + scrollY,
                 ContextWordScale * fitScale,
                 iconScaleMultiplier: 0.68f,
@@ -406,7 +406,7 @@ public sealed class FisheyeVisualStyleRenderer : IKineticStyleRenderer
                 wordProgress: 0.0);
         }
 
-        var activeVisual = StyleLayoutHelper.ResolveWordVisual(activeWord, packet, allowTrackMoodFallback: true);
+        var activeVisual = StyleLayoutHelper.ResolveWordVisual(activeWord, packet, allowTrackMoodFallback: false);
         var activeScale = (reducedMotion ? 1.00f : _activeScale.Value) * fitScale;
         var activeOpacity = reducedMotion ? (0.90f + (0.10f * highlightEased)) : 1.0f;
         var activeColor = StyleLayoutHelper.BlendSrgb(packet.Palette.AccentColor3, packet.Palette.AccentColor1, highlightEased);
@@ -520,16 +520,15 @@ public sealed class FisheyeVisualStyleRenderer : IKineticStyleRenderer
                         }
                     }
 
-                    StyleLayoutHelper.DrawVisualGlyph(
+                    _aesthetics.DrawReactiveVisual(
                         canvas,
-                        context.Fonts,
-                        context.Legibility,
+                        in context,
                         visual,
                         centerX: 0f,
                         centerY: 0f,
-                        iconSizeDip: iconSize,
-                        tintColor: iconTint,
-                        opacity: opacity);
+                        iconSizeDip: iconSize * 1.15f,
+                        opacity: opacity,
+                        isActive: isActive);
                 }
                 finally
                 {
@@ -593,7 +592,7 @@ public sealed class FisheyeVisualStyleRenderer : IKineticStyleRenderer
         FrameRenderPacket packet)
     {
         var iconAllowance = font.Size * 1.25f;
-        var activeHasVisual = StyleLayoutHelper.ResolveWordVisual(active, packet, allowTrackMoodFallback: true) is not null;
+        var activeHasVisual = StyleLayoutHelper.ResolveWordVisual(active, packet, allowTrackMoodFallback: false) is not null;
         var maxW = TextShaperService.MeasureWidth(active.Text, font, fonts) + (activeHasVisual ? iconAllowance : 0f);
         if (prev is not null)
         {

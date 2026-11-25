@@ -8,27 +8,33 @@ using SkiaSharp;
 namespace LyricPulse.Rendering.Styles;
 
 /// <summary>
-/// Style #7 — Spider's Web: radial geometric web spun outward from viewport center with
-/// 3 softly sagging catenary concentric silk rings, plucked-strand transverse damped vibration
-/// on word onset, and strictly upright (<c>0°</c>) anchored dew-node labels.
+/// Style #7 — Spider's Web (Verci-inspired): delicate sagging concentric orb-weaver silk rings,
+/// plucked-strand transverse vibration on word onset, stylized white translucent spider weaving smoothly
+/// along the active silk thread, and upright word labels anchored on radial tiers.
 /// </summary>
 public sealed class SpidersWebStyleRenderer : IKineticStyleRenderer
 {
-    private static readonly float[] RingRatios = [0.36f, 0.66f, 0.94f];
+    private static readonly float[] RingRatios = [0.24f, 0.44f, 0.66f, 0.88f];
 
     private readonly AestheticsOverlayRenderer _aesthetics = new();
-    private readonly SKPaint _ringPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.05f };
+    private readonly SKPaint _ringPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 0.95f };
     private readonly SKPaint _spokePaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round };
     private readonly SKPaint _spokeGlowPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round };
     private readonly SKPaint _dewPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _spiderBodyPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _spiderLegPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round };
     private readonly SKPath _silkPath = new();
+    private readonly SKPath _legPath = new();
     private readonly SKImageFilter _glowBlur = SKImageFilter.CreateBlur(5.0f, 5.0f);
 
     private SpringState _wordScale = SpringState.AtRest(1.05f);
+    private SpringState _spiderX = SpringState.AtRest(0f);
+    private SpringState _spiderY = SpringState.AtRest(0f);
     private float _twangElapsedSec = 0.40f;
     private float _highlightFade = 1.0f;
     private (int LineIndex, int WordIndex) _lastWordKey = (-1, -1);
     private float _lastWordDurationSec = 0.32f;
+    private bool _hasSpiderPos;
     private bool _disposed;
 
     public OverlayStyleId StyleId => OverlayStyleId.SpidersWeb;
@@ -36,6 +42,9 @@ public sealed class SpidersWebStyleRenderer : IKineticStyleRenderer
     public void ResetState()
     {
         _wordScale = SpringState.AtRest(1.05f);
+        _spiderX = SpringState.AtRest(0f);
+        _spiderY = SpringState.AtRest(0f);
+        _hasSpiderPos = false;
         _twangElapsedSec = 0.40f;
         _highlightFade = 1.0f;
         _lastWordKey = (-1, -1);
@@ -52,13 +61,13 @@ public sealed class SpidersWebStyleRenderer : IKineticStyleRenderer
         }
 
         var dt = Math.Clamp(packet.DeltaSeconds, 0f, SpringState.MaxDeltaSeconds);
-        var activeIdx = slice.CurrentLine.Words.IsEmpty
-            ? 0
-            : Math.Clamp(slice.ActiveWordIndex, 0, slice.CurrentLine.Words.Length - 1);
+        var words = slice.CurrentLine.Words;
+        var wordCount = words.IsEmpty ? 1 : words.Length;
+        var activeIdx = Math.Clamp(slice.ActiveWordIndex, 0, wordCount - 1);
 
-        if (!slice.CurrentLine.Words.IsEmpty)
+        if (!words.IsEmpty)
         {
-            var word = slice.CurrentLine.Words[activeIdx];
+            var word = words[activeIdx];
             _lastWordDurationSec = Math.Clamp((float)(word.EndTime - word.StartTime).TotalSeconds, 0.08f, 2.5f);
         }
 
@@ -74,7 +83,7 @@ public sealed class SpidersWebStyleRenderer : IKineticStyleRenderer
             }
             else
             {
-                _wordScale = new SpringState(Value: 0.85f, Velocity: 0f, Target: 1.05f + ((packet.SafePartyEnergy - 1f) * 0.08f));
+                _wordScale = new SpringState(Value: 0.85f, Velocity: 0f, Target: 1.06f + ((packet.SafePartyEnergy - 1f) * 0.08f));
                 _twangElapsedSec = 0f;
                 _highlightFade = 0f;
             }
@@ -90,19 +99,45 @@ public sealed class SpidersWebStyleRenderer : IKineticStyleRenderer
         {
             _wordScale = SpringState.AtRest(1.00f);
             _twangElapsedSec = 0.40f;
+            _hasSpiderPos = false;
             _aesthetics.ResetDot();
             return _highlightFade < 0.999f;
         }
 
+        var (cx, cy, radius) = ComputeWebMetrics(packet);
+        var spokeCount = Math.Max(wordCount, 7);
+        var seed = StyleLayoutHelper.DeterministicHash(slice.CurrentLine.Index, slice.CurrentLine.RawText);
+        var angle = ComputeSpokeAngle(activeIdx, spokeCount, seed);
+        var tierRatio = (activeIdx % 2 == 0) ? 0.56f : 0.82f;
+        var nx = cx + (MathF.Cos(angle) * radius * tierRatio);
+        var ny = cy + (MathF.Sin(angle) * radius * tierRatio);
+
+        // Spider hovers gracefully between center hub and active node
+        var spiderTargetX = cx + ((nx - cx) * 0.44f);
+        var spiderTargetY = cy + ((ny - cy) * 0.44f);
+        if (!_hasSpiderPos)
+        {
+            _spiderX = SpringState.AtRest(spiderTargetX);
+            _spiderY = SpringState.AtRest(spiderTargetY);
+            _hasSpiderPos = true;
+        }
+        else
+        {
+            _spiderX = _spiderX.WithTarget(spiderTargetX).Step(SpringTokens.WordEnter.WithTempoCompression(_lastWordDurationSec), dt);
+            _spiderY = _spiderY.WithTarget(spiderTargetY).Step(SpringTokens.WordEnter.WithTempoCompression(_lastWordDurationSec), dt);
+        }
+
         var spring = SpringTokens.WordSnap.WithTempoCompression(_lastWordDurationSec);
         _wordScale = _wordScale.Step(spring, dt);
+        var dotActive = packet.ShowFollowingDot && _aesthetics.AdvanceDot(key, nx, ny, dt, reducedMotion: false, _lastWordDurationSec);
+
         if (_twangElapsedSec < 0.34f)
         {
             _twangElapsedSec = Math.Min(0.34f, _twangElapsedSec + dt);
         }
 
         var isPlaying = packet.PlaybackSnapshot?.IsPlaying ?? true;
-        return !_wordScale.IsAtRest || _twangElapsedSec < 0.34f || _highlightFade < 0.999f || isPlaying;
+        return !_wordScale.IsAtRest || !_spiderX.IsAtRest || dotActive || _twangElapsedSec < 0.34f || _highlightFade < 0.999f || isPlaying;
     }
 
     public void Render(in StyleRenderContext context, in LifecycleFrameState lifecycle)
@@ -117,13 +152,10 @@ public sealed class SpidersWebStyleRenderer : IKineticStyleRenderer
         }
 
         var fontId = packet.ActiveFontId;
-        var fontSize = StyleLayoutHelper.ResolveStyleFontSize(packet, styleMultiplier: 0.64f);
+        var fontSize = StyleLayoutHelper.ResolveStyleFontSize(packet, styleMultiplier: 0.62f);
         var font = context.Fonts.GetOrCreateFont(fontId, fontSize, enforceMinOverlayFloor: !packet.IsCompactCard);
 
-        var (cx, cy) = StyleLayoutHelper.ComputeAnchorPoint(packet, 0.50f, 0.50f);
-        var radius = MathF.Min(packet.ViewportWidthDip * (packet.IsCompactCard ? 0.40f : 0.33f), packet.ViewportHeightDip * (packet.IsCompactCard ? 0.42f : 0.36f));
-        radius = Math.Max(radius, 42f);
-
+        var (cx, cy, radius) = ComputeWebMetrics(packet);
         var scrimRect = new SKRect(cx - radius, cy - radius, cx + radius, cy + radius);
         context.Legibility.DrawAmbientScrim(
             context.Canvas,
@@ -141,23 +173,18 @@ public sealed class SpidersWebStyleRenderer : IKineticStyleRenderer
         }
 
         var activeIdx = Math.Clamp(slice.ActiveWordIndex, 0, wordCount - 1);
-        var spokeCount = Math.Max(wordCount, 6);
+        var spokeCount = Math.Max(wordCount, 7);
         var seed = StyleLayoutHelper.DeterministicHash(slice.CurrentLine.Index, slice.CurrentLine.RawText);
 
         Span<float> angles = spokeCount <= 32 ? stackalloc float[spokeCount] : new float[spokeCount];
-        const float startAngleRad = -115f * (MathF.PI / 180f);
-        var stepRad = (2f * MathF.PI) / spokeCount;
         for (var i = 0; i < spokeCount; i++)
         {
-            var jitterDeg = ((((seed >> (i % 16)) & 0xF) / 15f) - 0.5f) * 8f;
-            angles[i] = startAngleRad + (i * stepRad) + (jitterDeg * (MathF.PI / 180f));
+            angles[i] = ComputeSpokeAngle(i, spokeCount, seed);
         }
 
-        // 1. Concentric sagging catenary silk rings
         DrawCatenaryRings(context.Canvas, cx, cy, radius, angles, packet);
 
-        // 2. Radial spokes with plucked-strand transverse vibration on active spoke
-        var spinFraction = packet.ReducedMotion ? 1.0f : (float)Math.Clamp(slice.WordProgress / 0.45, 0.15, 1.0);
+        var spinFraction = packet.ReducedMotion ? 1.0f : (float)Math.Clamp(slice.WordProgress / 0.45, 0.25, 1.0);
         var twangAmp = packet.ReducedMotion
             ? 0f
             : 4.5f * MathF.Exp(-9f * _twangElapsedSec) * MathF.Sin(42f * _twangElapsedSec) * packet.SafePartyEnergy;
@@ -183,8 +210,8 @@ public sealed class SpidersWebStyleRenderer : IKineticStyleRenderer
                 _silkPath.MoveTo(cx, cy);
                 _silkPath.QuadTo(mx, my, ex, ey);
 
-                _spokeGlowPaint.StrokeWidth = 5.0f;
-                _spokeGlowPaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha(0.45f);
+                _spokeGlowPaint.StrokeWidth = 4.8f;
+                _spokeGlowPaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha(0.42f);
                 _spokeGlowPaint.ImageFilter = _glowBlur;
                 try
                 {
@@ -195,27 +222,28 @@ public sealed class SpidersWebStyleRenderer : IKineticStyleRenderer
                     _spokeGlowPaint.ImageFilter = null;
                 }
 
-                _spokePaint.StrokeWidth = 1.9f;
-                _spokePaint.Color = packet.Palette.AccentColor1.ToSkColorWithAlpha(0.95f);
+                _spokePaint.StrokeWidth = 1.8f;
+                _spokePaint.Color = SKColors.White.WithAlpha(235);
                 context.Canvas.DrawPath(_silkPath, _spokePaint);
             }
             else
             {
-                _spokePaint.StrokeWidth = isActive ? 1.9f : (isPast ? 1.4f : 1.0f);
+                _spokePaint.StrokeWidth = isActive ? 1.8f : (isPast ? 1.2f : 0.85f);
                 _spokePaint.Color = isActive
-                    ? packet.Palette.AccentColor1.ToSkColorWithAlpha(0.95f)
+                    ? SKColors.White.WithAlpha(235)
                     : isPast
-                        ? packet.Palette.AccentColor2.ToSkColorWithAlpha(0.58f)
-                        : packet.Palette.AccentColor3.ToSkColorWithAlpha(0.24f);
+                        ? packet.Palette.AccentColor1.ToSkColorWithAlpha(0.55f)
+                        : packet.Palette.AccentColor3.ToSkColorWithAlpha(0.22f);
                 context.Canvas.DrawLine(cx, cy, ex, ey, _spokePaint);
             }
         }
 
-        // Hub anchor glow
-        _dewPaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha(0.75f);
-        context.Canvas.DrawCircle(cx, cy, packet.IsCompactCard ? 2.5f : 4.0f, _dewPaint);
+        // Stylized translucent Verci white spider perched near center facing active word
+        var sx = !packet.ReducedMotion && _hasSpiderPos ? _spiderX.Value : cx;
+        var sy = !packet.ReducedMotion && _hasSpiderPos ? _spiderY.Value : cy;
+        DrawStylizedSpider(context.Canvas, sx, sy, angles[activeIdx], packet.IsCompactCard ? 0.55f : 1.0f, (float)packet.RenderTimeSeconds, packet.ReducedMotion);
 
-        // 3. Strictly upright (0° horizontal) word labels anchored on alternating radial tiers
+        // Upright dew-node word labels
         var highlightEased = Ease.Highlight(_highlightFade);
         var activeNodeX = cx;
         var activeNodeY = cy;
@@ -224,7 +252,7 @@ public sealed class SpidersWebStyleRenderer : IKineticStyleRenderer
         {
             var text = words.IsEmpty ? slice.CurrentLine.RawText : words[i].Text;
             var angle = angles[i];
-            var tierRatio = (i % 2 == 0) ? 0.54f : 0.80f;
+            var tierRatio = (i % 2 == 0) ? 0.56f : 0.82f;
             var nx = cx + (MathF.Cos(angle) * radius * tierRatio);
             var ny = cy + (MathF.Sin(angle) * radius * tierRatio);
             var isActive = i == activeIdx;
@@ -237,17 +265,17 @@ public sealed class SpidersWebStyleRenderer : IKineticStyleRenderer
             }
 
             _dewPaint.Color = isActive
-                ? packet.Palette.AccentColor1.ToSkColorWithAlpha(1.0f)
+                ? SKColors.White
                 : isPast
-                    ? packet.Palette.AccentColor2.ToSkColorWithAlpha(0.80f)
-                    : packet.Palette.AccentColor3.ToSkColorWithAlpha(0.42f);
-            context.Canvas.DrawCircle(nx, ny, isActive ? (packet.IsCompactCard ? 3.5f : 5.2f) : (packet.IsCompactCard ? 2.0f : 3.0f), _dewPaint);
+                    ? packet.Palette.AccentColor1.ToSkColorWithAlpha(0.82f)
+                    : packet.Palette.AccentColor3.ToSkColorWithAlpha(0.38f);
+            context.Canvas.DrawCircle(nx, ny, isActive ? (packet.IsCompactCard ? 3.2f : 4.8f) : (packet.IsCompactCard ? 1.8f : 2.6f), _dewPaint);
 
             var labelOpacity = isActive
                 ? (packet.ReducedMotion ? (0.90f + (0.10f * highlightEased)) : 1.0f)
-                : isPast ? 0.72f : 0.36f;
+                : isPast ? 0.74f : 0.34f;
             var labelColor = isActive
-                ? StyleLayoutHelper.BlendSrgb(packet.Palette.AccentColor3, packet.Palette.AccentColor1, highlightEased)
+                ? StyleLayoutHelper.BlendSrgb(packet.Palette.AccentColor1, SKColors.White.ToRgb(), 0.45f * highlightEased)
                 : packet.Palette.AccentColor3;
             var labelScale = isActive ? (packet.ReducedMotion ? 1.0f : _wordScale.Value) : 0.90f;
 
@@ -285,7 +313,7 @@ public sealed class SpidersWebStyleRenderer : IKineticStyleRenderer
             }
         }
 
-        _aesthetics.DrawFollowingDot(context.Canvas, packet, activeNodeX, activeNodeY, Math.Clamp(fontSize * 0.14f, 3.0f, 6.5f));
+        _aesthetics.DrawFollowingDot(context.Canvas, packet, activeNodeX, activeNodeY, Math.Clamp(fontSize * 0.14f, 3.0f, 6.2f));
 
         StyleLayoutHelper.DrawSecondarySubline(
             in context,
@@ -308,45 +336,102 @@ public sealed class SpidersWebStyleRenderer : IKineticStyleRenderer
         _spokePaint.Dispose();
         _spokeGlowPaint.Dispose();
         _dewPaint.Dispose();
+        _spiderBodyPaint.Dispose();
+        _spiderLegPaint.Dispose();
         _silkPath.Dispose();
+        _legPath.Dispose();
         _glowBlur.Dispose();
+    }
+
+    private void DrawStylizedSpider(SKCanvas canvas, float sx, float sy, float facingRad, float scale, float timeSec, bool reducedMotion)
+    {
+        var save = canvas.Save();
+        try
+        {
+            canvas.Translate(sx, sy);
+            canvas.RotateDegrees((facingRad * (180f / MathF.PI)) + 90f);
+            canvas.Scale(scale, scale);
+
+            var legJitter = reducedMotion ? 0f : MathF.Sin(timeSec * 14f) * 1.6f;
+
+            // 8 graceful orb-weaver articulated silk legs
+            _spiderLegPaint.StrokeWidth = 1.6f;
+            _spiderLegPaint.Color = new SKColor(0xF8, 0xFA, 0xFC, 215);
+            for (var side = -1; side <= 1; side += 2)
+            {
+                for (var leg = 0; leg < 4; leg++)
+                {
+                    var yAnchor = -4f + (leg * 3.5f);
+                    var spreadY = -18f + (leg * 12f) + ((leg % 2 == 0 ? 1 : -1) * legJitter);
+                    var kneeX = side * (16f + (leg == 1 || leg == 2 ? 4f : 0f));
+                    var tipX = side * (28f + (leg == 1 ? 6f : 0f));
+
+                    _legPath.Rewind();
+                    _legPath.MoveTo(side * 3f, yAnchor);
+                    _legPath.LineTo(kneeX, spreadY * 0.6f);
+                    _legPath.LineTo(tipX, spreadY);
+                    canvas.DrawPath(_legPath, _spiderLegPaint);
+                }
+            }
+
+            // Sleek white cephalothorax & tapered abdomen
+            _spiderBodyPaint.Color = new SKColor(0xFF, 0xFF, 0xFF, 238);
+            canvas.DrawOval(0f, -4f, 4.2f, 5.2f, _spiderBodyPaint);
+            canvas.DrawOval(0f, 6.5f, 6.0f, 8.2f, _spiderBodyPaint);
+        }
+        finally
+        {
+            canvas.RestoreToCount(save);
+        }
     }
 
     private void DrawCatenaryRings(SKCanvas canvas, float cx, float cy, float radius, ReadOnlySpan<float> angles, FrameRenderPacket packet)
     {
-        _ringPaint.Color = packet.Palette.AccentColor3.ToSkColorWithAlpha(0.28f);
+        _ringPaint.Color = new SKColor(0xFF, 0xFF, 0xFF, 48);
 
         foreach (var ringRatio in RingRatios)
         {
             var r = radius * ringRatio;
-            var sagR = r * 0.94f; // 6% inward catenary sag between spokes
             _silkPath.Rewind();
-
             for (var i = 0; i < angles.Length; i++)
             {
-                var a0 = angles[i];
-                var a1 = angles[(i + 1) % angles.Length];
-                var x0 = cx + (MathF.Cos(a0) * r);
-                var y0 = cy + (MathF.Sin(a0) * r);
+                var a1 = angles[i];
+                var a2 = angles[(i + 1) % angles.Length];
                 var x1 = cx + (MathF.Cos(a1) * r);
                 var y1 = cy + (MathF.Sin(a1) * r);
+                var x2 = cx + (MathF.Cos(a2) * r);
+                var y2 = cy + (MathF.Sin(a2) * r);
 
-                var midX = ((x0 + x1) * 0.5f) * 0.96f + (cx * 0.04f);
-                var midY = ((y0 + y1) * 0.5f) * 0.96f + (cy * 0.04f);
-                var midAngle = MathF.Atan2(midY - cy, midX - cx);
-                var ctrlX = cx + (MathF.Cos(midAngle) * sagR);
-                var ctrlY = cy + (MathF.Sin(midAngle) * sagR);
+                var midX = ((x1 + x2) * 0.5f) * 0.93f + (cx * 0.07f);
+                var midY = ((y1 + y2) * 0.5f) * 0.93f + (cy * 0.07f) + 2.5f;
 
                 if (i == 0)
                 {
-                    _silkPath.MoveTo(x0, y0);
+                    _silkPath.MoveTo(x1, y1);
                 }
 
-                _silkPath.QuadTo(ctrlX, ctrlY, x1, y1);
+                _silkPath.QuadTo(midX, midY, x2, y2);
             }
 
             _silkPath.Close();
             canvas.DrawPath(_silkPath, _ringPaint);
         }
+    }
+
+    private static (float Cx, float Cy, float Radius) ComputeWebMetrics(FrameRenderPacket packet)
+    {
+        var (cx, cy) = StyleLayoutHelper.ComputeAnchorPoint(packet, 0.50f, 0.50f);
+        var radius = MathF.Min(
+            packet.ViewportWidthDip * (packet.IsCompactCard ? 0.42f : 0.36f),
+            packet.ViewportHeightDip * (packet.IsCompactCard ? 0.44f : 0.38f));
+        return (cx, cy, Math.Max(radius, 42f));
+    }
+
+    private static float ComputeSpokeAngle(int index, int spokeCount, uint seed)
+    {
+        const float startAngleRad = -115f * (MathF.PI / 180f);
+        var stepRad = (2f * MathF.PI) / spokeCount;
+        var jitterDeg = ((((seed >> (index % 16)) & 0xF) / 15f) - 0.5f) * 8f;
+        return startAngleRad + (index * stepRad) + (jitterDeg * (MathF.PI / 180f));
     }
 }

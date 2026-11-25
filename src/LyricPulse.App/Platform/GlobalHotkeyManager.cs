@@ -85,6 +85,11 @@ public sealed class GlobalHotkeyManager : IGlobalHotkeyService
         var conflicts = new Dictionary<HotkeyAction, string>();
         foreach (var (action, gesture) in bindings)
         {
+            if (string.IsNullOrWhiteSpace(gesture))
+            {
+                continue;
+            }
+
             if (!TryRegister(action, gesture, out var err) && err is not null)
             {
                 conflicts[action] = err;

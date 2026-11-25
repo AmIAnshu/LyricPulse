@@ -146,10 +146,10 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
         }
 
         var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet, 0.50f, 0.52f);
-        var dotProgress = (float)Math.Clamp(slice.WordProgress, 0.0, 1.0);
-        var dotTargetX = anchorX + ((dotProgress - 0.5f) * Math.Min(packet.ViewportWidthDip * 0.28f, fontSize * 3.0f));
+        var dotTargetX = anchorX;
         var dotTargetY = anchorY + (fontSize * 0.62f);
-        var dotActive = packet.ShowFollowingDot && _aesthetics.AdvanceDot(dotTargetX, dotTargetY, dt, reducedMotion: false, _lastWordDurationSec);
+        var wordKey = (slice.ActiveLineIndex, slice.ActiveWordIndex);
+        var dotActive = packet.ShowFollowingDot && _aesthetics.AdvanceDot(wordKey, dotTargetX, dotTargetY, dt, reducedMotion: false, _lastWordDurationSec);
 
         return !_stackOffsetY.IsAtRest ||
                !_activeRowScale.IsAtRest ||
@@ -271,7 +271,7 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
         _aesthetics.DrawFollowingDot(
             context.Canvas,
             packet,
-            destRect.MidX + (((float)Math.Clamp(slice.WordProgress, 0.0, 1.0) - 0.5f) * fontSize * 2.4f),
+            destRect.MidX,
             destRect.MidY + (fontSize * 0.65f),
             Math.Clamp(fontSize * 0.09f, 3.0f, 7.5f));
 
@@ -442,7 +442,8 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
             };
 
             var y = centerY + (offset * rowPitch) + scrollY;
-            DrawSingleVisualRow(canvas, context, font, fontId, row, centerX, y, rowScale, rowOpacity, isActive, wordProgress);
+            var organicX = packet.IsCompactCard ? 0f : ((offset % 2 == 0 ? -1f : 1f) * 8f);
+            DrawSingleVisualRow(canvas, context, font, fontId, row, centerX + organicX, y, rowScale, rowOpacity, isActive, wordProgress);
         }
     }
 
@@ -464,13 +465,11 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
             ? row.PrimaryWord
             : $"{row.LeadingConnectors} {row.PrimaryWord}";
 
-        var effectiveVisual = row.Visual ?? (isActive && !StyleLayoutHelper.IsConnectorWord(row.PrimaryWord)
-            ? packet.PlaybackSnapshot?.TrackMoodVisual
-            : null);
+        var effectiveVisual = row.Visual;
 
         var textWidth = TextShaperService.MeasureWidth(combinedText, font, context.Fonts);
         var hasVisual = effectiveVisual is not null;
-        var badgeDiameter = font.Size * 1.18f;
+        var badgeDiameter = font.Size * 1.15f;
         var gap = font.Size * 0.34f;
         var totalWidth = textWidth + (hasVisual ? badgeDiameter + gap : 0f);
 
@@ -521,32 +520,49 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
                     font,
                     fontId,
                     prefixColor,
-                    opacity: opacity * (isActive ? 0.80f : 0.85f),
+                    opacity: opacity * (isActive ? 0.85f : 0.82f),
                     fonts: context.Fonts);
 
                 textStartX += TextShaperService.MeasureWidth(prefixWithSpace, font, context.Fonts);
             }
 
+            var primaryW = TextShaperService.MeasureWidth(row.PrimaryWord, font, context.Fonts);
             if (isActive && packet.ShowColorSweepLayer)
             {
-                var primaryW = TextShaperService.MeasureWidth(row.PrimaryWord, font, context.Fonts);
                 var sweepRect = new SKRect(textStartX, -font.Size * 0.54f, textStartX + primaryW, font.Size * 0.54f);
                 _aesthetics.DrawWordColorSweep(canvas, sweepRect, wordProgress, packet, opacity);
             }
 
-            var primaryColor = isActive ? packet.Palette.AccentColor1 : packet.Palette.AccentColor3;
-            context.Legibility.DrawLegibleText(
-                canvas,
-                row.PrimaryWord,
-                textStartX,
-                baselineY,
-                SKTextAlign.Left,
-                font,
-                fontId,
-                primaryColor,
-                opacity: opacity,
-                activeGlowColor: isActive ? packet.Palette.AccentColor2 : null,
-                fonts: context.Fonts);
+            var useCutout = isActive && !packet.ReducedMotion && !packet.IsCompactCard && packet.ShowColorSweepLayer && hasVisual;
+            if (useCutout)
+            {
+                _aesthetics.DrawInvertedCutoutWord(
+                    canvas,
+                    in context,
+                    font,
+                    row.PrimaryWord,
+                    textStartX + (primaryW * 0.5f),
+                    0f,
+                    primaryW,
+                    tiltDegrees: (row.StartWordIndex % 2 == 0 ? -1.8f : 1.8f),
+                    opacity: opacity);
+            }
+            else
+            {
+                var primaryColor = isActive ? StyleLayoutHelper.BlendSrgb(packet.Palette.AccentColor1, SKColors.White.ToRgb(), 0.40f) : packet.Palette.AccentColor3;
+                context.Legibility.DrawLegibleText(
+                    canvas,
+                    row.PrimaryWord,
+                    textStartX,
+                    baselineY,
+                    SKTextAlign.Left,
+                    font,
+                    fontId,
+                    primaryColor,
+                    opacity: opacity,
+                    activeGlowColor: isActive ? packet.Palette.AccentColor2 : null,
+                    fonts: context.Fonts);
+            }
         }
         finally
         {
@@ -583,33 +599,25 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
             canvas.Translate(cx, cy);
             canvas.Scale(popScale, popScale);
 
-            var rect = new SKRect(-radius, -radius, radius, radius);
-            var corner = diameter * 0.34f;
+            if (packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay)
+            {
+                var rect = new SKRect(-radius, -radius, radius, radius);
+                var corner = diameter * 0.34f;
+                _badgeObsidianPaint.Color = LegibilityStyleSpec.ScaleAlpha(
+                    isActive ? ActiveBadgeObsidian : InactiveBadgeObsidian,
+                    opacity * 0.80f);
+                canvas.DrawRoundRect(rect, corner, corner, _badgeObsidianPaint);
+            }
 
-            // High-contrast dark obsidian backing guarantees >= 7:1 glyph contrast over pure #FFFFFF webpages
-            _badgeObsidianPaint.Color = LegibilityStyleSpec.ScaleAlpha(
-                isActive ? ActiveBadgeObsidian : InactiveBadgeObsidian,
-                opacity);
-            canvas.DrawRoundRect(rect, corner, corner, _badgeObsidianPaint);
-
-            // Subtle album-synced accent tint layered over obsidian backing
-            _badgeTintPaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha((isActive ? 0.18f : 0.10f) * opacity);
-            canvas.DrawRoundRect(rect, corner, corner, _badgeTintPaint);
-
-            _badgeRingPaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha((isActive ? 0.72f : 0.44f) * opacity);
-            canvas.DrawRoundRect(rect, corner, corner, _badgeRingPaint);
-
-            var glyphTint = isActive ? packet.Palette.AccentColor1 : packet.Palette.AccentColor2;
-            StyleLayoutHelper.DrawVisualGlyph(
+            _aesthetics.DrawReactiveVisual(
                 canvas,
-                context.Fonts,
-                context.Legibility,
+                in context,
                 visual,
                 centerX: 0f,
                 centerY: 0f,
-                iconSizeDip: diameter * 0.62f,
-                tintColor: glyphTint,
-                opacity: opacity);
+                iconSizeDip: diameter * 0.92f,
+                opacity: opacity,
+                isActive: isActive);
         }
         finally
         {

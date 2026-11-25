@@ -23,6 +23,7 @@ public partial class StageWindow : Window, IDisposable
     private readonly StageCardCanvasHost? _heroHost;
     private readonly Dictionary<OverlayStyleId, StageCardCanvasHost> _cardHosts = new();
     private readonly DispatcherTimer _fullscreenIdleTimer;
+    private readonly DispatcherTimer _postFullscreenSettleTimer;
 
     private WindowState _stateBeforeFullscreen = WindowState.Normal;
     private bool _allowShutdownClose;
@@ -32,6 +33,7 @@ public partial class StageWindow : Window, IDisposable
     {
         InitializeComponent();
         _fullscreenIdleTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.0) };
+        _postFullscreenSettleTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
     }
 
     public StageWindow(
@@ -53,6 +55,7 @@ public partial class StageWindow : Window, IDisposable
         _heroHost = new StageCardCanvasHost(viewModel.Runtime, fonts, shaders, telemetry, rendererFactory)
         {
             SurfaceMode = StageRenderSurfaceMode.StageCanvas,
+            BottomFadeToBlack = !viewModel.IsFullscreen,
             TargetMaxFps = 0 // Native vsync 60+ FPS on hero stage
         };
         HeroStageSlot.Content = _heroHost;
@@ -67,8 +70,19 @@ public partial class StageWindow : Window, IDisposable
             }
         };
 
+        _postFullscreenSettleTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
+        _postFullscreenSettleTimer.Tick += (_, _) =>
+        {
+            _postFullscreenSettleTimer.Stop();
+            if (!_disposed)
+            {
+                _heroHost?.RequestWake();
+                UpdateVisibleStripCards();
+            }
+        };
+
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
-        StyleStripScroller.ScrollChanged += (_, _) => UpdateVisibleStripCards();
+        StudioScroller.ScrollChanged += (_, _) => UpdateVisibleStripCards();
         SizeChanged += (_, _) =>
         {
             if (DataContext is StageViewModel vm)
@@ -76,6 +90,7 @@ public partial class StageWindow : Window, IDisposable
                 vm.IsCompactDrawerMode = Bounds.Width < 880.0;
             }
 
+            UpdateHeroStageHeight();
             UpdateVisibleStripCards();
         };
     }
@@ -129,6 +144,7 @@ public partial class StageWindow : Window, IDisposable
         }
 
         _fullscreenIdleTimer.Stop();
+        _postFullscreenSettleTimer.Stop();
         _heroHost?.Dispose();
         foreach (var host in _cardHosts.Values)
         {
@@ -147,6 +163,8 @@ public partial class StageWindow : Window, IDisposable
             vm.IsCompactDrawerMode = Bounds.Width < 880.0;
             vm.Runtime.SetStageWindowOpen(true);
         }
+
+        UpdateHeroStageHeight();
 
         if (_heroHost is not null)
         {
@@ -173,9 +191,14 @@ public partial class StageWindow : Window, IDisposable
             if (_heroHost is not null)
             {
                 _heroHost.IsCardPaused = true;
+                _heroHost.ReleaseGpuResources();
             }
 
             PauseAllPreviewCards(true);
+            foreach (var host in _cardHosts.Values)
+            {
+                host.ReleaseGpuResources();
+            }
             return;
         }
 
@@ -325,7 +348,7 @@ public partial class StageWindow : Window, IDisposable
             card.IsHovered = false;
             if (_cardHosts.TryGetValue(card.StyleId, out var host))
             {
-                host.TargetMaxFps = card.IsActive ? 60 : 30;
+                host.TargetMaxFps = card.IsActive ? 30 : 24;
             }
         }
     }
@@ -372,7 +395,6 @@ public partial class StageWindow : Window, IDisposable
         if (e.PropertyName == nameof(StageViewModel.IsFullscreen))
         {
             ApplyFullscreenWindowState(vm.IsFullscreen);
-            UpdateVisibleStripCards();
         }
         else if (e.PropertyName == nameof(StageViewModel.EffectivePreviewsPaused))
         {
@@ -384,27 +406,72 @@ public partial class StageWindow : Window, IDisposable
         }
     }
 
+    private void UpdateHeroStageHeight()
+    {
+        if (HeroStageContainer is null)
+        {
+            return;
+        }
+
+        var isFullscreen = DataContext is StageViewModel vm && vm.IsFullscreen;
+        HeroStageContainer.Height = isFullscreen
+            ? Math.Max(Bounds.Height, 360.0)
+            : Math.Clamp(Bounds.Height * 0.76, 440.0, 680.0);
+    }
+
     private void ApplyFullscreenWindowState(bool fullscreen)
     {
         if (fullscreen)
         {
+            PauseAllPreviewCards(true);
+            _postFullscreenSettleTimer.Stop();
             _stateBeforeFullscreen = WindowState == WindowState.FullScreen ? WindowState.Normal : WindowState;
-            ExtendClientAreaTitleBarHeightHint = 0;
+            if (_heroHost is not null)
+            {
+                _heroHost.BottomFadeToBlack = false;
+            }
+
+            if (StudioScroller is not null)
+            {
+                StudioScroller.Offset = new Vector(0, 0);
+                StudioScroller.VerticalScrollBarVisibility = ScrollBarVisibility.Disabled;
+            }
+
             WindowState = WindowState.FullScreen;
+            UpdateHeroStageHeight();
             _fullscreenIdleTimer.Stop();
             _fullscreenIdleTimer.Start();
         }
         else
         {
             _fullscreenIdleTimer.Stop();
-            ExtendClientAreaTitleBarHeightHint = 40;
+            if (DataContext is StageViewModel vm)
+            {
+                vm.IsChromeVisible = true;
+            }
+
+            if (_heroHost is not null)
+            {
+                _heroHost.BottomFadeToBlack = true;
+            }
+
+            if (StudioScroller is not null)
+            {
+                StudioScroller.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+            }
+
+            // Keep ExtendClientAreaTitleBarHeightHint constant (40) to prevent DWM/NCCALCSIZE swapchain flicker.
             WindowState = _stateBeforeFullscreen;
+            UpdateHeroStageHeight();
+            _heroHost?.ReleaseGpuResources();
+            _postFullscreenSettleTimer.Stop();
+            _postFullscreenSettleTimer.Start();
         }
     }
 
     private void UpdateVisibleStripCards()
     {
-        if (DataContext is not StageViewModel vm)
+        if (DataContext is not StageViewModel vm || StudioScroller is null)
         {
             return;
         }
@@ -416,10 +483,7 @@ public partial class StageWindow : Window, IDisposable
             return;
         }
 
-        var offsetX = StyleStripScroller.Offset.X;
-        var viewportW = Math.Max(StyleStripScroller.Viewport.Width, 320.0);
-        const double cardStride = 232.0; // 220 + 12 spacing
-
+        var viewportH = Math.Max(StudioScroller.Viewport.Height, Bounds.Height);
         for (var i = 0; i < vm.FilteredStyleCards.Count; i++)
         {
             var card = vm.FilteredStyleCards[i];
@@ -428,11 +492,15 @@ public partial class StageWindow : Window, IDisposable
                 continue;
             }
 
-            var cardLeft = i * cardStride;
-            var cardRight = cardLeft + 220.0;
-            var inViewport = cardRight >= offsetX - 40 && cardLeft <= offsetX + viewportW + 40;
+            var inViewport = true;
+            if (host.Bounds.Height > 1.0 && host.TranslatePoint(new Point(0, 0), StudioScroller) is { } topLeft)
+            {
+                var bottom = topLeft.Y + host.Bounds.Height;
+                inViewport = bottom >= -120.0 && topLeft.Y <= viewportH + 120.0;
+            }
+
             host.IsCardPaused = !inViewport;
-            host.TargetMaxFps = (card.IsActive || card.IsHovered) ? 60 : 30;
+            host.TargetMaxFps = card.IsHovered ? 60 : (card.IsActive ? 30 : 24);
         }
     }
 

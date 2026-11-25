@@ -10,20 +10,19 @@ using SkiaSharp;
 namespace LyricPulse.Rendering.Styles;
 
 /// <summary>
-/// Style #10 — Messages: hyper-clean floating phone-screen chat thread locked intentionally to
-/// <c>Segoe UI Variable</c> (<see cref="LyricFontId.SystemUi"/>) and high-contrast chat tokens
-/// (<c>#0066D6</c> outgoing / <c>#222433</c> incoming), featuring alternating sender cadence,
-/// <c>Spring.BubblePush</c> entrance, subtle intra-bubble karaoke highlight, and a pre-arrival
-/// 3-dot typing indicator pill. Zero post-process shaders.
+/// Style #10 — Messages / Native Design (Verci-inspired): frameless floating iMessage-style
+/// conversation thread centered on Stage Canvas (frosted glass container on transparent Desktop Overlay),
+/// <c>Today HH:mm</c> micro-header, vibrant blue outgoing &amp; obsidian frosted incoming bubbles,
+/// <c>Spring.BubblePush</c> entrance, HarfBuzz multi-script text, and zero per-frame allocations.
 /// </summary>
 public sealed class MessagesStyleRenderer : IKineticStyleRenderer
 {
     public static readonly SKColor ThreadBackdropColor = new(0x10, 0x11, 0x1A, 0xC8); // #C810111A
     public static readonly SKColor ThreadBorderColor = new(0xFF, 0xFF, 0xFF, 0x20);   // #20FFFFFF
-    public static readonly SKColor OutgoingTopColor = new(0x0B, 0x74, 0xE8, 0xFF);    // #0B74E8
-    public static readonly SKColor OutgoingBottomColor = new(0x00, 0x5E, 0xC7, 0xFF); // #005EC7
-    public static readonly SKColor IncomingBgColor = new(0x22, 0x24, 0x33, 0xF5);     // #F5222433
-    public static readonly SKColor IncomingBorderColor = new(0xFF, 0xFF, 0xFF, 0x18);
+    public static readonly SKColor OutgoingTopColor = new(0x0E, 0x84, 0xFF, 0xFF);    // #0E84FF
+    public static readonly SKColor OutgoingBottomColor = new(0x00, 0x62, 0xD1, 0xFF); // #0062D1
+    public static readonly SKColor IncomingBgColor = new(0x22, 0x24, 0x33, 0xF2);     // #F2222433
+    public static readonly SKColor IncomingBorderColor = new(0xFF, 0xFF, 0xFF, 0x1E);
     public static readonly SKColor LiveGreenDot = new(0x22, 0xC5, 0x5E, 0xFF);        // #22C55E
     public static readonly SKColor HeaderPrimaryColor = new(0xF8, 0xFA, 0xFC, 0xFF);  // #F8FAFC
     public static readonly SKColor HeaderSecondaryColor = new(0x94, 0xA3, 0xB8, 0xFF);// #94A3B8
@@ -37,11 +36,14 @@ public sealed class MessagesStyleRenderer : IKineticStyleRenderer
     private readonly SKPaint _cardShadowPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _bubbleFillPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _bubbleBorderPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.0f };
-    private readonly SKPaint _textPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _dotPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKRoundRect _clipRoundRect = new();
     private readonly SKRoundRect _bubbleRoundRect = new();
-    private readonly SKImageFilter _cardShadowFilter = SKImageFilter.CreateDropShadowOnly(0f, 10f, 18f, 18f, new SKColor(0, 0, 0, 115));
+    private readonly SKPoint[] _clipRadii = new SKPoint[4];
+    private readonly SKPoint[] _bubbleRadii = new SKPoint[4];
+    private readonly List<LyricLine> _visibleLinesScratch = new(6);
+    private readonly List<string> _wrappedLinesScratch = new(6);
+    private readonly SKImageFilter _cardShadowFilter = SKImageFilter.CreateDropShadowOnly(0f, 10f, 18f, 18f, new SKColor(0, 0, 0, 105));
 
     private SpringState _bubblePushY = SpringState.AtRest(0f);
     private SpringState _newBubbleScale = SpringState.AtRest(1.0f);
@@ -121,24 +123,24 @@ public sealed class MessagesStyleRenderer : IKineticStyleRenderer
         }
 
         var isCompact = packet.IsCompactCard;
+        var isFloatingDesktop = packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay;
         var heroMult = packet.SurfaceMode == StageRenderSurfaceMode.StageCanvas
-            ? Math.Clamp(packet.SafeHeroScale * 0.72f, 1.0f, 1.65f)
+            ? Math.Clamp(packet.SafeHeroScale * 0.78f, 1.0f, 1.75f)
             : 1.0f;
 
         var compactMaxW = Math.Max(120f, Math.Min(packet.ViewportWidthDip - 12f, 280f));
         var compactMaxH = Math.Max(90f, Math.Min(packet.ViewportHeightDip - 12f, 220f));
-        var stageMaxW = Math.Max(160f, Math.Min(packet.ViewportWidthDip - 32f, 520f));
-        var stageMaxH = Math.Max(140f, Math.Min(packet.ViewportHeightDip - 32f, 640f));
+        var stageMaxW = Math.Max(180f, Math.Min(packet.ViewportWidthDip - 32f, 580f));
+        var stageMaxH = Math.Max(150f, Math.Min(packet.ViewportHeightDip - 32f, 640f));
 
         var threadW = isCompact
-            ? Math.Clamp(packet.ViewportWidthDip * 0.84f, Math.Min(150f, compactMaxW), compactMaxW)
-            : Math.Clamp(packet.ViewportWidthDip * 0.24f * heroMult, Math.Min(310f, stageMaxW), stageMaxW);
+            ? Math.Clamp(packet.ViewportWidthDip * 0.86f, Math.Min(150f, compactMaxW), compactMaxW)
+            : Math.Clamp(packet.ViewportWidthDip * 0.28f * heroMult, Math.Min(340f, stageMaxW), stageMaxW);
         var threadH = isCompact
             ? Math.Clamp(packet.ViewportHeightDip * 0.86f, Math.Min(110f, compactMaxH), compactMaxH)
-            : Math.Clamp(packet.ViewportHeightDip * 0.48f * heroMult, Math.Min(320f, stageMaxH), stageMaxH);
+            : Math.Clamp(packet.ViewportHeightDip * 0.48f * heroMult, Math.Min(300f, stageMaxH), stageMaxH);
 
-        // Lower-right on DesktopOverlay (per MOTION_AND_STYLES.md), centered on StageCanvas / GalleryCard
-        var (anchorX, anchorY) = packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay
+        var (anchorX, anchorY) = isFloatingDesktop
             ? (packet.ViewportWidthDip - (threadW * 0.5f) - Math.Max(24f, packet.ViewportWidthDip * 0.04f),
                packet.ViewportHeightDip - (threadH * 0.5f) - Math.Max(24f, packet.ViewportHeightDip * 0.08f))
             : StyleLayoutHelper.ComputeAnchorPoint(packet, 0.50f, 0.50f);
@@ -146,38 +148,62 @@ public sealed class MessagesStyleRenderer : IKineticStyleRenderer
         var cardRect = StyleLayoutHelper.ClampLayerRectToViewport(anchorX, anchorY, threadW, threadH, packet.ViewportWidthDip, packet.ViewportHeightDip);
         var corner = isCompact ? 14f : 22f;
 
-        // Soft elevation shadow + phone glass card
-        _cardShadowPaint.Color = SKColors.Black;
-        _cardShadowPaint.ImageFilter = _cardShadowFilter;
-        try
+        // Frameless floating chat bubbles on StageCanvas / GalleryCard (per Verci Native Design!),
+        // with clean glass phone container on transparent DesktopOverlay.
+        if (isFloatingDesktop)
         {
-            context.Canvas.DrawRoundRect(cardRect, corner, corner, _cardShadowPaint);
+            _cardShadowPaint.Color = SKColors.Black;
+            _cardShadowPaint.ImageFilter = _cardShadowFilter;
+            try
+            {
+                context.Canvas.DrawRoundRect(cardRect, corner, corner, _cardShadowPaint);
+            }
+            finally
+            {
+                _cardShadowPaint.ImageFilter = null;
+            }
+
+            _cardFillPaint.Color = ThreadBackdropColor;
+            context.Canvas.DrawRoundRect(cardRect, corner, corner, _cardFillPaint);
+
+            _cardBorderPaint.Color = ThreadBorderColor;
+            context.Canvas.DrawRoundRect(cardRect, corner, corner, _cardBorderPaint);
         }
-        finally
-        {
-            _cardShadowPaint.ImageFilter = null;
-        }
 
-        _cardFillPaint.Color = ThreadBackdropColor;
-        context.Canvas.DrawRoundRect(cardRect, corner, corner, _cardFillPaint);
-
-        _cardBorderPaint.Color = ThreadBorderColor;
-        context.Canvas.DrawRoundRect(cardRect, corner, corner, _cardBorderPaint);
-
-        var headerH = isCompact ? 24f : 40f;
-        var bodyFontSize = isCompact ? 11f : Math.Clamp(15.5f * heroMult, 14f, 24f);
-        var metaFontSize = isCompact ? 8.5f : Math.Clamp(11f * heroMult, 10f, 15f);
+        var headerH = isCompact ? 20f : (isFloatingDesktop ? 42f : 28f);
+        var bodyFontSize = isCompact ? 11.5f : Math.Clamp(16f * heroMult, 14f, 25f);
+        var metaFontSize = isCompact ? 8.5f : Math.Clamp(11.5f * heroMult, 10f, 15f);
         var bodyFont = context.Fonts.GetOrCreateFont(LyricFontId.SystemUi, bodyFontSize, enforceMinOverlayFloor: false);
         var metaFont = context.Fonts.GetOrCreateFont(LyricFontId.SystemUi, metaFontSize, enforceMinOverlayFloor: false);
 
         var clipSave = context.Canvas.Save();
         try
         {
-            var radii = new[] { new SKPoint(corner, corner), new SKPoint(corner, corner), new SKPoint(corner, corner), new SKPoint(corner, corner) };
-            _clipRoundRect.SetRectRadii(cardRect, radii);
+            SetUniformRadii(_clipRadii, corner);
+            _clipRoundRect.SetRectRadii(cardRect, _clipRadii);
             context.Canvas.ClipRoundRect(_clipRoundRect, antialias: true);
 
-            DrawThreadHeader(context.Canvas, cardRect, headerH, bodyFont, metaFont, packet, isCompact);
+            if (isFloatingDesktop)
+            {
+                DrawThreadHeader(context, cardRect, headerH, bodyFont, metaFont, packet, isCompact);
+            }
+            else if (!isCompact)
+            {
+                // Verci-style minimal "Today HH:mm" micro-caption centered cleanly above the bubbles
+                var stamp = $"Today {FormatTimestamp(slice.CurrentLine.StartTime)}";
+                context.Legibility.DrawLegibleText(
+                    context.Canvas,
+                    stamp,
+                    cardRect.MidX,
+                    cardRect.Top + 18f,
+                    SKTextAlign.Center,
+                    metaFont,
+                    LyricFontId.SystemUi,
+                    new RgbColor(HeaderSecondaryColor.Red, HeaderSecondaryColor.Green, HeaderSecondaryColor.Blue),
+                    opacity: 0.78f,
+                    includeStrokeHalo: false,
+                    fonts: context.Fonts);
+            }
 
             var threadClip = new SKRect(cardRect.Left, cardRect.Top + headerH, cardRect.Right, cardRect.Bottom);
             context.Canvas.ClipRect(threadClip);
@@ -186,7 +212,6 @@ public sealed class MessagesStyleRenderer : IKineticStyleRenderer
             var pushY = packet.ReducedMotion ? 0f : _bubblePushY.Value;
             var bottomY = cardRect.Bottom - (isCompact ? 8f : 14f) + pushY;
 
-            // Optional pre-arrival 3-dot typing indicator at bottom
             if (IsTypingCueVisible(slice))
             {
                 var nextOutgoing = IsOutgoingSide(slice.ActiveLineIndex + 1);
@@ -198,31 +223,17 @@ public sealed class MessagesStyleRenderer : IKineticStyleRenderer
                 bottomY -= pillH + (isCompact ? 5f : 10f);
             }
 
-            // Timestamp micro-caption under newest bubble
-            var timestampStr = FormatTimestamp(slice.CurrentLine.StartTime);
-            var activeOutgoing = IsOutgoingSide(slice.ActiveLineIndex);
-            _textPaint.Color = HeaderSecondaryColor.WithAlpha(205);
-            context.Canvas.DrawText(
-                timestampStr,
-                activeOutgoing ? cardRect.Right - padX - 4f : cardRect.Left + padX + 4f,
-                bottomY - 2f,
-                activeOutgoing ? SKTextAlign.Right : SKTextAlign.Left,
-                metaFont,
-                _textPaint);
-            bottomY -= metaFontSize + (isCompact ? 4f : 7f);
-
-            // Collect up to 4 visible bubbles bottom-up (active + up to 3 settled history lines)
-            var history = CollectVisibleLines(packet, slice, maxCount: isCompact ? 3 : 4);
-            var maxBubbleW = (cardRect.Width - (padX * 2f)) * 0.82f;
+            CollectVisibleLines(packet, slice, maxCount: isCompact ? 3 : 4, _visibleLinesScratch);
+            var maxBubbleW = (cardRect.Width - (padX * 2f)) * 0.84f;
             var fadeAlpha = packet.ReducedMotion ? (0.90f + (0.10f * Ease.Highlight(_fadeIn))) : 1.0f;
 
-            for (var i = history.Count - 1; i >= 0; i--)
+            for (var i = _visibleLinesScratch.Count - 1; i >= 0; i--)
             {
-                var line = history[i];
-                var isNewest = i == history.Count - 1;
+                var line = _visibleLinesScratch[i];
+                var isNewest = i == _visibleLinesScratch.Count - 1;
                 var outgoing = IsOutgoingSide(line.Index);
                 var bubbleScale = isNewest && !packet.ReducedMotion ? _newBubbleScale.Value : 1.0f;
-                var ageFade = Math.Clamp(1.0f - ((history.Count - 1 - i) * 0.14f), 0.55f, 1.0f);
+                var ageFade = Math.Clamp(1.0f - ((_visibleLinesScratch.Count - 1 - i) * 0.14f), 0.55f, 1.0f);
 
                 var bubbleH = DrawMessageBubble(
                     in context,
@@ -269,14 +280,13 @@ public sealed class MessagesStyleRenderer : IKineticStyleRenderer
         _cardShadowPaint.Dispose();
         _bubbleFillPaint.Dispose();
         _bubbleBorderPaint.Dispose();
-        _textPaint.Dispose();
         _dotPaint.Dispose();
     }
 
     internal static bool IsOutgoingSide(int lineIndex) => ((Math.Max(0, lineIndex) / 2) % 2) == 0;
 
     private void DrawThreadHeader(
-        SKCanvas canvas,
+        in StyleRenderContext context,
         SKRect cardRect,
         float headerH,
         SKFont bodyFont,
@@ -284,6 +294,7 @@ public sealed class MessagesStyleRenderer : IKineticStyleRenderer
         FrameRenderPacket packet,
         bool isCompact)
     {
+        var canvas = context.Canvas;
         var padX = isCompact ? 10f : 14f;
         var cy = cardRect.Top + (headerH * 0.5f);
         var avatarR = isCompact ? 6.5f : 11f;
@@ -292,35 +303,43 @@ public sealed class MessagesStyleRenderer : IKineticStyleRenderer
         _dotPaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha(0.95f);
         canvas.DrawCircle(avatarX, cy, avatarR, _dotPaint);
 
-        // Live green presence dot
         _dotPaint.Color = LiveGreenDot;
         canvas.DrawCircle(avatarX + (avatarR * 0.72f), cy + (avatarR * 0.68f), isCompact ? 2.4f : 3.5f, _dotPaint);
 
         var title = packet.SceneSnapshot.Track?.RawTitle ?? "Neon Horizon";
         var textX = avatarX + avatarR + (isCompact ? 6f : 10f);
-        _textPaint.Color = HeaderPrimaryColor;
-        canvas.DrawText(
+        context.Legibility.DrawLegibleText(
+            canvas,
             StyleLayoutHelper.SliceByGraphemes(title, isCompact ? 16 : 26),
             textX,
             cy + (isCompact ? 3.5f : 1f),
             SKTextAlign.Left,
             isCompact ? metaFont : bodyFont,
-            _textPaint);
+            LyricFontId.SystemUi,
+            new RgbColor(HeaderPrimaryColor.Red, HeaderPrimaryColor.Green, HeaderPrimaryColor.Blue),
+            opacity: 1.0f,
+            includeStrokeHalo: false,
+            fonts: context.Fonts,
+            includeAmbientShadow: false);
 
         if (!isCompact)
         {
             var artist = packet.SceneSnapshot.Track?.RawArtist ?? "Now Playing";
-            _textPaint.Color = HeaderSecondaryColor;
-            canvas.DrawText(
+            context.Legibility.DrawLegibleText(
+                canvas,
                 StyleLayoutHelper.SliceByGraphemes(artist, 28),
                 textX,
                 cy + 14f,
                 SKTextAlign.Left,
                 metaFont,
-                _textPaint);
+                LyricFontId.SystemUi,
+                new RgbColor(HeaderSecondaryColor.Red, HeaderSecondaryColor.Green, HeaderSecondaryColor.Blue),
+                opacity: 1.0f,
+                includeStrokeHalo: false,
+                fonts: context.Fonts,
+                includeAmbientShadow: false);
         }
 
-        // Subtle header divider line
         _cardBorderPaint.Color = new SKColor(0xFF, 0xFF, 0xFF, 18);
         canvas.DrawLine(cardRect.Left + 10f, cardRect.Top + headerH, cardRect.Right - 10f, cardRect.Top + headerH, _cardBorderPaint);
     }
@@ -341,16 +360,16 @@ public sealed class MessagesStyleRenderer : IKineticStyleRenderer
         float opacity,
         bool isCompact)
     {
-        var bPadX = isCompact ? 8f : 13f;
+        var bPadX = isCompact ? 8f : 14f;
         var bPadY = isCompact ? 5f : 9f;
         var lineH = bodyFont.Size * 1.32f;
         var maxTextW = Math.Max(40f, maxBubbleW - (bPadX * 2f));
 
-        var wrappedLines = WrapLineText(line.RawText, bodyFont, maxTextW, context.Fonts);
+        WrapLineText(line.RawText, bodyFont, maxTextW, context.Fonts, _wrappedLinesScratch);
         var widest = 0f;
-        foreach (var wl in wrappedLines)
+        for (var i = 0; i < _wrappedLinesScratch.Count; i++)
         {
-            widest = Math.Max(widest, TextShaperService.MeasureWidth(wl, bodyFont, context.Fonts));
+            widest = Math.Max(widest, TextShaperService.MeasureWidth(_wrappedLinesScratch[i], bodyFont, context.Fonts));
         }
 
         var subText = isNewest ? StyleLayoutHelper.ResolveSecondaryLineText(line, context.Packet.SecondaryLineMode) : null;
@@ -361,7 +380,7 @@ public sealed class MessagesStyleRenderer : IKineticStyleRenderer
         }
 
         var bubbleW = Math.Clamp(widest + (bPadX * 2f), isCompact ? 42f : 64f, maxBubbleW);
-        var bubbleH = (wrappedLines.Count * lineH) + (bPadY * 2f) + (hasSub ? (metaFont.Size * 1.3f) : 0f);
+        var bubbleH = (_wrappedLinesScratch.Count * lineH) + (bPadY * 2f) + (hasSub ? (metaFont.Size * 1.3f) : 0f);
 
         var left = outgoing ? (cardRect.Right - padX - bubbleW) : (cardRect.Left + padX);
         var rect = new SKRect(left, bottomY - bubbleH, left + bubbleW, bottomY);
@@ -378,12 +397,13 @@ public sealed class MessagesStyleRenderer : IKineticStyleRenderer
                 context.Canvas.Translate(-pivotX, -pivotY);
             }
 
-            var r = isCompact ? 11f : 17f;
+            var r = isCompact ? 11f : 18f;
             var tailR = isCompact ? 4f : 5f;
-            var corners = outgoing
-                ? new[] { new SKPoint(r, r), new SKPoint(r, r), new SKPoint(tailR, tailR), new SKPoint(r, r) }
-                : new[] { new SKPoint(r, r), new SKPoint(r, r), new SKPoint(r, r), new SKPoint(tailR, tailR) };
-            _bubbleRoundRect.SetRectRadii(rect, corners);
+            _bubbleRadii[0] = new SKPoint(r, r);
+            _bubbleRadii[1] = new SKPoint(r, r);
+            _bubbleRadii[2] = outgoing ? new SKPoint(tailR, tailR) : new SKPoint(r, r);
+            _bubbleRadii[3] = outgoing ? new SKPoint(r, r) : new SKPoint(tailR, tailR);
+            _bubbleRoundRect.SetRectRadii(rect, _bubbleRadii);
 
             if (outgoing)
             {
@@ -415,28 +435,48 @@ public sealed class MessagesStyleRenderer : IKineticStyleRenderer
 
             var textY = rect.Top + bPadY + (bodyFont.Size * 0.92f);
             var textAlpha = isNewest
-                ? (0.72f + (0.28f * (float)Math.Clamp(slice.LineProgress, 0.0, 1.0))) * opacity
+                ? (0.76f + (0.24f * (float)Math.Clamp(slice.LineProgress, 0.0, 1.0))) * opacity
                 : opacity;
-            _textPaint.Color = (outgoing ? SKColors.White : HeaderPrimaryColor)
-                .WithAlpha((byte)Math.Clamp(MathF.Round(255f * textAlpha), 0f, 255f));
+            var textRgb = outgoing
+                ? new RgbColor(255, 255, 255)
+                : new RgbColor(HeaderPrimaryColor.Red, HeaderPrimaryColor.Green, HeaderPrimaryColor.Blue);
 
-            foreach (var wl in wrappedLines)
+            for (var i = 0; i < _wrappedLinesScratch.Count; i++)
             {
-                context.Canvas.DrawText(wl, rect.Left + bPadX, textY, SKTextAlign.Left, bodyFont, _textPaint);
+                context.Legibility.DrawLegibleText(
+                    context.Canvas,
+                    _wrappedLinesScratch[i],
+                    rect.Left + bPadX,
+                    textY,
+                    SKTextAlign.Left,
+                    bodyFont,
+                    LyricFontId.SystemUi,
+                    textRgb,
+                    opacity: textAlpha,
+                    includeStrokeHalo: false,
+                    fonts: context.Fonts,
+                    includeAmbientShadow: false);
                 textY += lineH;
             }
 
             if (hasSub && subText is not null)
             {
-                _textPaint.Color = (outgoing ? new SKColor(0xE0, 0xF2, 0xFE, 210) : HeaderSecondaryColor)
-                    .WithAlpha((byte)Math.Clamp(MathF.Round(210f * opacity), 0f, 255f));
-                context.Canvas.DrawText(
+                var subRgb = outgoing
+                    ? new RgbColor(0xE0, 0xF2, 0xFE)
+                    : new RgbColor(HeaderSecondaryColor.Red, HeaderSecondaryColor.Green, HeaderSecondaryColor.Blue);
+                context.Legibility.DrawLegibleText(
+                    context.Canvas,
                     StyleLayoutHelper.SliceByGraphemes(subText, 36),
                     rect.Left + bPadX,
                     textY - (lineH * 0.15f),
                     SKTextAlign.Left,
                     metaFont,
-                    _textPaint);
+                    LyricFontId.SystemUi,
+                    subRgb,
+                    opacity: 0.82f * opacity,
+                    includeStrokeHalo: false,
+                    fonts: context.Fonts,
+                    includeAmbientShadow: false);
             }
         }
         finally
@@ -470,40 +510,38 @@ public sealed class MessagesStyleRenderer : IKineticStyleRenderer
         slice.NextLine is not null &&
         (slice.TimeUntilNextLine is { TotalMilliseconds: > 0 and <= 450 } || slice.LineProgress >= 0.82);
 
-    private static List<LyricLine> CollectVisibleLines(FrameRenderPacket packet, ActiveLyricSlice slice, int maxCount)
+    private static void CollectVisibleLines(FrameRenderPacket packet, ActiveLyricSlice slice, int maxCount, List<LyricLine> destination)
     {
-        var result = new List<LyricLine>(maxCount);
+        destination.Clear();
         var doc = packet.SceneSnapshot.Document;
         if (doc is not null && !doc.Lines.IsEmpty && slice.ActiveLineIndex >= 0)
         {
             var start = Math.Max(0, slice.ActiveLineIndex - (maxCount - 1));
             for (var i = start; i <= slice.ActiveLineIndex && i < doc.Lines.Length; i++)
             {
-                result.Add(doc.Lines[i]);
+                destination.Add(doc.Lines[i]);
             }
 
-            return result;
+            return;
         }
 
         if (slice.PreviousLine is not null)
         {
-            result.Add(slice.PreviousLine);
+            destination.Add(slice.PreviousLine);
         }
 
         if (slice.CurrentLine is not null)
         {
-            result.Add(slice.CurrentLine);
+            destination.Add(slice.CurrentLine);
         }
-
-        return result;
     }
 
-    private static List<string> WrapLineText(string text, SKFont font, float maxWidth, FontAssetRegistry fonts)
+    private static void WrapLineText(string text, SKFont font, float maxWidth, FontAssetRegistry fonts, List<string> destination)
     {
-        var lines = new List<string>(2);
+        destination.Clear();
         if (string.IsNullOrWhiteSpace(text))
         {
-            return lines;
+            return;
         }
 
         var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -513,7 +551,7 @@ public sealed class MessagesStyleRenderer : IKineticStyleRenderer
             var candidate = string.IsNullOrEmpty(current) ? part : $"{current} {part}";
             if (!string.IsNullOrEmpty(current) && TextShaperService.MeasureWidth(candidate, font, fonts) > maxWidth)
             {
-                lines.Add(current);
+                destination.Add(current);
                 current = part;
             }
             else
@@ -524,10 +562,17 @@ public sealed class MessagesStyleRenderer : IKineticStyleRenderer
 
         if (!string.IsNullOrEmpty(current))
         {
-            lines.Add(current);
+            destination.Add(current);
         }
+    }
 
-        return lines;
+    private static void SetUniformRadii(SKPoint[] radii, float corner)
+    {
+        var pt = new SKPoint(corner, corner);
+        radii[0] = pt;
+        radii[1] = pt;
+        radii[2] = pt;
+        radii[3] = pt;
     }
 
     private static string FormatTimestamp(TimeSpan time)

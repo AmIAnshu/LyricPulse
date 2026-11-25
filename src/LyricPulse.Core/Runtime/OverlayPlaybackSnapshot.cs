@@ -1,3 +1,4 @@
+using LyricPulse.Core.Audio;
 using LyricPulse.Core.Color;
 using LyricPulse.Core.Models;
 
@@ -78,7 +79,9 @@ public sealed record OverlayPlaybackSnapshot(
     bool IsOsReducedMotion = false,
     long OffsetGeneration = 0,
     bool IsStageWindowOpen = false,
-    WordVisualMatch? TrackMoodVisual = null)
+    WordVisualMatch? TrackMoodVisual = null,
+    AlbumArtPayload? AlbumArt = null,
+    AudioFrameMetrics? AudioMetrics = null)
 {
     public int ActiveLineIndex => ActiveSlice.ActiveLineIndex;
     public int ActiveWordIndex => ActiveSlice.ActiveWordIndex;
@@ -89,6 +92,7 @@ public sealed record OverlayPlaybackSnapshot(
 
     public bool IsLyricsVisible => Settings.LyricsVisible && !IsFullscreenHidden;
     public bool IsEffectiveReducedMotion => Settings.ReducedMotion || IsOsReducedMotion;
+    public AudioFrameMetrics EffectiveAudioMetrics => AudioMetrics ?? AudioFrameMetrics.Silent;
 }
 
 internal sealed record RuntimeStateBox(
@@ -99,6 +103,7 @@ internal sealed record RuntimeStateBox(
     LyricsStatus LiveLyricsStatus,
     WordVisualMatch? LiveMoodVisual,
     AlbumAccentPalette LiveTargetPalette,
+    AlbumArtPayload? LiveAlbumArt,
     PaletteMorphState PaletteMorph,
     TimingOffsetState TimingOffset,
     bool IsDemoMode,
@@ -125,6 +130,7 @@ internal sealed record RuntimeStateBox(
         LiveLyricsStatus: LyricsStatus.NotFound,
         LiveMoodVisual: null,
         LiveTargetPalette: AlbumAccentPalette.Default,
+        LiveAlbumArt: null,
         PaletteMorph: PaletteMorphState.Static(AlbumAccentPalette.Default),
         TimingOffset: new TimingOffsetState(null, TimeSpan.Zero, false),
         IsDemoMode: false,

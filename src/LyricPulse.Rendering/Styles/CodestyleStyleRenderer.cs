@@ -96,7 +96,16 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
         }
 
         var isPlaying = packet.PlaybackSnapshot?.IsPlaying ?? (packet.SceneSnapshot.PlaybackState == MediaPlaybackState.Playing);
+        var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet, 0.50f, 0.52f);
+        var words = slice.CurrentLine.Words;
+        var activeIdx = words.IsEmpty ? 0 : Math.Clamp(slice.ActiveWordIndex, 0, words.Length - 1);
+        var wordFrac = words.IsEmpty || words.Length <= 1 ? 0.5f : (activeIdx / (float)(words.Length - 1));
+        var approxDotX = anchorX + ((wordFrac - 0.5f) * Math.Min(packet.ViewportWidthDip * 0.45f, 420f));
+        var approxDotY = anchorY;
+        var dotActive = packet.ShowFollowingDot && _aesthetics.AdvanceDot((slice.ActiveLineIndex, activeIdx), approxDotX, approxDotY, dt, packet.ReducedMotion);
+
         return !_lineScrollOffsetY.IsAtRest ||
+               dotActive ||
                _lineFadeIn < 0.999f ||
                (isPlaying && !packet.ReducedMotion);
     }
@@ -239,6 +248,14 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
 
     private void DrawCodeCardBackdrop(SKCanvas canvas, SKRect rect, FrameRenderPacket packet)
     {
+        if (packet.SurfaceMode != StageRenderSurfaceMode.DesktopOverlay && !packet.HighContrastScrim)
+        {
+            // Frameless floating terminal typography on Stage Canvas / Gallery Card (subtle ambient wash)
+            _cardBgPaint.Color = new SKColor(0x0B, 0x0C, 0x16, 64);
+            canvas.DrawRoundRect(rect, 14f, 14f, _cardBgPaint);
+            return;
+        }
+
         if (packet.HighContrastScrim)
         {
             _cardBgPaint.Color = LegibilityStyleSpec.HighContrastScrimColor;

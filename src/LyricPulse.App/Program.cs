@@ -6,6 +6,7 @@ using LyricPulse.App.Platform;
 using LyricPulse.App.Tray;
 using LyricPulse.Core;
 using LyricPulse.Core.Abstractions;
+using LyricPulse.Core.Audio;
 using LyricPulse.Rendering;
 using LyricPulse.Rendering.Fonts;
 using Microsoft.Extensions.DependencyInjection;
@@ -73,6 +74,11 @@ public static class Program
         {
             services.AddSingleton<IGlobalHotkeyService>(_ =>
                 new GlobalHotkeyManager(action => Dispatcher.UIThread.Post(action)));
+            services.AddSingleton<IAudioSpectrumProvider, WasapiLoopbackAudioProvider>();
+        }
+        else
+        {
+            services.AddSingleton<IAudioSpectrumProvider, SyntheticAudioSpectrumProvider>();
         }
 
         services.AddLyricPulseCore();
