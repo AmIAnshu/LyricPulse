@@ -313,3 +313,147 @@ The following Milestone 1A visual & rendering guarantees were verified directly 
 1. **Multi-size `.ico` Tray Bundle (`TrayIconFactory.cs:62`):** Currently emits a single `32×32` PNG rather than a multi-entry `.ico` (`16/20/24/32/48px` per `pages/tray.md` §2) for crisp pixel-snapped `100%`/`125%` DPI tray rendering.
 2. **In-place `NativeMenu` Mutation (`TrayController.cs:147`):** Still replaces `_trayIcon.Menu = BuildNativeMenu(nextState)` on state diffs rather than mutating existing `NativeMenuItem` properties in place (`pages/tray.md` §5).
 3. **Typography & Micro-Polish:** `FontOpticalMetrics.TrackingEm` (`FontAssetRegistry.cs:25-73`) is not yet applied to glyph positioning; `InspectScriptRequirements` resolves fallback per whole word/token (single unspaced tokens mixing two non-Latin scripts e.g. `"星⭐"` use the first missing script's fallback); `BuildWindowedRows` (`VisualStackStyleRenderer.cs:285`) allocates a tiny managed `new List<VisualStackRow>(8)` scratch list (zero native impact; easily hoisted to a field).
+
+
+---
+
+## Phase 6 v1.0 Release UI Audit
+
+**Audit Date:** 2026-11-25  
+**Auditor:** LyricPulse UI Auditor (ECC UI Review + `ui-ux-pro-max` / WCAG 2.2 AA/AAA)  
+**Authoritative Specs Audited Against:**
+- `design-system/lyricpulse/MASTER.md`
+- `design-system/lyricpulse/MOTION_AND_STYLES.md`
+- `design-system/lyricpulse/pages/gallery.md`, `settings.md`, `tray.md`
+
+**Scope:** Phase 4B & Phase 5 visual deliverables (`AmbientPartyMesh.sksl`, `StageBackdropRenderer`, `AestheticsOverlayRenderer`, all 10 kinetic style renderers, `LyricPulseTokens.axaml`, `ColorPickerTheme.axaml`, `Icons.axaml`, `StageWindow.axaml/.cs`, `SettingsView.axaml`, `ObsBroadcastWindow.axaml`, `TrayIconFactory.cs`, `TrayController.cs`, `TrayMenuState.cs`). Static code & contrast verification (no `src/` edits; `dotnet test` was not executed because `dotnet` SDK is not on shell `PATH`).
+
+---
+
+### Phase 6 Executive Verdict: **FAIL** *(0 Critical, 2 High, 2 Medium, 1 Low — Remediate `UI-13` & `UI-14` Before v1.0 Sign-Off)*
+
+| Severity | Open Count | Summary |
+|---|---:|---|
+| **CRITICAL** | **0** | Zero emoji chrome; all 10 styles registered; 5-size `.ico` verified; Dark/Light token contrast >= 5.03:1 |
+| **HIGH** | **2** | `UI-13` (Gallery strip cards use one-shot `TryFindBrush` breaking runtime Dark/Light parity, text `"Pin"` instead of `PathIcon`, and `PropertyChanged` leak); `UI-14` (`_heroHost` keeps rendering 60+ FPS `AmbientPartyMesh` when hidden to tray + dead `IsFullscreen` `else if` branch) |
+| **MEDIUM** | **2** | `UI-15` (Always-green top-bar status dot, missing active states on filter/Anchor/Theme/Scrim buttons, `32×32` top icon hit targets, minor OBS/taskbar hexes); `UI-16` (`CutoutWord` & `Messages` bypass HarfBuzz multi-script fallback, unsprung `FollowingDot` in 4 styles, `NodeLine` RM long-line overflow) |
+| **LOW** | **1** | `UI-17` (Hero `Pin` / top toggles Regular-vs-Filled swap, `TopGlassBar` RM transition, minimal `ColorPickerTheme`, `Messages` managed list allocs) |
+
+---
+
+### Phase 6 Dimension Scorecard
+
+| # | Audit Dimension | Status | Key Evidence |
+|---|---|---|---|
+| 1 | **Dark & Light `{DynamicResource}` Token Parity & Contrast** | **FAIL** *(High)* | `LyricPulseTokens.axaml` Dark & Light tokens verify **5.03:1 – 18.34:1** (`GlassPill` `6.74:1 – 17.67:1`); `StageWindow.axaml` & `SettingsView.axaml` bind `{DynamicResource}` cleanly (with intentional `#F8FAFC`/`#CBD5E1` over dark stage and `#00FF00` OBS chroma key). **FAILS** because `StageWindow.axaml.cs:319,378,385,390,410,412-414,448-450` snapshots brushes once via `TryFindBrush(...)` when building the 10 Gallery strip cards—leaving strip cards stuck in the old theme after runtime Dark/Light switches (`UI-13`). Also `ObsBroadcastWindow.axaml:16,18` (`#CC14161F`, `#33FFFFFF`, `#F4F6FA`) and `SettingsView.axaml:252` (`#475569`) use hardcoded hexes (`UI-15`). |
+| 2 | **Zero Emoji Chrome & Vector Fluent `PathIcon`s + 5-Size `.ico`** | **PASS WITH NOTES** | Full scan confirms **zero emojis** across `LyricPulse.UI`, `LyricPulse.App`, and `LyricPulse.Rendering` chrome; `Icons.axaml` provides 21 crisp `StreamGeometry` icons; `TrayIconFactory.cs:73-113` & `Assets/LyricPulse.ico` verified as a 5-entry `.ico` (`16×16`, `20×20`, `24×24`, `32×32`, `48×48`, 3,564 bytes). **Note:** Gallery strip `pinBtn` (`StageWindow.axaml.cs:340-345`) renders text `"Pin"`/`"Pinned"` at `28×28` instead of `LpIconPinRegular`/`LpIconPinFilled` (`UI-13`). |
+| 3 | **Fullscreen `F11` Auto-Hide & Gallery 30/60 FPS Gating** | **FAIL** *(High)* | `F11`/`Escape` keybindings, `2.0s` `_fullscreenIdleTimer`, `OnPointerMoved` wake, and `30/60 FPS` (`TargetMaxFps`) card hover/active gating work on visible cards. **FAILS** because closing `StageWindow` to Tray (`OnClosing` → `Hide()`) never pauses `_heroHost` (continuing 60+ FPS `AmbientPartyMesh` SkSL rendering invisibly), and `StageWindow.axaml.cs:245-252` has an unreachable `IsFullscreen` `else if` branch (`UI-14`). |
+| 4 | **`AmbientPartyMesh.sksl`, `StageBackdropRenderer` & `AestheticsOverlayRenderer`** | **PASS WITH NOTES** | `AmbientPartyMesh.sksl` has zero loops, safe `max(iResolution, 1.0)` & `clamp(iEnergy, 0.5, 1.85)`, and `StageBackdropRenderer` skips `DesktopOverlay`/`ObsBroadcast` and falls back to static gradient in software/RM. `AestheticsOverlayRenderer` caches all `SKPaint` + `SKImageFilter`s (`_dotBlur`, `_sweepBlur`, `_cutoutBlur`) and `CutoutDarkInk` achieves `17.05:1–18.61:1` contrast. **Note:** `DrawInvertedCutoutWord` bypasses HarfBuzz fallback, and 4 styles skip `AdvanceDot` (`UI-16`). |
+| 5 | **All 10 Styles + `ReducedMotion` Fallbacks & Multi-DPI** | **PASS WITH NOTES** | All 10 styles (`Fisheye`, `FisheyeVisual`, `Codestyle`, `CodestyleVisual`, `VisualStack`, `Constellation`, `SpidersWeb`, `NodeLine`, `KineticWall`, `Messages`) cleanly suppress SkSL shaders, 3D homography, blinking cursors, ripples, and continuous motion under `ReducedMotion = true`, and route text/icons through `LegibilityPipeline` + `ClampLayerRectToViewport`. **Notes:** `Messages` lacks HarfBuzz multi-script fallback, and `NodeLine` RM long lines (`> 8` words) overflow instead of wrapping (`UI-16`). |
+
+---
+
+### Phase 6 Detailed Findings & Concrete Fixes
+
+#### HIGH
+
+##### `UI-13` — Gallery Strip Cards Break Runtime Dark/Light Theme Parity (`TryFindBrush`), Render Text `"Pin"` Instead of Vector `PathIcon`, and Leak `PropertyChanged` Handlers
+- **Locations:**
+  - `src/LyricPulse.UI/Views/StageWindow.axaml.cs:276-459` (lines `319`, `331-352`, `378`, `385`, `390`, `410`, `412-414`, `436-453`)
+- **Evidence:**
+  1. `RebuildStyleStrip()` assigns `Background`, `Foreground`, and `BorderBrush` via `TryFindBrush(...)` (`this.TryFindResource(...)` snapshot at construction time) rather than live dynamic resource bindings. Switching `ThemeVariantMode` (`System` ↔ `Dark` ↔ `Light`) in `SettingsView` updates `StageWindow.axaml` and `SettingsView.axaml`, while all 10 bottom Gallery cards remain frozen in the previous theme's surface/text/border colors.
+  2. `pinBtn` (`lines 331-346`) uses a hardcoded `Color.FromArgb(0xB8, 0x14, 0x16, 0x1F)` background, a `28×28` DIP hit target (`< 40×40` minimum in `MASTER.md` §8.1), and a `<TextBlock Text="Pin" />` label instead of vector `PathIcon` (`LpIconPinRegular` / `LpIconPinFilled`).
+  3. `cardVm.PropertyChanged += ...` (`line 436`) attaches a new anonymous delegate inside `RebuildStyleStrip()` every time `StyleFilter` changes (`All` / `Pinned` / `With Visuals` / `Motion`) without detaching prior handlers, leaking references to detached card controls.
+- **Concrete Fix:**
+  1. Bind strip card brushes dynamically using `control[!Property] = new DynamicResourceExtension("Lp...")` (or move the card template into `StageWindow.axaml` `<DataTemplate x:DataType="vm:StyleCardViewModel">` with `{DynamicResource}` bindings).
+  2. Replace the `"Pin"` `TextBlock` with a `PathIcon` bound to `LpIconPinRegular`/`LpIconPinFilled` inside a `40×40` hit area (visual `32×32` pill) using `{DynamicResource LpGlassPillBrush}` / `{DynamicResource LpAccentSoftBgBrush}`.
+  3. Track and unsubscribe `PropertyChanged` handlers (or use AXAML `DataTemplate` bindings) before rebuilding `StyleStripPanel.Children`.
+
+##### `UI-14` — Hidden `StageWindow` (`OnClosing` → Tray) Never Pauses `_heroHost` + Unreachable `IsFullscreen` Branch & Over-Wide Strip Viewport Floor
+- **Locations:**
+  - `src/LyricPulse.UI/Views/StageWindow.axaml.cs:86-111, 144-163, 245-252, 476, 495-501`
+  - `src/LyricPulse.Rendering/Host/LyricCanvasControl.cs:133, 255, 268`
+- **Evidence:**
+  1. When the user closes `StageWindow` to the System Tray (`OnClosing`, lines `146-159`), `Hide()` is called and `PauseAllPreviewCards(true)` pauses `_cardHosts.Values` (`lines 495-501`), **but `_heroHost` is never paused**. Because `Hide()` does not fire `OnUnloaded` and `LyricCanvasControl.cs:268` checks `IsVisible` (which stays `true`) rather than `IsEffectivelyVisible`, `_heroHost` keeps scheduling `RequestAnimationFrame` at 60+ FPS (`TargetMaxFps = 0`) and executing `AmbientPartyMesh.sksl` while the window is hidden.
+  2. In `OnViewModelPropertyChanged` (`lines 245-252`), the first `if (e.PropertyName == nameof(StageViewModel.IsFullscreen))` short-circuits the `or nameof(StageViewModel.IsFullscreen)` clause in the `else if`, so toggling `IsFullscreen` relies incidentally on `SizeChanged` instead of calling `UpdateVisibleStripCards()` reliably.
+  3. `UpdateVisibleStripCards()` (`line 476`) clamps `viewportW = Math.Max(StyleStripScroller.Viewport.Width, 1000.0)`, keeping off-screen cards unpaused when the available strip width is narrower than `1000` DIP (e.g., `760×600` compact mode or `380px` Settings drawer open).
+- **Concrete Fix:**
+  1. Pause `_heroHost.IsCardPaused = true` in `OnClosing` (`Hide()`) and resume `_heroHost.IsCardPaused = false; _heroHost.RequestWake();` in `SurfaceAndFocus` / `OnOpened`. Also check `IsEffectivelyVisible` (or window visibility) in `LyricCanvasControl` as defense-in-depth.
+  2. Call `UpdateVisibleStripCards()` inside the `IsFullscreen` branch of `OnViewModelPropertyChanged`, and remove the `1000.0` floor on `StyleStripScroller.Viewport.Width` once laid out (`> 0`).
+
+---
+
+#### MEDIUM
+
+##### `UI-15` — Media Status Dot Permanently Locked to `LpLiveGreenBrush`, Missing Active Button Selection States, `< 40px` Top Icon Hit Targets, & Minor Chrome Hexes
+- **Locations:**
+  - `src/LyricPulse.UI/Views/StageWindow.axaml:83-84, 157, 164, 171, 223-235, 263-268, 380-384`
+  - `src/LyricPulse.UI/Views/SettingsView.axaml:45-88, 198-203, 242-252, 311-316, 342-349`
+  - `src/LyricPulse.UI/Views/ObsBroadcastWindow.axaml:16, 18`
+- **Evidence:**
+  1. `StageWindow.axaml:83-84` sets `Fill="{DynamicResource LpLiveGreenBrush}"` unconditionally on the 8px media status dot even when `StageViewModel.MediaHealth` (`StageViewModel.cs:757`) is `Idle`, `Paused`, `Warning`, or `Error`—violating `MASTER.md` §1/§10 (Signal Emerald reserved exclusively for live playback).
+  2. Segmented/selection button groups—Style Filters (`All`/`Pinned`/`With Visuals`/`Motion`), Font/Backdrop flyouts (`StageWindow.axaml:223-235, 264-267`), Bilingual Sub-line (`SettingsView.axaml:198-203`), 5-Zone Safe Anchor Grid (`SettingsView.axaml:242-251`, despite `IsAnchorTopCenter`..`IsAnchorBottomRight` existing in `StageViewModel.cs:698-702`), Theme Variant (`311-316`), and Scrim Intensity (`342-349`)—have no bound active-state styling (`LpAccentSoftBgBrush`/`LpAccentBorderBrush`). The 4 font `RadioButton`s (`SettingsView.axaml:45-88`) also retain default Fluent circular bullets.
+  3. Top-right icon buttons (`StageWindow.axaml:157, 164, 171`) are `32×32` DIP (`< 40×40` DIP minimum hit area in `MASTER.md` §8.1).
+  4. `ObsBroadcastWindow.axaml:16, 18` uses hardcoded `#CC14161F`, `#33FFFFFF`, and `#F4F6FA` on the floating chroma bar (while its child `Button`s inherit Light/Dark theme foreground/backgrounds), and `SettingsView.axaml:252` hardcodes `#475569` for the simulated taskbar strip.
+- **Concrete Fix:**
+  1. Bind the 8px status dot `Fill` to `MediaHealth` (`LpLiveGreenBrush` for `PlayingSynced`, `LpWarningBrush` for `Warning`, `LpDangerBrush` for `Error`, `LpTextTertiaryBrush` for `Idle`/`Paused`/`Loading`).
+  2. Add `.active` / `:checked` pill styles using `LpAccentSoftBgBrush` + `LpAccentBorderBrush` (with `Padding` compensation so borders never shift layout) across all filter, anchor, theme, scrim, sub-line, and font-tile selectors.
+  3. Expand top-bar icon button hit areas to `40×40` DIP (`36×36` minimum) and replace `#CC14161F`/`#33FFFFFF`/`#F4F6FA` in `ObsBroadcastWindow.axaml` with `{DynamicResource LpGlassPillBrush}` / `{DynamicResource LpGlassPillBorderBrush}` / `{DynamicResource LpTextPrimaryBrush}` (and `{DynamicResource LpBorderStrongBrush}` for `SettingsView.axaml:252`).
+
+##### `UI-16` — `CutoutWord` & `Messages` Bypass HarfBuzz Multi-Script Fallback + Unsprung `FollowingDot` in 4 Styles + `NodeLine` RM Long-Line Overflow
+- **Locations:**
+  - `src/LyricPulse.Rendering/Styles/AestheticsOverlayRenderer.cs:234`
+  - `src/LyricPulse.Rendering/Styles/MessagesStyleRenderer.cs:205, 302, 314, 425, 433`
+  - `src/LyricPulse.Rendering/Styles/CodestyleStyleRenderer.cs:362`, `CodestyleVisualStyleRenderer.cs:376`, `SpidersWebStyleRenderer.cs:288`, `KineticWallStyleRenderer.cs:373`
+  - `src/LyricPulse.Rendering/Styles/NodeLineStyleRenderer.cs:102-109, 348`
+- **Evidence:**
+  1. `AestheticsOverlayRenderer.DrawInvertedCutoutWord` (`line 234`) draws directly with `canvas.DrawText(text, ..., font, _cutoutInkPaint)` without checking `FontAssetRegistry.InspectScriptRequirements` / HarfBuzz shaping, and `MessagesStyleRenderer` (`lines 205, 302, 314, 425, 433`) calls `canvas.DrawText` directly with `Segoe UI Variable`, risking tofu boxes (`□`) on CJK/Arabic/Devanagari lyrics in `Messages` and non-Latin cutout words in `FisheyeVisual`.
+  2. `CodestyleStyleRenderer`, `CodestyleVisualStyleRenderer`, `SpidersWebStyleRenderer`, and `KineticWallStyleRenderer` invoke `_aesthetics.DrawFollowingDot(...)` without calling `_aesthetics.AdvanceDot(...)` in `Advance()`, causing the pulse dot to teleport to `fallbackX/fallbackY` without `Spring.WordSnap` glide or hop arc.
+  3. `NodeLineStyleRenderer` sets `effectiveSpan = spanW * (count / 8f)` (`line 348`) for `> 8`-word lines while locking `panX = 0` under `ReducedMotion` (`line 104`), pushing words 9+ past the right viewport edge instead of wrapping to 2 static rows (`MOTION_AND_STYLES.md` §6 Style 8).
+- **Concrete Fix:**
+  1. Route `DrawInvertedCutoutWord` and `MessagesStyleRenderer` text runs through `FontAssetRegistry.InspectScriptRequirements` + `GetOrCreateFallbackFont` / `ShapeToBlobSynchronized` (using `LegibilityPipeline` or a shared cached blob helper).
+  2. Call `_aesthetics.AdvanceDot(...)` inside `Advance()` for `Codestyle`, `CodestyleVisual`, `SpidersWeb`, and `KineticWall` (or share the last-computed target anchor) so the dot hops smoothly on word changes.
+  3. In `NodeLineStyleRenderer`, clamp `effectiveSpan` to `spanW` (or wrap to 2 static rows) when `packet.ReducedMotion == true` and `wordCount > 8`.
+
+---
+
+#### LOW
+
+##### `UI-17` — Secondary Craft, Accessibility & Reduced-Motion Polish
+- **Locations:**
+  - `src/LyricPulse.UI/Views/StageWindow.axaml:36, 162, 169, 352`
+  - `src/LyricPulse.UI/Themes/ColorPickerTheme.axaml:1-6`
+  - `src/LyricPulse.UI/Controls/StageCardCanvasHost.cs:221-223`
+  - `src/LyricPulse.Rendering/Styles/AestheticsOverlayRenderer.cs:91-172`
+  - `src/LyricPulse.Rendering/Styles/MessagesStyleRenderer.cs:176, 384-385, 475, 503`
+- **Evidence:**
+  - `StageWindow.axaml:352` always renders `LpIconPinFilled` on the hero callout Pin button even when `IsActiveStylePinned == false` (and lines `162, 169` don't swap Regular/Filled states).
+  - `StageWindow.axaml:36` keeps `TopGlassBar` `0.18s` opacity transition active under `ReducedMotion` (`MASTER.md` §9 specifies `100ms` under Reduced Motion).
+  - `ColorPickerTheme.axaml` only sets `ColorViewContentBackgroundBrush` and `ColorViewTabBackgroundBrush` (`Transparent`), leaving inner `ColorPicker` flyout surfaces to `FluentTheme` defaults.
+  - `StageCardCanvasHost.GetFallbackDemoDocument()` (`lines 221-223`) synchronously initializes `GloveSemanticVisualMatcher` on the UI thread during first packet creation (`StarterLexicon` mode is fast, but could be pre-warmed off-thread).
+  - `AestheticsOverlayRenderer.DrawWordColorSweep` (`lines 91-172`) still draws the blurred moving glow sweep when `ReducedMotion == true`; `MessagesStyleRenderer` allocates small per-frame managed arrays/lists (`SKPoint[4]`, `List<LyricLine>`, `List<string>`).
+- **Concrete Fix:** Swap Regular/Filled `PathIcon` geometries on active toggles; use static underline-only in `DrawWordColorSweep` under `ReducedMotion`; hoist `MessagesStyleRenderer` corner arrays and scratch lists to instance fields.
+
+
+---
+
+### Phase 6 Re-Verification Addendum (`e0dfe47`)
+
+**Re-Verification Date:** 2026-11-25  
+**Commit Audited:** `e0dfe47` (`fix(ui,ux): remediate all Phase 6 v1.0 UI and UX audit blockers`)  
+**Updated Phase 6 Verdict:** **PASS WITH NOTES** — **0 Critical, 0 High blockers remain.** *(Build/test results `282/282`, 0 warnings, `--smoke-test` exit 0 reported by orchestrator; this re-verification audited source & git diff statically with `src/` read-only.)*
+
+#### Blocker Closure Matrix (`UI-13` – `UI-17`)
+
+| ID | Orig. Sev | Status on `e0dfe47` | Independent Verification Evidence |
+|---|---|---|---|
+| **`UI-13`** | HIGH | **RESOLVED** | `StageWindow.axaml.cs` removes `RebuildStyleStrip()` and `TryFindBrush(...)` entirely. `StageWindow.axaml:34-52, 450-513` binds the 10-card strip declaratively via `<ItemsControl ItemsSource="{Binding FilteredStyleCards}">`, `Button.card-btn`, and live `{DynamicResource}` brushes (`LpSurfaceBrush`, `LpBorderDefaultBrush`, `LpBorderStrongBrush`, `LpAccentBorderBrush`, `LpFocusRingBrush`, `LpStageBackgroundBrush`, `LpMediaOutlineBrush`, `LpAccentPrimaryBrush`, `LpOnAccentPrimaryBrush`, `LpTextPrimaryBrush`, `LpSurfaceElevatedBrush`, `LpTextSecondaryBrush`). Strip Pin control (`StageWindow.axaml:482-495`) is now a `40×40` `ToggleButton` with vector `PathIcon` (`LpIconPinFilled`, zero `"Pin"` ASCII text) and zero leaked `PropertyChanged` delegates. |
+| **`UI-14`** | HIGH | **RESOLVED** | `StageWindow.axaml.cs:173-178` pauses `_heroHost.IsCardPaused = true` alongside `PauseAllPreviewCards(true)` in `OnClosing` (`Hide()` to tray), and `SurfaceAndFocus`/`OnOpened` (`lines 109-113, 151-155`) resume `_heroHost.IsCardPaused = false; _heroHost.RequestWake();`. `OnViewModelPropertyChanged` (`lines 372-376`) calls `UpdateVisibleStripCards()` inside the `IsFullscreen` branch, and `UpdateVisibleStripCards` (`line 420`) lowers the viewport floor from `1000.0` to `320.0`. |
+| **`UI-15`** | MEDIUM | **MOSTLY RESOLVED** | `StageWindow.axaml:117-130` binds the 8px status dot to `StageViewModel.MediaHealthDotBrush` (`PlayingSynced` green, `Warning` amber, `Error` red, `Loading` indigo, `Idle`/`Paused` muted slate) + `ShowTroubleshootingPill` (`"Fix?"`). Active selection styling (`Button.chip.active`, `Button.seg.active`) is wired across Font/Backdrop flyouts, Gallery filters, Bilingual Sub-line, 5-Zone Safe Anchor Grid, Theme Variant, and Scrim Intensity (`StageWindow.axaml:22-33, 91-98, 265-276, 306-309, 418-421`; `SettingsView.axaml:11-23, 213-218, 257-266, 326-331, 357-364`). Top icon buttons expanded to `36×36` (`StageWindow.axaml:197-218`), and `SettingsView.axaml:267` uses `{DynamicResource LpBorderDefaultBrush}` for the taskbar strip. *(Remaining non-blocking notes below.)* |
+| **`UI-16`** | MEDIUM | **DEFERRED (Non-blocking Note)** | `LyricPulse.Rendering` was unchanged in `e0dfe47`; HarfBuzz fallback in `DrawInvertedCutoutWord` & `MessagesStyleRenderer`, `AdvanceDot` spring glide in 4 styles, and `NodeLine` RM long-line wrapping remain deferred post-v1.0 polish. |
+| **`UI-17`** | LOW | **DEFERRED (Non-blocking Note)** | Hero `Pin` Regular/Filled swap, `TopGlassBar` RM `100ms` duration, `ColorPickerTheme` inner flyout overrides, and `MessagesStyleRenderer` small managed list hoisting remain non-blocking polish. |
+
+#### Remaining Non-Blocking Notes Observed in `e0dfe47`
+1. **Local Property Precedence on Top Studio Pill Chips (`StageWindow.axaml:91-98`):** `Size`, `Font`, `Screen`, and `Aesthetics` buttons retain inline `Background="Transparent" BorderThickness="0"`, which overrides `Button.chip.active`'s `Background` and `BorderThickness="1.5"` in Avalonia (only `Foreground` from `.active` applies). Removing those two local attributes lets the active flyout pill highlight cleanly.
+2. **Light-Mode Status Dot Brush Tokens (`StageViewModel.cs:909-916`):** `MediaHealthDotBrush` allocates `new SolidColorBrush(...)` with dark-theme hexes (`#22C55E`, `#F59E0B`, `#DC2626`) rather than cached/theme-aware `LpLiveGreenBrush`/`LpWarningBrush` tokens (`#15803D`/`#B45309` in Light mode); paired with text label so legible, easily improved post-v1.0.
+3. **`ObsBroadcastWindow.axaml:16,18` & Font `RadioButton` Template (`SettingsView.axaml:60-103`):** Floating OBS chroma pill still uses `#CC14161F`/`#33FFFFFF`/`#F4F6FA` over `#00FF00` chroma key, and font tiles still display default Fluent `RadioButton` circles.

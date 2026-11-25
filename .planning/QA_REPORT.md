@@ -378,3 +378,104 @@
 #### Non-Blocking Phase 4/5 Hygiene Notes (LOW)
 - `src/LyricPulse.Rendering/Fonts/FontAssetRegistry.cs:518`: Wrap one-time startup `new SKFontStyle(...)` in `using` (`SKFontStyle` is `IDisposable`).
 - `src/LyricPulse.Rendering/Fonts/FontAssetRegistry.cs:265-281` & `TextShaperService.cs:54-55`: Before adding concurrent Phase 5 Gallery thumbnail renderers, guard shared cached `SKShaper` instances against multi-threaded `Shape()` calls (currently safe because all `MeasureWidth`/`ShapeToBlob` calls run serialized on Avalonia's single Win32 compositor thread).
+
+---
+
+## Phase 6 v1.0 Release QA Audit
+
+- **Target Scope:** Complete `LyricPulse` v1.0 codebase (`LyricPulse.Core`, `LyricPulse.Rendering`, `LyricPulse.UI`, `LyricPulse.App`, `LyricPulse.Tests`)
+- **Audited Commit:** `b88131e` (`.NET 10.0.404` SDK, `net10.0-windows10.0.19041.0`, READ-ONLY audit on `src/`)
+- **Verdict:** **PASS** (**0 CRITICAL, 0 HIGH blockers**; 2 non-blocking MEDIUM, 3 LOW)
+  - `Debug` & `Release` builds (AOT/Trim/SingleFile analyzers enabled): **0 warnings, 0 errors**.
+  - `dotnet test` offline deterministic suite: **279 / 279 passed, 0 failed, 0 skipped**.
+  - `LyricPulse.Core` (`96.33%` line / `86.51%` branch) and `LyricPulse.Rendering` (`94.99%` line / `84.76%` branch) both clear the `>= 80%` line & branch gate.
+  - Release `--smoke-test`: **ExitCode = 0** across 5 fonts, 3/3 SkSL shaders, 12-line Neon Horizon demo, 10/10 styles, and 10 StageCards.
+  - Forbidden APIs, reflection JSON serialization, hardcoded secrets, Core dependency isolation, and native Skia resource hygiene across all 10 styles / `StageBackdropRenderer` / `AestheticsOverlayRenderer` / `StageCardCanvasHost` all **PASS**.
+
+---
+
+### 1. Build, Test, Smoke & Coverage Summary (`b88131e`)
+
+| Verification Gate | Measured Result (`b88131e`) | Requirement / Target | Status |
+|---|---|---|---|
+| `dotnet build LyricPulse.sln -c Debug --no-restore` | **0 warnings, 0 errors** (Exit 0, `52.09s`) | 0 warnings / 0 errors | **PASS** |
+| `dotnet build LyricPulse.sln -c Release --no-restore` | **0 warnings, 0 errors** (Exit 0, `39.51s`) | 0 AOT/trim/single-file warnings | **PASS** |
+| `dotnet test LyricPulse.sln -c Debug --no-build --collect:"XPlat Code Coverage"` | **279 passed, 0 failed, 0 skipped** (`23s`) | 100% deterministic offline pass | **PASS** |
+| Release `LyricPulse.App.exe --smoke-test` | **ExitCode = 0** (`[PASS] LyricPulse Phase 5 smoke test succeeded \| Fonts=5 \| Shaders=3/3 OK \| DemoLines=12 \| Styles=10/10 \| StageCards=10 \| TrayHeader='Demo: Neon Horizon'`, empty stderr) | Clean headless startup & 10-style render | **PASS** |
+| `LyricPulse.Core` Line Coverage (`coverlet.runsettings`) | **96.33%** (`4,983 / 5,173`) | `>= 80%` | **PASS** |
+| `LyricPulse.Core` Branch Coverage (`coverlet.runsettings`) | **86.51%** (`1,821 / 2,105`) | `>= 80%` | **PASS** |
+| `LyricPulse.Rendering` Line Coverage (`coverlet.runsettings`) | **94.99%** (`6,043 / 6,362`) | `>= 80%` | **PASS** |
+| `LyricPulse.Rendering` Branch Coverage (`coverlet.runsettings`) | **84.76%** (`1,919 / 2,264`) | `>= 80%` | **PASS** |
+| `LyricPulse.UI` *(informational — Avalonia Views/ViewModels)* | `42.85%` line (`665 / 1,552`), `19.26%` branch (`83 / 431`) | ViewModels & catalog unit-tested | **INFO** |
+| `LyricPulse.App` *(informational — Win32/Avalonia shells)* | `37.79%` line (`930 / 2,461`), `40.22%` branch (`364 / 905`) | Pure logic tested (`Bounds`/`Hotkeys`/`Tray`/`Guard`) | **INFO** |
+| `LyricPulse.Core` SkiaSharp / Avalonia / HarfBuzz Isolation | **0 / 17** libraries (`src/LyricPulse.Core/obj/project.assets.json`) | Strictly 0 direct or transitive | **PASS** |
+
+#### Per-File Coverage Highlights (`b88131e` — Phase 4/5 Additions)
+
+| Assembly | Source File | Line Coverage | Lines | Branch Coverage | Branches |
+|---|---|---:|---:|---:|---:|
+| `LyricPulse.Core` | `Visuals/GloveSemanticVisualMatcher.cs` | 96.96% | 255 / 263 | 91.23% | 104 / 114 |
+| `LyricPulse.Core` | `Visuals/QuantizedEmbeddingTable.cs` | 97.40% | 225 / 231 | 87.23% | 82 / 94 |
+| `LyricPulse.Core` | `Visuals/SemanticIdiomLexicon.cs` | 97.22% | 175 / 180 | 89.47% | 34 / 38 |
+| `LyricPulse.Core` | `Visuals/StarterLexiconCatalog.cs` | 93.04% | 107 / 115 | 86.76% | 59 / 68 |
+| `LyricPulse.Core` | `Runtime/OverlayRuntimeController.cs` | 90.65% | 485 / 535 | 71.60% | 116 / 162 |
+| `LyricPulse.Rendering` | `Styles/AestheticsOverlayRenderer.cs` | 98.96% | 190 / 192 | 90.00% | 45 / 50 |
+| `LyricPulse.Rendering` | `Styles/StageBackdropRenderer.cs` | 98.36% | 120 / 122 | 84.62% | 22 / 26 |
+| `LyricPulse.Rendering` | `Styles/FisheyeStyleRenderer.cs` | 97.93% | 378 / 386 | 89.80% | 88 / 98 |
+| `LyricPulse.Rendering` | `Styles/FisheyeVisualStyleRenderer.cs` | 95.39% | 435 / 456 | 81.25% | 91 / 112 |
+| `LyricPulse.Rendering` | `Styles/CodestyleStyleRenderer.cs` | 96.82% | 335 / 346 | 88.43% | 107 / 121 |
+| `LyricPulse.Rendering` | `Styles/CodestyleVisualStyleRenderer.cs` | 94.09% | 366 / 389 | 85.16% | 132 / 155 |
+| `LyricPulse.Rendering` | `Styles/VisualStackStyleRenderer.cs` | 94.13% | 433 / 460 | 84.30% | 145 / 172 |
+| `LyricPulse.Rendering` | `Styles/ConstellationStyleRenderer.cs` | 95.05% | 288 / 303 | 91.13% | 113 / 124 |
+| `LyricPulse.Rendering` | `Styles/SpidersWebStyleRenderer.cs` | 96.99% | 258 / 266 | 90.18% | 101 / 112 |
+| `LyricPulse.Rendering` | `Styles/NodeLineStyleRenderer.cs` | 96.04% | 291 / 303 | 88.89% | 112 / 126 |
+| `LyricPulse.Rendering` | `Styles/KineticWallStyleRenderer.cs` | 94.88% | 278 / 293 | 85.00% | 68 / 80 |
+| `LyricPulse.Rendering` | `Styles/MessagesStyleRenderer.cs` | 94.36% | 368 / 390 | 83.52% | 147 / 176 |
+| `LyricPulse.Rendering` | `Styles/LyricStyleRouter.cs` | 95.24% | 120 / 126 | 83.33% | 40 / 48 |
+
+---
+
+### 2. Security, AOT, Resource-Hygiene & Thread-Safety Verification
+
+| Audit Dimension | Verification Evidence | Verdict |
+|---|---|---|
+| **Forbidden APIs (`src/`)** | `git grep` for `[DllImport`, `SKTypeface.FromStream`, `SKPaint.TextSize`, `.TextSize =`, `SKFilterQuality`, `<RuntimeIdentifiers>` across `src/` returned **0 hits**. | **PASS** |
+| **AOT / Trim JSON Serialization** | Every `JsonSerializer.SerializeAsync` / `DeserializeAsync` call in `src/` (`DiskLyricsCache`, `LrcLibLyricsProvider`, `NetEaseLyricsProvider`, `TimingOffsetService`, `JsonSettingsStore`) uses source-generated `LyricPulseJsonContext` / `LyricPulseIndentedJsonContext`. `IsAotCompatible`, `EnableTrimAnalyzer`, and `EnableAotAnalyzer` pass with 0 warnings in `Release`. | **PASS** |
+| **Hardcoded Secrets** | `git grep` across `src/` (excluding font/lexicon assets) for `apikey`, `api_key`, `client_secret`, `password`, `bearer`, `authorization:`, `x-api-key`, `private_key` returned **0 hits**. | **PASS** |
+| **Native Skia Hygiene (All 10 Styles + Backdrop + Aesthetics + StageCardCanvasHost)** | All 10 style renderers, `StageBackdropRenderer`, `AestheticsOverlayRenderer`, `PlaybackLifecycleChoreographer`, `ShaderLibrary`, `LegibilityPipeline`, `FontAssetRegistry`, and `LyricStyleRouter` own field-level `SKPaint` / `SKImageFilter` / `SKPath` / `SKRoundRect` / `SKRuntimeEffect` / `SKTextBlob` / `SKShaper` instances and dispose every handle in `Dispose()`. Per-frame `SKShader` gradients (`StageBackdropRenderer`, `AestheticsOverlayRenderer`, `MessagesStyleRenderer`, `LegibilityPipeline`) and offscreen snapshots (`ShaderLibrary`) are scoped with `using var` and detached from paints inside `finally` blocks. `StageCardCanvasHost` creates per-host renderers via `ILyricSceneRendererFactory` (`ownsRenderer: true`) outside root MS.DI tracking and disposes `_canvas` in `Dispose()` (called by `StageWindow.Dispose()` and `ObsBroadcastWindow.Dispose()`). | **PASS** |
+| **Cross-Thread Synchronization (`StageWindow`, `StageViewModel`, `TrayController`, `LyricCanvasControl`)** | `LyricCanvasControl` synchronizes `AdvanceAnimationFrame`, `RenderSynchronized`, `ReleaseGpuResources`, `SetRenderer`, and `Dispose` under `_renderSync`. `LyricStyleRouter` synchronizes `AdvancePhysics`, `Render`, `LastLifecycleState`, and `Dispose` under `_sync`. `ShaderLibrary` guards shared SkSL uniforms/children/`_blitPaint` under `_shaderSync`. `FontAssetRegistry` synchronizes `SKFont`, fallback `SKTypeface`, and HarfBuzz `SKShaper` (`ShapeSynchronized` / `ShapeToBlobSynchronized`) under `_cacheLock` and retires evicted `SKFont`s until `Dispose()`. `TrayController` marshals all snapshot/conflict/theme updates onto `Dispatcher.UIThread` so `_lastState` and `NativeMenu` mutations are strictly serialized on the UI thread, and `App.CleanupDesktopHost` tears down UI/tray/windows before stopping/disposing `_runtime` and `_services`. | **PASS** |
+| **Test Suite Determinism** | `tests/` contains **0** `Skip=` attributes, **0** `Thread.Sleep` calls, and **0** live network `HttpClient` calls (all HTTP tests use mock `HttpMessageHandler`s). | **PASS** |
+
+---
+
+### 3. Severity-Classified Findings (`b88131e` — Read-Only Audit)
+
+#### CRITICAL / HIGH Findings
+
+*None.* (`0 CRITICAL`, `0 HIGH`)
+
+#### MEDIUM Findings
+
+1. **[MEDIUM] `StageWindow.RebuildStyleStrip` Multi-Rebuild Churn & `StyleCardViewModel.PropertyChanged` Handler Leak**
+   - **Locations:**
+     - `src/LyricPulse.UI/Views/StageWindow.axaml.cs:273-284,436-453`
+     - `src/LyricPulse.UI/ViewModels/StageViewModel.cs:1091-1109`
+   - **Details:** `StageViewModel.RebuildFilteredStyleCards()` calls `FilteredStyleCards.Clear()` followed by up to 10 individual `FilteredStyleCards.Add(card)` calls, firing `CollectionChanged` up to 11 times per filter switch (`All` / `Pinned` / `With Visuals` / `Motion`) or pin toggle in `"Pinned"` view. Each event invokes `StageWindow.RebuildStyleStrip()`, which clears `StyleStripPanel.Children` (triggering `OnUnloaded`/`ReleaseGpuResources()` churn on reused `_cardHosts`) and attaches a fresh anonymous `cardVm.PropertyChanged += (_, ev) => { ... }` handler (`line 436`) without unsubscribing previous handlers. Repeated filter clicks accumulate zombie handlers on `StyleCardViewModel` that retain discarded `Border`/`Grid`/`ToggleButton` visual trees in managed memory.
+   - **Recommendation:** Batch-replace or suppress rebuilds during `RebuildFilteredStyleCards()` (or map/reorder existing card `Border` containers once at startup and toggle `IsVisible` per filter), and store/unsubscribe `PropertyChanged` delegates when rebuilding.
+
+2. **[MEDIUM] `StageViewModel.SafeRunAsync` Drops Non-Cancellation Exceptions Unobserved & Unlogged**
+   - **Location:** `src/LyricPulse.UI/ViewModels/StageViewModel.cs:1133-1147`
+   - **Details:** `SafeRunAsync` catches only `OperationCanceledException` and `ObjectDisposedException` when invoked via fire-and-forget `_ = SafeRunAsync(...)` from commands and property setters. Unlike `TrayController.SafeInvokeAsync` (`src/LyricPulse.App/Tray/TrayController.cs:419-435`), unexpected exceptions (e.g., `IOException` during `JsonSettingsStore.SaveAsync`) escape the `async Task` as unobserved `Task` exceptions without logging.
+   - **Recommendation:** Inject `ILogger<StageViewModel>?` (default `NullLogger<StageViewModel>.Instance`) and add a `catch (Exception ex)` block logging action failures consistently with `TrayController`.
+
+#### LOW Findings
+
+3. **[LOW] `StageWindow.OnViewModelPropertyChanged` Unreachable `IsFullscreen` Branch**
+   - **Location:** `src/LyricPulse.UI/Views/StageWindow.axaml.cs:245-252`
+   - **Details:** `else if (e.PropertyName is nameof(StageViewModel.EffectivePreviewsPaused) or nameof(StageViewModel.IsFullscreen))` (`line 249`) can never match `IsFullscreen` because `if (e.PropertyName == nameof(StageViewModel.IsFullscreen))` (`line 245`) already handles it, skipping `UpdateVisibleStripCards()` on fullscreen transitions (visually mitigated by `ShowBottomStyleStrip` hiding the strip container).
+
+4. **[LOW] Minor Disposal & Idle-Cache Hygiene (`StageWindow`, `StageCardCanvasHost`, `TrayController`, `App`)**
+   - `src/LyricPulse.UI/Views/StageWindow.axaml.cs:125-142`: `Dispose()` does not unsubscribe `viewModel.PropertyChanged` or `viewModel.FilteredStyleCards.CollectionChanged`.
+   - `src/LyricPulse.UI/Controls/StageCardCanvasHost.cs:205-225`: `GetFallbackDemoDocument()` constructs a standalone `GloveSemanticVisualMatcher` on first idle render and hardcodes `VisualPreference.Balanced` rather than reusing the runtime's initialized matcher/preference.
+   - `src/LyricPulse.App/Tray/TrayController.cs:97,118,137,160` & `src/LyricPulse.App/App.axaml.cs:414`: `_disposed` is read directly instead of via `Volatile.Read(ref _disposed)` (benign in practice since `Interlocked.Exchange` fences disposal and `TrayController` updates run on `Dispatcher.UIThread`).
+

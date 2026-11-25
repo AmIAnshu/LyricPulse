@@ -304,3 +304,167 @@
 2. **[LOW] Zero-Music First Launch Discoverability (`App.axaml.cs:153-187`):** Launching `LyricPulse.App.exe` without `--demo` and with no player active stays silent in the Windows tray (resolved naturally when Phase 5 opens `GalleryWindow` on first launch; in Milestone 1A, double-clicking the `.exe` a second time or left-clicking the tray immediately launches `Neon Horizon` Demo Mode).
 3. **[MEDIUM — Deferred to Phase 5] Tray `NativeMenu` In-Place Mutation & Hotkey Style-Switch Cue (`UX-07` / `UX-10`):** `TrayController.cs:147` replaces `_trayIcon.Menu` on state transitions (rather than mutating persistent `NativeMenuItem` instances in place), and `Ctrl+Shift+S` / `Ctrl+Shift+L` have no transient HUD confirmation pill when pressed during idle/paused states.
 4. **[LOW — Deferred to Phase 6 Packaging] Shell Icon & All-Displays-Disabled Notice (`UX-11` / `UX-13`):** Add multi-size `LyricPulse.ico` `<ApplicationIcon>` to `LyricPulse.App.csproj` and surface an `"All displays disabled"` tray status once Phase 5 exposes per-monitor `DisabledDisplays` switches.
+
+
+---
+
+## Phase 6 v1.0 Release UX Audit
+
+**Audit Date:** 2026-11-25  
+**Commit Audited:** `b88131e` (`master`, read-only inspection of `src/`)  
+**Auditor:** LyricPulse UX Evaluator (ECC Review & UX Recipes)  
+**Authoritative Specs Audited Against:**
+- `design-system/lyricpulse/MASTER.md`
+- `design-system/lyricpulse/pages/gallery.md`
+- `design-system/lyricpulse/pages/settings.md`
+- `design-system/lyricpulse/pages/tray.md`
+
+### Executive Verdict: **FAIL** *(0 CRITICAL, 5 HIGH, 5 MEDIUM, 4 LOW — 5 HIGH UX/A11y/Contrast Blockers Before v1.0 Release Sign-Off)*
+
+> **Summary:** Core v1.0 architecture is strong—`StageWindow` launches directly into the grainy `AmbientPartyMesh` stage with automatic idle `Neon Horizon` fallback, `FullscreenStageScale` (`1.85×`) scales all 10 styles cleanly, `Following Beat Dot` and `Color-Changing Sweep Layer` work across renderers, `F11` enters borderless fullscreen with 2s idle bar auto-hide and `Esc` cascade, minimize-to-tray (`X`) and clean `1.5s`-bounded Quit teardown work reliably, and 2-step Reset safety + OBS Chroma-Key capture are in place. However, **5 HIGH** issues in responsive Settings drawer docking (`< 880px`), hotkey capture/conflict rollback, keyboard accessibility of the 10-card strip & drawer focus, missing active-selection/media-health UI bindings, and Light-mode contrast block immediate v1.0 sign-off.
+
+---
+
+### 1. v1.0 User Journey & CEO Requirements Scorecard
+
+| # | User Journey / CEO Requirement | Status | Key Evidence & Verdict Notes |
+|---|---|---|---|
+| 1 | **Primary `StageWindow` Launch, Floating Glass Pill Bar, `<`/`>` Carousel & 10-Card Strip** | **PARTIAL / FAIL** | Launches directly into `StageWindow` (`App.axaml.cs:165, 190-192`) with `AmbientPartyMesh.sksl` grain/vignette + idle `Neon Horizon` fallback (`StageCardCanvasHost.cs:159-179`) and `<`/`>` carousel (`StageWindow.axaml:314-334`). Blocked by hardcoded green media dot (`UX6-04`), unreadable Light-mode hero counter/category contrast (`UX6-05`), unfocusable `Border` strip cards (`UX6-03`), and missing active filter/font states (`UX6-04`). |
+| 2 | **`F11` Pure Fullscreen Party Stage, 2s Idle Auto-Hide, Mouse Wake & `Esc` Cascade** | **PASS WITH NOTES** | `F11` hides carousel/strip (`StageViewModel.cs:427-428`), enters `WindowState.FullScreen` with `ExtendClientAreaTitleBarHeightHint = 0` (`StageWindow.axaml.cs:255-270`), fades `TopGlassBar` after `2.0s` idle pointer (`lines 63-71`), wakes on `OnPointerMoved` (`lines 165-174`), and cascades `Esc` (`Flyout -> Settings -> Fullscreen`, `StageViewModel.cs:110-128`). Minor `Done`-button timer gap (`UX6-12`). |
+| 3 | **Bigger Concert Typography (`1.85×`), Following Beat Dot & Color-Changing Sweep Layer** | **PASS** | `DefaultFullscreenStageScale = 1.85f` (`AppSettings.cs:91`) flows via `OverlayFrameAdapter.ComputeRecommendedHeroScale` (`OverlayFrameAdapter.cs:90-93`) into `EffectiveHeroFontSizeDip` and `StyleLayoutHelper.ResolveStyleFontSize` across all 10 styles (`Codestyle*` capped cleanly at `68f`, `Messages` scaled `1.0–1.65×`). `ShowFollowingDot` & `ShowColorSweepLayer` toggles in Aesthetics flyout & Settings drive `AestheticsOverlayRenderer` cleanly. |
+| 4 | **Diagnostics Flyout, Retry Fetch, Universal Player Toggle, `−1s..+1s` Offset & Desktop Overlay Toggle** | **PASS WITH NOTES** | Diagnostics flyout surfaces GSMTC, Lyrics pipeline, Display count, `Follow All Media Players`, `Retry Lyrics`, and `Toggle Demo` (`StageWindow.axaml:288-309`); 5-step tabular `−1s..+1s` offset + `0.0s` reset + `Ctrl+Left/Right/0` work cleanly; `DesktopOverlayEnabled` toggle switches multi-monitor click-through overlays (`App.axaml.cs:398-409`). Blocked by unbound `MediaHealth` dot & `ShowTroubleshootingPill` (`UX6-04`). |
+| 5 | **Minimize-to-Tray (`X`), Second-Instance Wakeup, Responsive Settings Drawer, Hotkey Capture, 2-Step Reset & Quit** | **FAIL** | `OnClosing` minimizes cleanly to tray (`StageWindow.axaml.cs:144-163`), 2-step Reset works (`SettingsView.axaml:393-403`), and `CleanupDesktopHost` (`App.axaml.cs:590-684`) disposes tray/windows before `1.5s`-bounded runtime teardown. Blocked by `< 880px` inline drawer squeeze (`UX6-01`), hotkey capture unregistering valid keys on conflict + failing `D0–D9`/`Backspace` (`UX6-02`), missing Settings focus management (`UX6-03`), missing Settings active states (`UX6-04`), and second-instance demo hijack (`UX6-06`). |
+
+---
+
+### 2. Severity-Classified Findings
+
+#### HIGH (Release Blockers)
+
+##### `UX6-01` — Settings Drawer Always Docks Inline (`380px`), Squeezing `StageWindow` & Clipping Top Bar Below `880px`
+- **Locations:**
+  - `src/LyricPulse.UI/Views/StageWindow.axaml:10, 21, 40, 417-420`
+  - `src/LyricPulse.UI/Themes/LyricPulseTokens.axaml:37, 40, 76, 79, 101` (`LpDrawerScrimBrush`, `LpShadowDrawer`, `LpRadiusDrawer` unused)
+- **User Impact:** `StageWindow` defines `MinWidth="760"` (`line 10`), yet `SettingsView` is permanently placed in `Grid.Column="1"` (`Width="380"`, `lines 418-420`). When a user opens Settings (`Ctrl+,` or gear icon) at `760–880px` (or even `1000px`), the main stage/gallery pane is crushed to `380–620px` wide, clipping the `Auto,*,Auto` `TopGlassBar` pill bar off the right edge. Violates `settings.md:11-13` (compact `< 880px` slide-over drawer with `LpDrawerScrimBrush` backdrop).
+- **Concrete Fix:** Switch `SettingsView` dynamically at `Bounds.Width < 880` to a right-anchored overlay `Grid.Column="0"` (`Width="360"`, `CornerRadius="{StaticResource LpRadiusDrawer}"`, `BoxShadow="{DynamicResource LpShadowDrawer}"`) backed by a clickable `LpDrawerScrimBrush` dismiss layer; keep `380px` inline docking at `>= 880px` (and `400px` at `>= 1200px`), and allow `TopGlassBar` pills to wrap/compact gracefully at narrow widths.
+
+##### `UX6-02` — Hotkey Recorder Destroys Valid Previous Shortcut on Conflict & Rejects `D0–D9` / `Backspace` / `Delete`
+- **Locations:**
+  - `src/LyricPulse.App/Platform/GlobalHotkeyManager.cs:209-228`
+  - `src/LyricPulse.UI/ViewModels/StageViewModel.cs:274-283, 1028-1042`
+  - `src/LyricPulse.UI/Views/StageWindow.axaml.cs:178-195, 506-523`
+  - `src/LyricPulse.App/Platform/HotkeyGestureParser.cs:139-206`
+- **User Impact:**
+  1. **Silent Loss of Working Hotkey on Conflict:** When rebinding an active hotkey (e.g., `Ctrl+Shift+L`) to a shortcut occupied by another app (`ERROR_HOTKEY_ALREADY_REGISTERED`), `GlobalHotkeyManager.DrainCommandsOnMessageThread` (`lines 210-214`) unregisters the existing Win32 hotkey ID *before* attempting `RegisterHotKey` for the candidate. When registration fails, `CommitCapturedHotkey` keeps `"Ctrl+Shift+L"` in `AppSettings.GlobalHotkeys` (`lines 1031-1041`) without re-registering it—so the UI displays `"Ctrl+Shift+L"` while the shortcut is dead until restart (violates `settings.md:149`).
+  2. **Number Keys Fail (`D0–D9`):** `StageWindow.FormatKeyGesture` (`line 519`) formats `Key.D1..Key.D9` as `"D1".."D9"`, which `HotkeyGestureParser.TryParseVirtualKey` (`lines 141-205`) rejects with `"Unrecognized key 'D1'"`.
+  3. **Cannot Clear with `Backspace` / `Delete`:** `ClearHotkeyCommand` (`StageViewModel.cs:274-283`) is unwired from both `SettingsView.axaml` and `StageWindow.OnKeyDown`, so pressing `Backspace` or `Delete` (`settings.md:148`) shows `"Include Ctrl, Alt, or Shift+Ctrl/Alt."` instead of clearing to `"Unassigned"`.
+- **Concrete Fix:** (1) On `TryRegister` failure in `ValidateAndRegisterSingleHotkey` / `GlobalHotkeyManager`, immediately restore the previous valid binding via Win32 `RegisterHotKey`; (2) normalize `Key.D0..Key.D9` (and `OemMinus`, `OemPlus`, `OemQuestion`, `Oem1`, `OemPipe`) in `FormatKeyGesture` / `TryParseVirtualKey`; (3) handle `Key.Back` / `Key.Delete` during `IsRecordingHotkey` to execute `ClearHotkeyCommand` and exit capture.
+
+##### `UX6-03` — Bottom 10-Card Strip Unreachable via Keyboard + Missing Settings/Flyout Focus Management
+- **Locations:**
+  - `src/LyricPulse.UI/Views/StageWindow.axaml.cs:238-253, 331-353, 404-424`
+  - `src/LyricPulse.UI/ViewModels/StageViewModel.cs:110-157`
+  - `src/LyricPulse.UI/Views/SettingsView.axaml:22-33`
+- **User Impact:**
+  1. All 10 style cards in `RebuildStyleStrip()` are constructed as raw `Border` controls with `PointerPressed` (`lines 404-424`)—they are not `Focusable`, have no `TabStop`, no `Enter`/`Space` key activation, no `AutomationProperties.Name`, and no `:focus-visible` ring (`MASTER.md:302`). Meanwhile, each card's `pinBtn` (`lines 331-353`) lacks `AutomationProperties.Name` (screen readers announce only `"Pin"`/`"Pinned"` without the style name).
+  2. Opening Settings (`Ctrl+,` or gear button) or any Top Pill flyout does not move keyboard focus inside the panel, and pressing `Esc` (`ExitFullscreenCommand`) does not restore focus to the trigger control (`settings.md:19`, `MASTER.md:310`).
+- **Concrete Fix:** Build strip cards as focusable `Button`s (or `Focusable = true` with `KeyDown` `Enter`/`Space`, `AutomationProperties.Name="{DisplayName}, {CapabilityChip}"`, and `:focus-visible` `LpFocusRingBrush` adorner), add `AutomationProperties.Name` from `cardVm.PinToolTip` on `pinBtn`, and manage focus entry/restoration on `IsSettingsDrawerOpen` and `ActiveFlyout` transitions.
+
+##### `UX6-04` — Unbound Media Health Dot / Troubleshooting Pill & Missing Active-State Indicators on 7 Control Groups
+- **Locations:**
+  - `src/LyricPulse.UI/Views/StageWindow.axaml:83-84, 223-234, 264-267, 380-383`
+  - `src/LyricPulse.UI/Views/SettingsView.axaml:197-204, 242-251, 310-317, 341-350`
+  - `src/LyricPulse.UI/ViewModels/StageViewModel.cs:698-702, 757-783`
+- **User Impact:**
+  1. **Always-Green Media Dot & Hidden Troubleshooting Affordance:** `StageWindow.axaml:83-84` hardcodes `Fill="{DynamicResource LpLiveGreenBrush}"` even when `"No music playing"`, `"Paused"`, `"Lyrics offline"`, or `"No synced lyrics"`—violating `MASTER.md:23, 356` and `gallery.md:54-60`. `StageViewModel.MediaHealth` (`lines 757-780`) and `ShowTroubleshootingPill` (`lines 782-783`) exist in the ViewModel but are completely unbound in XAML.
+  2. **Invisible Selection State on 7 Button Groups:** Plain `<Button>` controls with zero checked/selected styling are used for: (a) Settings **5-Zone Safe Anchor Grid** (`Top`/`Center`/`B-Left`/`B-Third`/`B-Right`, even though `IsAnchorTopCenter..IsAnchorBottomRight` exist at `StageViewModel.cs:698-702`), (b) **Theme Variant** (`System`/`Dark`/`Light`), (c) **Ambient Scrim Intensity** (`Off`/`Subtle`/`Balanced`/`Strong`), (d) **Bilingual Sub-line** (`Off`/`Translate`/`Romanize`), (e) Aesthetics flyout **Backdrop Mode** (`Ambient Party Mesh`/`Pure Black`), (f) Font flyout **Typeface tiles**, and (g) Bottom strip **Filter chips** (`All`/`Pinned`/`With Visuals`/`Motion`). Users cannot tell which option is currently active.
+- **Concrete Fix:** Bind the media status dot fill & troubleshooting pill (`"Not detecting?"` / `"Fix sync"`) to `MediaHealth` / `ShowTroubleshootingPill`, and convert all 7 selection groups to `RadioButton` / `ToggleButton` (or `.active` pseudoclass bound to VM properties) with `LpAccentSoftBgBrush` + `LpAccentBorderBrush` active styling.
+
+##### `UX6-05` — Unreadable Light-Mode Contrast on Hero Stage Counter Pill (`~1.4:1`) & Category Label (`~1.8:1`)
+- **Locations:**
+  - `src/LyricPulse.UI/Views/StageWindow.axaml:339, 355-358`
+  - `src/LyricPulse.UI/Themes/LyricPulseTokens.axaml:48-49, 60`
+- **User Impact:** When switching to **Light** theme (`Settings -> Light`), `StyleCounterText` (`Foreground="#CBD5E1"`, `StageWindow.axaml:357`) renders inside `LpGlassPillBrush` (`#EBFFFFFF` frosted white in Light mode, `LyricPulseTokens.axaml:49`), collapsing to **~1.4:1** contrast (completely illegible). Simultaneously, `SelectedStyleInfo.CategoryLabel` (`StageWindow.axaml:339`) binds `Foreground="{DynamicResource LpAccentTextBrush}"`, which flips to `#3730A3` dark indigo (`LyricPulseTokens.axaml:60`) directly on the `#0E1017` dark hero stage (**~1.8:1** contrast).
+- **Concrete Fix:** Bind `StyleCounterText` to `{DynamicResource LpTextSecondaryBrush}` (high contrast inside `LpGlassPillBrush` in both themes) and style `CategoryLabel` as an always-dark-stage luminous token (`#A5B4FC` or a `LpStageAccentTextBrush` / glass pill badge) since the hero stage canvas remains dark in both themes.
+
+---
+
+#### MEDIUM
+
+##### `UX6-06` — Second-Instance Wakeup & `Ctrl+Shift+G` Force Global Demo Mode When Paused / Instrumental / No-Lyrics
+- **Locations:** `src/LyricPulse.App/App.axaml.cs:462-464, 491-494`
+- **User Impact:** Pressing `Ctrl+Shift+G` or launching a second instance without `--demo` executes `if (!snap.IsDemoMode && (!snap.IsPlaying || snap.LyricsStatus != LyricsStatus.Synced)) await _runtime.SetDemoModeAsync(true)`. Because `StageWindow`'s `StageCardCanvasHost` (`StageCardCanvasHost.cs:159-179`) already renders `Neon Horizon` automatically on the Stage when idle, mutating global `IsDemoMode = true` hijacks paused Spotify/Apple Music or instrumental tracks, overwrites the Top Pill Bar with `"Neon Horizon"`, and broadcasts demo lyrics onto the Desktop Overlay if enabled.
+- **Concrete Fix:** Reserve `SetDemoModeAsync(true)` in `HandleSecondInstanceActivationAsync` strictly for `forceDemo == true` (`--demo` CLI flag), letting normal `OpenGallery` / second-instance wakeup simply call `SurfaceAndFocus` without overriding live paused/instrumental state.
+
+##### `UX6-07` — `"Play previews"` Button Is a Dead No-Op Under Reduced Motion
+- **Locations:** `src/LyricPulse.UI/ViewModels/StageViewModel.cs:163, 443-444`, `src/LyricPulse.UI/Views/StageWindow.axaml:386-392`
+- **User Impact:** `EffectivePreviewsPaused => PreviewsPaused || _snapshot.IsEffectiveReducedMotion`. Under Reduced Motion, clicking `"Play previews"` flips `_previewsPaused` (`false <-> true`), yet `EffectivePreviewsPaused` remains `true` forever—the label never changes and previews never play, making the button appear broken.
+- **Concrete Fix:** Either allow explicit user override (`PreviewsPausedOverride` until Reduced Motion toggles) or disable the button when `IsEffectiveReducedMotion` is active with `"Paused (Reduced Motion)"` clarity (`gallery.md:189`).
+
+##### `UX6-08` — `RebuildStyleStrip()` Accumulates `PropertyChanged` Subscriptions on Filter Changes
+- **Locations:** `src/LyricPulse.UI/Views/StageWindow.axaml.cs:276, 436-453`
+- **User Impact:** Every filter switch (`All` / `Pinned` / `With Visuals` / `Motion`) clears `StyleStripPanel.Children` and attaches a fresh `cardVm.PropertyChanged += ...` closure capturing the old `Border`, `ToggleButton`, and `StageCardCanvasHost` references without detaching previous handlers—leaking old visual subtrees on repeated filter toggles.
+- **Concrete Fix:** Track and detach `PropertyChanged` delegates before rebuilding, or bind `StyleStripPanel` via an `ItemsControl` / `DataTemplate` instead of imperative code-behind event subscriptions.
+
+##### `UX6-09` — Startup Hotkey Conflicts Are Not Synced to `StageViewModel`
+- **Locations:** `src/LyricPulse.App/App.axaml.cs:148, 165, 393-396, 546`
+- **User Impact:** `RegisterGlobalHotkeys` runs at `line 148` before `_stageViewModel` is constructed (`line 182`). Because `_lastRegisteredHotkeys` is cached at `line 539`, `ApplySnapshotToHost` (`line 393`) skips re-registering—so startup hotkey conflicts appear in the System Tray but never display inline errors in `Settings -> Global Hotkeys`.
+- **Concrete Fix:** Store `_lastHotkeyConflicts` on `App` and forward it to `_stageViewModel.SetHotkeyConflicts(_lastHotkeyConflicts)` inside `CreateAndShowPrimaryStageWindow`.
+
+##### `UX6-10` — Unmodified `Left` / `Right` Arrow Keys Hijack Keyboard Navigation Inside Settings & Toolbar
+- **Locations:** `src/LyricPulse.UI/Views/StageWindow.axaml.cs:220-232`
+- **User Impact:** `OnKeyDown` intercepts `Key.Left` / `Key.Right` whenever the focused control is `not Slider`, causing arrow navigation inside `SettingsView` (`RadioButton` groups, `ToggleSwitch`es, `ColorPicker`) or `TopGlassBar` to unexpectedly switch the active lyric style instead of navigating controls.
+- **Concrete Fix:** Restrict unmodified `Left` / `Right` style cycling to `!vm.IsSettingsDrawerOpen && !vm.IsAnyFlyoutOpen` (or when focus is on the stage/strip container rather than form controls).
+
+---
+
+#### LOW
+
+##### `UX6-11` — Hit-Area & Icon Consistency Polish (`MASTER.md:297`, `gallery.md:93-94, 149-151`)
+- **Locations:** `StageWindow.axaml:157-178`, `StageWindow.axaml.cs:331-346`, `ObsBroadcastWindow.axaml:11-23`
+- **Notes:** `TopGlassBar` icon buttons are `32×32px` and strip `pinBtn` is `28×28px` (below `40×40px` icon-button target); `pinBtn` renders `"Pin"`/`"Pinned"` text (`9px`) instead of `LpIconPinRegular`/`LpIconPinFilled`; `DesktopOverlay` toggle does not swap to `LpIconEyeOffFilled` when off; `ObsBroadcastWindow` lacks active highlight on the selected `Green`/`Blue`/`Black` chroma button.
+
+##### `UX6-12` — Fullscreen Idle Timer After Closing Flyout & `2px` Titlebar Overlap
+- **Locations:** `StageWindow.axaml.cs:64-71`, `StageViewModel.cs:153-157`, `StageWindow.axaml:13, 31`
+- **Notes:** Clicking `Done` (`ClosePopupsCommand`) during Fullscreen stops flyout blocking, but `_fullscreenIdleTimer` is not restarted until the next `OnPointerMoved`, leaving `TopGlassBar` visible if the mouse stays still; `TopGlassBar` `Margin="16,38,16,0"` overlaps `ExtendClientAreaTitleBarHeightHint="40"` by `2px`.
+
+##### `UX6-13` — `SurfaceAndFocus` Monitor Bounds Check & 5s Reset Auto-Disarm
+- **Locations:** `StageWindow.axaml.cs:86-111`, `StageViewModel.cs:257-263`
+- **Notes:** `SurfaceAndFocus` does not verify `Position` intersects `Screens.All` after undocking an external monitor (`tray.md:118`); `IsResetConfirmArmed` remains armed until clicked (no 5s timeout or disarm on Settings close).
+
+##### `UX6-14` — Tray All-Displays-Disabled Notice & Diagnostics `Retry Lyrics` State
+- **Locations:** `src/LyricPulse.App/Tray/TrayMenuState.cs:280-382`, `src/LyricPulse.UI/Views/StageWindow.axaml:304`
+- **Notes:** `TrayMenuState` does not surface `"All displays disabled"` if `DesktopOverlayEnabled` is ON with every monitor disabled; Diagnostics `"Retry Lyrics"` button stays enabled in Demo/Synced states (`CanRetryLyricsFetch` could disable it when not applicable).
+
+
+---
+
+### Phase 6 Re-Verification Addendum (`e0dfe47`)
+
+**Re-Verified Commit:** `e0dfe47` (`master`, read-only inspection of `src/`)  
+**Verification Runs Executed:**
+- `dotnet build LyricPulse.sln -c Debug --no-restore`: **0 Warning(s), 0 Error(s)**
+- `dotnet build LyricPulse.sln -c Release --no-restore`: **0 Warning(s), 0 Error(s)**
+- `dotnet test LyricPulse.sln -c Release --no-build`: **282 / 282 Passed (0 Failed, 0 Skipped)** — includes `Phase5StageAndSettingsTests` Phase 6 tests (`HotkeyGestureParser_AcceptsDigitKeys_D0ThroughD9`, `StageViewModel_Phase6DrawerModes_HotkeyClear_HealthDot_AndActiveBooleans`)
+- `LyricPulse.App.dll --smoke-test`: **Exit 0** (`[PASS] LyricPulse Phase 5 smoke test succeeded | Fonts=5 | Shaders=3/3 OK | DemoLines=12 | Styles=10/10 | StageCards=10 | TrayHeader='Demo: Neon Horizon'`)
+
+**Updated Phase 6 Verdict:** **`PASS WITH NOTES`** — **0 CRITICAL**, **0 HIGH** blockers remaining. Approved for **v1.0 Release Sign-Off**.
+
+#### 1. Remediation Verification Matrix (`e0dfe47`)
+
+| ID | Original Severity | Status | Verified Fix Evidence (`e0dfe47`) |
+|---|---|---|---|
+| **`UX6-01`** | HIGH | **VERIFIED FIXED** | `StageViewModel.cs:393-407` adds `IsCompactDrawerMode`, `IsDockedDrawerVisible`, and `IsOverlayDrawerVisible`; `StageWindow.axaml.cs:76, 99, 147` updates `Bounds.Width < 880.0` on open, `SurfaceAndFocus`, and resize; `StageWindow.axaml:519-534` switches `< 880px` to a `360px` right-anchored overlay drawer (`LpRadiusDrawer`, `LpShadowDrawer`) backed by clickable `LpDrawerScrimBrush` (`OnDrawerScrimPressed`, `StageWindow.axaml.cs:333-340`). |
+| **`UX6-02`** | HIGH | **VERIFIED FIXED** | `GlobalHotkeyManager.cs:20, 211-241, 259` stores `_registeredSpecs` and rolls back the prior working `RegisterHotKey` binding on Win32 error `1409`; `HotkeyGestureParser.cs:166-171` + `StageWindow.axaml.cs:456` support `D0`–`D9` (`Ctrl+0..9` / `Ctrl+Shift+0..9`); `StageWindow.axaml.cs:208-213` + `StageViewModel.cs:1059-1078` wire `Backspace`/`Delete` to `ClearCurrentRecordingHotkey()` -> `ClearHotkeyCommand`. |
+| **`UX6-03`** | HIGH | **VERIFIED FIXED** | `StageWindow.axaml:34-52, 450-513` converts the 10-card strip to declarative `ItemsControl` + focusable `Button.card-btn` with `.active` and `:focus-visible` (`LpFocusRingBrush`), `AutomationProperties.Name="{Binding DisplayName}"`, and `40×40` `Pin` `ToggleButton` with `AutomationProperties.Name="{Binding PinToolTip}"`. `StageWindow.axaml.cs:338, 381-384` restores focus to `SettingsToggleBtn` when the drawer closes; `lines 248-263` guard `Left`/`Right` arrows against `Slider`, `TextBox`, `Button`, and `ToggleButton` (which includes `RadioButton`). |
+| **`UX6-04`** | HIGH | **VERIFIED FIXED** | `StageWindow.axaml:117-130` binds `MediaHealthDotBrush` (`StageViewModel.cs:750-757`) and `ShowTroubleshootingPill` (`"Fix?"` pill); `SettingsView.axaml:11-23, 213-218, 257-266, 326-331, 357-364` and `StageWindow.axaml:22-33, 91-98, 265-276, 306-309, 418-421` apply `.chip`/`.seg` + `.active` states across all selection groups; `SettingsView.axaml:348` binds `IsEnabled="{Binding IsReducedMotionToggleEnabled}"`. |
+| **`UX6-05`** | HIGH | **VERIFIED FIXED** | `StageWindow.axaml:356-401` renders hero chevrons, pin button (`40×40`), `StyleCounterText` pill (`#E2E8F0` on `#CC14161F`), `CategoryLabel` (`#A5B4FC`), `DisplayName` (`#F8FAFC`), and `Description` (`#CBD5E1`) with high contrast on the dark hero stage in both Dark and Light themes. |
+| **`UX6-06`** | MEDIUM | **VERIFIED FIXED** | `App.axaml.cs:493-496` restricts second-instance/`Ctrl+Shift+G` auto-Demo activation to `snap.Track is null` (preserving live paused, instrumental, and no-lyrics sessions). |
+| **`UX6-08`** | MEDIUM | **VERIFIED FIXED** | Declarative `ItemsControl` strip (`StageWindow.axaml:450-513` + `OnThumbHostLoaded`/`OnThumbHostUnloaded` at `StageWindow.axaml.cs:269-298`) removes `RebuildStyleStrip()` and its `PropertyChanged` closure leak; `StageViewModel.RebuildFilteredStyleCards()` (`StageViewModel.cs:1179-1208`) also guards against redundant collection churn. |
+| **`UX6-09`** | MEDIUM | **VERIFIED FIXED** | `App.axaml.cs:42, 190, 547` retains `_lastHotkeyConflicts` and passes it to `_stageViewModel.SetHotkeyConflicts(_lastHotkeyConflicts)` during `CreateAndShowPrimaryStageWindow`. |
+
+#### 2. Remaining Non-Blocking Notes (Post-v1.0 Polish)
+
+1. **[MEDIUM — Non-Blocking Edge Case] Empty Unassigned Hotkey Treated as Registration Conflict (`GlobalHotkeyManager.cs:85-92`, `App.axaml.cs:528-537`):** Clearing a hotkey via `Backspace`/`Delete` (`ClearCurrentRecordingHotkey`) writes `string.Empty` into `GlobalHotkeys`, causing `RegisterAll` -> `TryRegister(action, "")` to return `"Shortcut cannot be empty."` as a conflict error in Settings and `[Shortcut conflict]` in the Tray until reassigned. Skipping `string.IsNullOrWhiteSpace(gesture)` in `RegisterAll` / `App.RegisterGlobalHotkeys` resolves this cleanly.
+2. **[MEDIUM — Retained] `"Play previews"` Under App-Toggled Reduced Motion (`UX6-07`, `StageViewModel.cs:467-468`, `StageWindow.axaml:425`):** `IsReducedMotionToggleEnabled` disables the preview toggle under OS Reduced Motion (`!IsOsReducedMotion`), whereas manually toggling app `ReducedMotion = true` leaves the button enabled while `EffectivePreviewsPaused` remains locked `true`.
+3. **[LOW — Retained Polish]** Docked `TopGlassBar` crowding between `880px–1080px` when Settings (`380px`) is open (`StageWindow.axaml:74`); initial focus entry into `SettingsView` Close button on open; `UX6-11` (`TopGlassBar` `36×36` icons, `LpIconEyeOffFilled` toggle swap, `ObsBroadcastWindow` active chroma indicator); `UX6-12` (restarting `_fullscreenIdleTimer` on `Done`); `UX6-13` (`SurfaceAndFocus` off-screen monitor check + 5s Reset auto-disarm); `UX6-14` (`TrayMenuState` all-displays-disabled notice + Diagnostics `Retry Lyrics` disable state).

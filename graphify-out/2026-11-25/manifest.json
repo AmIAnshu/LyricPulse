@@ -1,0 +1,68 @@
+{
+  ".planning/config.json": {
+    "mtime": 1795552303.3287404,
+    "seen": 1795553447.2871857,
+    "ast_hash": "caa13d3a5109963ab417bef4e966d082",
+    "semantic_hash": "caa13d3a5109963ab417bef4e966d082"
+  },
+  ".planning/PROJECT.md": {
+    "mtime": 1795552299.9823844,
+    "seen": 1795553447.2871857,
+    "ast_hash": "0ba0c32039a5fe49b8a41cf37f13050c",
+    "semantic_hash": "0ba0c32039a5fe49b8a41cf37f13050c"
+  },
+  ".planning/research/CORE_ENGINE.md": {
+    "mtime": 1795552828.841682,
+    "seen": 1795553447.2871857,
+    "ast_hash": "c2de6e0d4bc0771fd72061def8c87810",
+    "semantic_hash": "c2de6e0d4bc0771fd72061def8c87810"
+  },
+  ".planning/research/DEVELOPER_ADDITIONS.md": {
+    "mtime": 1795552886.3741708,
+    "seen": 1795553447.2871857,
+    "ast_hash": "fdd5053db079236079769c1bfdab51a4",
+    "semantic_hash": "fdd5053db079236079769c1bfdab51a4"
+  },
+  ".planning/research/RENDERING_AND_WIN32.md": {
+    "mtime": 1795552952.8906548,
+    "seen": 1795553447.2871857,
+    "ast_hash": "ee718c5f1416a54957e3e901bd33dbcb",
+    "semantic_hash": "ee718c5f1416a54957e3e901bd33dbcb"
+  },
+  "design-system/lyricpulse/MASTER.md": {
+    "mtime": 1795552897.070249,
+    "seen": 1795553447.2871857,
+    "ast_hash": "d7d4284cda914bc8e7ce419ad20682a1",
+    "semantic_hash": "d7d4284cda914bc8e7ce419ad20682a1"
+  },
+  "design-system/lyricpulse/MOTION_AND_STYLES.md": {
+    "mtime": 1795552879.986322,
+    "seen": 1795553447.2871857,
+    "ast_hash": "e11e5ce1b54350f4ac273d9bee5bd8e7",
+    "semantic_hash": "e11e5ce1b54350f4ac273d9bee5bd8e7"
+  },
+  "design-system/lyricpulse/pages/gallery.md": {
+    "mtime": 1795552920.563877,
+    "seen": 1795553447.2871857,
+    "ast_hash": "273ef3ac4b8d8521b66614cab0c6e810",
+    "semantic_hash": "273ef3ac4b8d8521b66614cab0c6e810"
+  },
+  "design-system/lyricpulse/pages/settings.md": {
+    "mtime": 1795552907.040208,
+    "seen": 1795553447.2871857,
+    "ast_hash": "bad148228f4574f968126428051084df",
+    "semantic_hash": "bad148228f4574f968126428051084df"
+  },
+  "design-system/lyricpulse/pages/tray.md": {
+    "mtime": 1795552841.0551586,
+    "seen": 1795553447.2871857,
+    "ast_hash": "0954ae3438234615633cd9b0201989ee",
+    "semantic_hash": "0954ae3438234615633cd9b0201989ee"
+  },
+  "docs/REVERSE_ENGINEERING_BASELINE.md": {
+    "mtime": 1795552305.770961,
+    "seen": 1795553447.2871857,
+    "ast_hash": "a736b368012a6daedf8377a4f2727ed8",
+    "semantic_hash": "a736b368012a6daedf8377a4f2727ed8"
+  }
+}
