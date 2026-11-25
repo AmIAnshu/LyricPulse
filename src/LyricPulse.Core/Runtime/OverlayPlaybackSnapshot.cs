@@ -30,6 +30,24 @@ public sealed record PaletteMorphState(
 
         return OklabColorMath.MorphPalette(FromPalette, ToPalette, elapsedSec / DurationSeconds);
     }
+
+    public PaletteMorphState ClampRemainingDuration(long nowTimestamp, long timestampFrequency, double maxDurationSeconds)
+    {
+        if (DurationSeconds <= 0.0 || ReferenceEquals(FromPalette, ToPalette) || FromPalette == ToPalette)
+        {
+            return this;
+        }
+
+        var elapsedSec = Math.Max(0L, nowTimestamp - StartTimestamp) / (double)timestampFrequency;
+        var remainingSec = DurationSeconds - elapsedSec;
+        if (remainingSec <= maxDurationSeconds)
+        {
+            return this;
+        }
+
+        var currentColor = Evaluate(nowTimestamp, timestampFrequency);
+        return new PaletteMorphState(currentColor, ToPalette, nowTimestamp, maxDurationSeconds);
+    }
 }
 
 /// <summary>
@@ -56,7 +74,9 @@ public sealed record OverlayPlaybackSnapshot(
     DateTimeOffset? PausedSinceUtc,
     DateTimeOffset? LastOffsetNudgeUtc,
     long TrackGeneration,
-    long SeekGeneration)
+    long SeekGeneration,
+    bool IsOsReducedMotion = false,
+    long OffsetGeneration = 0)
 {
     public int ActiveLineIndex => ActiveSlice.ActiveLineIndex;
     public int ActiveWordIndex => ActiveSlice.ActiveWordIndex;
@@ -66,6 +86,7 @@ public sealed record OverlayPlaybackSnapshot(
     public double WordProgress => ActiveSlice.WordProgress;
 
     public bool IsLyricsVisible => Settings.LyricsVisible && !IsFullscreenHidden;
+    public bool IsEffectiveReducedMotion => Settings.ReducedMotion || IsOsReducedMotion;
 }
 
 internal sealed record RuntimeStateBox(
@@ -81,11 +102,16 @@ internal sealed record RuntimeStateBox(
     long DemoStartTimestamp,
     LyricsDocument? DemoDocument,
     bool IsFullscreenHidden,
+    bool IsOsReducedMotion,
+    bool HasUserNudgedInCurrentTrack,
     DateTimeOffset? PausedSinceUtc,
     DateTimeOffset? LastOffsetNudgeUtc,
     long TrackGeneration,
-    long SeekGeneration)
+    long SeekGeneration,
+    long OffsetGeneration)
 {
+    public bool IsEffectiveReducedMotion => Settings.ReducedMotion || IsOsReducedMotion;
+
     public static RuntimeStateBox Initial { get; } = new(
         Settings: AppSettings.Default,
         LiveSession: null,
@@ -99,8 +125,11 @@ internal sealed record RuntimeStateBox(
         DemoStartTimestamp: 0,
         DemoDocument: null,
         IsFullscreenHidden: false,
+        IsOsReducedMotion: false,
+        HasUserNudgedInCurrentTrack: false,
         PausedSinceUtc: null,
         LastOffsetNudgeUtc: null,
         TrackGeneration: 0,
-        SeekGeneration: 0);
+        SeekGeneration: 0,
+        OffsetGeneration: 0);
 }

@@ -16,10 +16,13 @@ public sealed record ActiveLyricSlice(
     double WordProgress,
     double LineProgress,
     bool IsInInstrumentalGap,
-    TimeSpan? TimeUntilNextLine)
+    TimeSpan? TimeUntilNextLine,
+    bool IsPostSongOutro = false)
 {
     public static readonly TimeSpan InstrumentalGapThreshold = TimeSpan.FromSeconds(4.0);
     public static readonly TimeSpan PostLineLingerDuration = TimeSpan.FromSeconds(0.9);
+    public static readonly TimeSpan MinRemainingOutroDuration = TimeSpan.FromSeconds(1.0);
+    public static readonly TimeSpan UnboundedOutroThreshold = TimeSpan.FromSeconds(2.5);
 
     public static ActiveLyricSlice Empty { get; } = new(
         ActiveLineIndex: -1,
@@ -30,9 +33,13 @@ public sealed record ActiveLyricSlice(
         WordProgress: 0.0,
         LineProgress: 0.0,
         IsInInstrumentalGap: false,
-        TimeUntilNextLine: null);
+        TimeUntilNextLine: null,
+        IsPostSongOutro: false);
 
-    public static ActiveLyricSlice Resolve(LyricsDocument? document, TimeSpan effectivePosition)
+    public static ActiveLyricSlice Resolve(
+        LyricsDocument? document,
+        TimeSpan effectivePosition,
+        TimeSpan trackDuration = default)
     {
         if (document is null || document.Lines.IsEmpty)
         {
@@ -50,7 +57,8 @@ public sealed record ActiveLyricSlice(
                 WordProgress: 0.0,
                 LineProgress: 0.0,
                 IsInInstrumentalGap: false,
-                TimeUntilNextLine: null);
+                TimeUntilNextLine: null,
+                IsPostSongOutro: false);
         }
 
         var lines = document.Lines;
@@ -68,20 +76,37 @@ public sealed record ActiveLyricSlice(
                 WordProgress: 0.0,
                 LineProgress: 0.0,
                 IsInInstrumentalGap: untilFirst > InstrumentalGapThreshold,
-                TimeUntilNextLine: untilFirst);
+                TimeUntilNextLine: untilFirst,
+                IsPostSongOutro: false);
         }
 
         var lineIdx = FindActiveLineIndex(lines, pos);
         var current = lines[lineIdx];
         var previous = lineIdx > 0 ? lines[lineIdx - 1] : null;
         var next = lineIdx + 1 < lines.Length ? lines[lineIdx + 1] : null;
+        var effectiveDuration = trackDuration > TimeSpan.Zero ? trackDuration : document.Track.Duration;
+
+        if (next is null && IsInPostSongOutro(current, pos, effectiveDuration))
+        {
+            return new ActiveLyricSlice(
+                ActiveLineIndex: -1,
+                ActiveWordIndex: -1,
+                PreviousLine: current,
+                CurrentLine: null,
+                NextLine: null,
+                WordProgress: 0.0,
+                LineProgress: 1.0,
+                IsInInstrumentalGap: true,
+                TimeUntilNextLine: null,
+                IsPostSongOutro: true);
+        }
+
         var timeUntilNext = next is not null && next.StartTime > pos
             ? next.StartTime - pos
             : (TimeSpan?)null;
 
         var isInstrumental = DetermineInstrumentalGap(current, next, pos);
         var lineProgress = ComputeIntervalProgress(current.StartTime, current.EndTime, pos);
-
         var (wordIdx, wordProgress) = ResolveActiveWord(current, pos);
 
         return new ActiveLyricSlice(
@@ -93,7 +118,8 @@ public sealed record ActiveLyricSlice(
             WordProgress: wordProgress,
             LineProgress: lineProgress,
             IsInInstrumentalGap: isInstrumental,
-            TimeUntilNextLine: timeUntilNext);
+            TimeUntilNextLine: timeUntilNext,
+            IsPostSongOutro: false);
     }
 
     private static int FindActiveLineIndex(ImmutableArray<LyricLine> lines, TimeSpan pos)
@@ -169,6 +195,25 @@ public sealed record ActiveLyricSlice(
 
         var silenceSpan = next.StartTime - current.EndTime;
         return silenceSpan > InstrumentalGapThreshold && pos >= current.EndTime + PostLineLingerDuration;
+    }
+
+    private static bool IsInPostSongOutro(LyricLine lastLine, TimeSpan pos, TimeSpan trackDuration)
+    {
+        if (lastLine.IsInstrumentalBreak || lastLine.EndTime <= lastLine.StartTime)
+        {
+            return false;
+        }
+
+        var outroStart = lastLine.EndTime + PostLineLingerDuration;
+        if (pos < outroStart)
+        {
+            return false;
+        }
+
+        var hasSubstantialRemainingTrack = trackDuration > outroStart &&
+                                           (trackDuration - outroStart) > MinRemainingOutroDuration;
+        var elapsedPastFinalLine = (pos - lastLine.EndTime) >= UnboundedOutroThreshold;
+        return hasSubstantialRemainingTrack || elapsedPastFinalLine;
     }
 
     private static double ComputeIntervalProgress(TimeSpan start, TimeSpan end, TimeSpan pos)

@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using LyricPulse.Core.Abstractions;
-using LyricPulse.Core.Color;
 using LyricPulse.Core.Lyrics;
 using LyricPulse.Core.Models;
 using Microsoft.Extensions.Logging;
@@ -11,13 +10,11 @@ namespace LyricPulse.Core.Runtime;
 /// <summary>
 /// Thread-safe live runtime orchestrator connecting GSMTC media tracking, Demo Mode looping,
 /// multi-provider lyrics fetching, background semantic visual pre-annotation, OKLab palette morphing,
-/// timing offsets, fullscreen auto-hide, and settings persistence behind a lock-free SampleFrame() hot path.
+/// timing offsets, OS Reduced Motion, fullscreen auto-hide, and settings persistence behind a lock-free SampleFrame() hot path.
 /// </summary>
 public sealed partial class OverlayRuntimeController : IAsyncDisposable
 {
     public static readonly TimeSpan FullscreenPollInterval = TimeSpan.FromMilliseconds(1500);
-    private const double NormalMorphDurationSeconds = 0.650;
-    private const double ReducedMotionMorphDurationSeconds = 0.150;
 
     private readonly IMediaSessionProvider _mediaProvider;
     private readonly ILyricsOrchestrator _lyricsOrchestrator;
@@ -37,12 +34,11 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
     private readonly SemaphoreSlim _settingsWriteLock = new(1, 1);
 
     private RuntimeStateBox _state = RuntimeStateBox.Initial;
+    private CachedDemoDocument? _cachedDemo;
     private CancellationTokenSource? _trackLoadCts;
     private Timer? _fullscreenTimer;
-    private LyricsDocument? _cachedAnnotatedDemoDoc;
-    private VisualPreference _cachedDemoVisualPreference = VisualPreference.Balanced;
-    private bool _started;
-    private bool _disposed;
+    private volatile bool _started;
+    private volatile bool _disposed;
 
     public OverlayRuntimeController(
         IMediaSessionProvider mediaProvider,
@@ -74,6 +70,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
 
     public AppSettings Settings => Volatile.Read(ref _state).Settings;
     public bool IsDemoMode => Volatile.Read(ref _state).IsDemoMode;
+    public bool IsEffectiveReducedMotion => Volatile.Read(ref _state).IsEffectiveReducedMotion;
 
     public event EventHandler<AppSettings>? SettingsChanged;
     public event EventHandler<OverlayPlaybackSnapshot>? StateChanged;
@@ -152,6 +149,9 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
     public Task ToggleReducedMotionAsync(CancellationToken cancellationToken = default) =>
         UpdateSettingsAsync(s => s with { ReducedMotion = !s.ReducedMotion }, cancellationToken);
 
+    public Task ToggleUniversalPlayerModeAsync(CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { UniversalPlayerMode = !s.UniversalPlayerMode }, cancellationToken);
+
     public async Task<OverlayStyleId> CyclePinnedStyleAsync(CancellationToken cancellationToken = default)
     {
         OverlayStyleId nextStyle = OverlayStyleId.Fisheye;
@@ -169,37 +169,87 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
     public async Task<TimingOffsetState> NudgeTimingOffsetAsync(TimeSpan delta, CancellationToken cancellationToken = default)
     {
         var state = Volatile.Read(ref _state);
+        if (!OverlaySnapshotBuilder.CanAdjustTimingOffset(state))
+        {
+            return state.TimingOffset;
+        }
+
+        var generation = state.TrackGeneration;
         var persist = !state.IsDemoMode && state.Settings.EnablePerTrackSavedOffsets;
         var updated = await _timingOffsetService.NudgeAsync(delta, persist, cancellationToken).ConfigureAwait(false);
-        var nowUtc = _utcNowProvider();
-
-        var nextState = UpdateState(s => s with
-        {
-            TimingOffset = updated,
-            LastOffsetNudgeUtc = nowUtc,
-            SeekGeneration = s.SeekGeneration + 1
-        });
-
-        NotifyStateChanged(nextState);
-        return updated;
+        return CommitTimingOffsetChange(updated, generation);
     }
 
     public async Task<TimingOffsetState> ResetTimingOffsetAsync(CancellationToken cancellationToken = default)
     {
         var state = Volatile.Read(ref _state);
+        if (!OverlaySnapshotBuilder.CanAdjustTimingOffset(state))
+        {
+            return state.TimingOffset;
+        }
+
+        var generation = state.TrackGeneration;
         var persist = !state.IsDemoMode && state.Settings.EnablePerTrackSavedOffsets;
         var updated = await _timingOffsetService.ResetAsync(persist, cancellationToken).ConfigureAwait(false);
-        var nowUtc = _utcNowProvider();
+        return CommitTimingOffsetChange(updated, generation);
+    }
 
-        var nextState = UpdateState(s => s with
+    private TimingOffsetState CommitTimingOffsetChange(TimingOffsetState updated, long expectedGeneration)
+    {
+        var nowUtc = _utcNowProvider();
+        RuntimeStateBox? published = null;
+
+        lock (_stateSync)
         {
-            TimingOffset = updated,
-            LastOffsetNudgeUtc = nowUtc,
-            SeekGeneration = s.SeekGeneration + 1
+            if (_state.TrackGeneration != expectedGeneration)
+            {
+                return _state.TimingOffset;
+            }
+
+            _state = _state with
+            {
+                TimingOffset = updated,
+                HasUserNudgedInCurrentTrack = true,
+                LastOffsetNudgeUtc = nowUtc,
+                SeekGeneration = _state.SeekGeneration + 1,
+                OffsetGeneration = _state.OffsetGeneration + 1
+            };
+            published = _state;
+        }
+
+        if (!_disposed)
+        {
+            NotifyStateChanged(published);
+        }
+
+        return updated;
+    }
+
+    public Task RetryLyricsFetchAsync(CancellationToken cancellationToken = default)
+    {
+        if (_disposed)
+        {
+            return Task.CompletedTask;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var current = Volatile.Read(ref _state);
+        if (current.IsDemoMode || current.LiveTrack is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        var track = current.LiveTrack;
+        var updated = UpdateState(s => s with
+        {
+            LiveDocument = null,
+            LiveLyricsStatus = LyricsStatus.Loading,
+            TrackGeneration = s.TrackGeneration + 1
         });
 
-        NotifyStateChanged(nextState);
-        return updated;
+        NotifyStateChanged(updated);
+        BeginTrackLoad(track, updated.TrackGeneration, forceRefresh: true);
+        return Task.CompletedTask;
     }
 
     public Task ToggleDemoModeAsync(CancellationToken cancellationToken = default) =>
@@ -209,47 +259,97 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
     {
         if (Volatile.Read(ref _state).IsDemoMode == enabled)
         {
+            if (enabled && !Volatile.Read(ref _state).Settings.LyricsVisible)
+            {
+                await UpdateSettingsAsync(s => s with { LyricsVisible = true }, cancellationToken).ConfigureAwait(false);
+            }
+
             return;
         }
 
         await _visualMatcher.InitializeAsync(cancellationToken).ConfigureAwait(false);
-        var nowTicks = _timestampProvider();
 
-        if (enabled)
+        if (enabled && !Volatile.Read(ref _state).Settings.LyricsVisible)
         {
-            var pref = Volatile.Read(ref _state).Settings.VisualPreference;
-            var demoDoc = GetOrCreateAnnotatedDemoDocument(pref);
-            var resetOffset = await _timingOffsetService.OnTrackChangedAsync(null, enablePerTrackSavedOffsets: false, cancellationToken).ConfigureAwait(false);
-
-            var nextState = UpdateState(s => s with
-            {
-                IsDemoMode = true,
-                DemoStartTimestamp = nowTicks,
-                DemoDocument = demoDoc,
-                TimingOffset = resetOffset,
-                PaletteMorph = CreatePaletteMorph(s, DemoSongProvider.DemoPalette, nowTicks),
-                TrackGeneration = s.TrackGeneration + 1
-            });
-
-            NotifyStateChanged(nextState);
-            return;
+            await UpdateSettingsAsync(s => s with { LyricsVisible = true }, cancellationToken).ConfigureAwait(false);
         }
 
-        var liveTrackKey = Volatile.Read(ref _state).LiveTrack?.CacheKey;
-        var liveOffset = await _timingOffsetService.OnTrackChangedAsync(
-            liveTrackKey,
-            Volatile.Read(ref _state).Settings.EnablePerTrackSavedOffsets,
-            cancellationToken).ConfigureAwait(false);
+        var nowTicks = _timestampProvider();
+        var nextState = enabled
+            ? await EnableDemoModeStateAsync(nowTicks, cancellationToken).ConfigureAwait(false)
+            : await DisableDemoModeStateAsync(nowTicks, cancellationToken).ConfigureAwait(false);
 
-        var restored = UpdateState(s => s with
+        NotifyStateChanged(nextState);
+    }
+
+    private async Task<RuntimeStateBox> EnableDemoModeStateAsync(long nowTicks, CancellationToken cancellationToken)
+    {
+        var pref = Volatile.Read(ref _state).Settings.VisualPreference;
+        var demoDoc = GetOrCreateAnnotatedDemoDocument(pref);
+        var resetOffset = await _timingOffsetService
+            .OnTrackChangedAsync(null, enablePerTrackSavedOffsets: false, cancellationToken)
+            .ConfigureAwait(false);
+
+        return UpdateState(s => s with
+        {
+            IsDemoMode = true,
+            DemoStartTimestamp = nowTicks,
+            DemoDocument = demoDoc,
+            TimingOffset = resetOffset,
+            HasUserNudgedInCurrentTrack = false,
+            LastOffsetNudgeUtc = null,
+            PaletteMorph = OverlaySnapshotBuilder.CreatePaletteMorph(s, DemoSongProvider.DemoPalette, nowTicks, _timestampFrequency),
+            TrackGeneration = s.TrackGeneration + 1
+        });
+    }
+
+    private async Task<RuntimeStateBox> DisableDemoModeStateAsync(long nowTicks, CancellationToken cancellationToken)
+    {
+        var liveState = Volatile.Read(ref _state);
+        var liveOffset = await _timingOffsetService
+            .OnTrackChangedAsync(liveState.LiveTrack?.CacheKey, liveState.Settings.EnablePerTrackSavedOffsets, cancellationToken)
+            .ConfigureAwait(false);
+
+        return UpdateState(s => s with
         {
             IsDemoMode = false,
             TimingOffset = liveOffset,
-            PaletteMorph = CreatePaletteMorph(s, s.LiveTargetPalette, nowTicks),
+            HasUserNudgedInCurrentTrack = false,
+            LastOffsetNudgeUtc = null,
+            PaletteMorph = OverlaySnapshotBuilder.CreatePaletteMorph(s, s.LiveTargetPalette, nowTicks, _timestampFrequency),
             TrackGeneration = s.TrackGeneration + 1
         });
+    }
 
-        NotifyStateChanged(restored);
+    public void SetOsReducedMotion(bool enabled)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        var current = Volatile.Read(ref _state);
+        if (current.IsOsReducedMotion == enabled)
+        {
+            return;
+        }
+
+        var nowTicks = _timestampProvider();
+        var updated = UpdateState(s =>
+        {
+            var effective = s.Settings.ReducedMotion || enabled;
+            var morph = effective
+                ? s.PaletteMorph.ClampRemainingDuration(nowTicks, _timestampFrequency, OverlaySnapshotBuilder.ReducedMotionMorphDurationSeconds)
+                : s.PaletteMorph;
+
+            return s with
+            {
+                IsOsReducedMotion = enabled,
+                PaletteMorph = morph
+            };
+        });
+
+        NotifyStateChanged(updated);
     }
 
     public async Task<AppSettings> UpdateSettingsAsync(
@@ -261,42 +361,17 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         AppSettings normalized;
         RuntimeStateBox nextState;
         bool policyChanged;
-        bool visualPrefChanged;
 
         await _settingsWriteLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             var previous = Volatile.Read(ref _state).Settings;
             normalized = updater(previous).ValidateAndNormalize();
-
-            policyChanged =
-                previous.UniversalPlayerMode != normalized.UniversalPlayerMode ||
-                previous.IgnoreBrowserVideoSessions != normalized.IgnoreBrowserVideoSessions ||
-                !previous.BlockedAppIds.SequenceEqual(normalized.BlockedAppIds);
-            visualPrefChanged = previous.VisualPreference != normalized.VisualPreference;
+            policyChanged = HasMediaPolicyChanged(previous, normalized);
+            var visualPrefChanged = previous.VisualPreference != normalized.VisualPreference;
 
             await _settingsStore.SaveAsync(normalized, cancellationToken).ConfigureAwait(false);
-
-            var isFullscreen = normalized.HideDuringFullscreen &&
-                               (_fullscreenDetector?.IsFullscreenExclusiveOrPresentation() ?? false);
-
-            nextState = UpdateState(s =>
-            {
-                var reannotatedDemo = visualPrefChanged && s.IsDemoMode
-                    ? GetOrCreateAnnotatedDemoDocument(normalized.VisualPreference)
-                    : s.DemoDocument;
-                var reannotatedLive = visualPrefChanged && s.LiveDocument is not null
-                    ? _visualMatcher.AnnotateDocument(s.LiveDocument, normalized.VisualPreference)
-                    : s.LiveDocument;
-
-                return s with
-                {
-                    Settings = normalized,
-                    IsFullscreenHidden = isFullscreen,
-                    DemoDocument = reannotatedDemo,
-                    LiveDocument = reannotatedLive
-                };
-            });
+            nextState = ApplySettingsToState(normalized, visualPrefChanged);
         }
         finally
         {
@@ -313,9 +388,45 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         return normalized;
     }
 
+    private static bool HasMediaPolicyChanged(AppSettings previous, AppSettings normalized) =>
+        previous.UniversalPlayerMode != normalized.UniversalPlayerMode ||
+        previous.IgnoreBrowserVideoSessions != normalized.IgnoreBrowserVideoSessions ||
+        !previous.BlockedAppIds.SequenceEqual(normalized.BlockedAppIds);
+
+    private RuntimeStateBox ApplySettingsToState(AppSettings normalized, bool visualPrefChanged)
+    {
+        var isFullscreen = normalized.HideDuringFullscreen &&
+                           (_fullscreenDetector?.IsFullscreenExclusiveOrPresentation() ?? false);
+        var nowTicks = _timestampProvider();
+
+        return UpdateState(s =>
+        {
+            var reannotatedDemo = visualPrefChanged && s.IsDemoMode
+                ? GetOrCreateAnnotatedDemoDocument(normalized.VisualPreference)
+                : s.DemoDocument;
+            var reannotatedLive = visualPrefChanged && s.LiveDocument is not null
+                ? _visualMatcher.AnnotateDocument(s.LiveDocument, normalized.VisualPreference)
+                : s.LiveDocument;
+
+            var effectiveReduced = normalized.ReducedMotion || s.IsOsReducedMotion;
+            var morph = effectiveReduced
+                ? s.PaletteMorph.ClampRemainingDuration(nowTicks, _timestampFrequency, OverlaySnapshotBuilder.ReducedMotionMorphDurationSeconds)
+                : s.PaletteMorph;
+
+            return s with
+            {
+                Settings = normalized,
+                IsFullscreenHidden = isFullscreen,
+                DemoDocument = reannotatedDemo,
+                LiveDocument = reannotatedLive,
+                PaletteMorph = morph
+            };
+        });
+    }
+
     public void RefreshFullscreenState()
     {
-        if (_fullscreenDetector is null)
+        if (_disposed || !_started || _fullscreenDetector is null)
         {
             return;
         }
@@ -328,7 +439,10 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         }
 
         var updated = UpdateState(s => s with { IsFullscreenHidden = hidden });
-        NotifyStateChanged(updated);
+        if (!_disposed)
+        {
+            NotifyStateChanged(updated);
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -345,6 +459,11 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
 
     private void OnMediaSessionChanged(object? sender, MediaSessionSnapshot? snapshot)
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         var nowUtc = _utcNowProvider();
         var updated = UpdateState(s =>
         {
@@ -366,37 +485,50 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
 
     private void OnMediaTrackChanged(object? sender, TrackIdentity? track)
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         var nowTicks = _timestampProvider();
         var updated = UpdateState(s =>
         {
             var nextGen = s.TrackGeneration + 1;
             var nextTargetPalette = track is null ? AlbumAccentPalette.Default : s.LiveTargetPalette;
             var morph = !s.IsDemoMode && track is null
-                ? CreatePaletteMorph(s, AlbumAccentPalette.Default, nowTicks)
+                ? OverlaySnapshotBuilder.CreatePaletteMorph(s, AlbumAccentPalette.Default, nowTicks, _timestampFrequency)
                 : s.PaletteMorph;
 
             return s with
             {
                 LiveTrack = track,
                 LiveDocument = null,
-                LiveLyricsStatus = track is null ? LyricsStatus.NotFound : LyricsStatus.NotFound,
+                LiveLyricsStatus = track is null ? LyricsStatus.NotFound : LyricsStatus.Loading,
                 LiveTargetPalette = nextTargetPalette,
                 PaletteMorph = morph,
+                TimingOffset = s.IsDemoMode ? s.TimingOffset : new TimingOffsetState(track?.CacheKey, TimeSpan.Zero, false),
+                HasUserNudgedInCurrentTrack = s.IsDemoMode && s.HasUserNudgedInCurrentTrack,
+                LastOffsetNudgeUtc = s.IsDemoMode ? s.LastOffsetNudgeUtc : null,
                 TrackGeneration = nextGen
             };
         });
 
         NotifyStateChanged(updated);
-        BeginTrackLoad(track, updated.TrackGeneration);
+        BeginTrackLoad(track, updated.TrackGeneration, forceRefresh: false);
     }
 
     private void OnMediaSeekDetected(object? sender, TimeSpan position)
     {
+        if (_disposed)
+        {
+            return;
+        }
+
         var updated = UpdateState(s => s with { SeekGeneration = s.SeekGeneration + 1 });
         NotifyStateChanged(updated);
     }
 
-    private void BeginTrackLoad(TrackIdentity? track, long generation)
+    private void BeginTrackLoad(TrackIdentity? track, long generation, bool forceRefresh)
     {
         CancellationToken ct;
         lock (_trackLoadSync)
@@ -414,17 +546,18 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
             ct = _trackLoadCts.Token;
         }
 
-        _ = Task.Run(() => LoadTrackResourcesAsync(track, generation, ct), CancellationToken.None);
+        _ = Task.Run(() => LoadTrackResourcesAsync(track, generation, forceRefresh, ct), CancellationToken.None);
     }
 
-    private async Task LoadTrackResourcesAsync(TrackIdentity track, long generation, CancellationToken ct)
+    private async Task LoadTrackResourcesAsync(TrackIdentity track, long generation, bool forceRefresh, CancellationToken ct)
     {
         try
         {
             var settings = Volatile.Read(ref _state).Settings;
 
-            var offsetTask = _timingOffsetService.OnTrackChangedAsync(track.CacheKey, settings.EnablePerTrackSavedOffsets, ct);
-            var lyricsTask = FetchAndAnnotateLyricsAsync(track, settings.VisualPreference, ct);
+            // Hydrate per-track saved offset immediately without waiting on remote HTTP fetches.
+            var offsetTask = HydrateTrackOffsetAsync(track.CacheKey, generation, settings.EnablePerTrackSavedOffsets, ct);
+            var lyricsTask = FetchAndAnnotateLyricsAsync(track, settings.VisualPreference, forceRefresh, ct);
             var paletteTask = ExtractAlbumPaletteAsync(ct);
 
             await Task.WhenAll(offsetTask, lyricsTask, paletteTask).ConfigureAwait(false);
@@ -433,7 +566,6 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
                 return;
             }
 
-            var offset = await offsetTask.ConfigureAwait(false);
             var (status, document) = await lyricsTask.ConfigureAwait(false);
             var extractedPalette = await paletteTask.ConfigureAwait(false);
             var nowTicks = _timestampProvider();
@@ -449,20 +581,19 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
                 var targetPalette = extractedPalette ?? AlbumAccentPalette.Default;
                 var morph = _state.IsDemoMode
                     ? _state.PaletteMorph
-                    : CreatePaletteMorph(_state, targetPalette, nowTicks);
+                    : OverlaySnapshotBuilder.CreatePaletteMorph(_state, targetPalette, nowTicks, _timestampFrequency);
 
                 _state = _state with
                 {
                     LiveLyricsStatus = status,
                     LiveDocument = document,
                     LiveTargetPalette = targetPalette,
-                    PaletteMorph = morph,
-                    TimingOffset = _state.IsDemoMode ? _state.TimingOffset : offset
+                    PaletteMorph = morph
                 };
                 published = _state;
             }
 
-            if (published is not null)
+            if (published is not null && !_disposed)
             {
                 NotifyStateChanged(published);
             }
@@ -477,12 +608,51 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         }
     }
 
+    private async Task HydrateTrackOffsetAsync(
+        string trackCacheKey,
+        long generation,
+        bool enablePerTrackSavedOffsets,
+        CancellationToken ct)
+    {
+        var loadedOffset = await _timingOffsetService
+            .OnTrackChangedAsync(trackCacheKey, enablePerTrackSavedOffsets, ct)
+            .ConfigureAwait(false);
+
+        if (ct.IsCancellationRequested)
+        {
+            return;
+        }
+
+        RuntimeStateBox? published = null;
+        lock (_stateSync)
+        {
+            if (_state.TrackGeneration != generation || _state.IsDemoMode || _state.HasUserNudgedInCurrentTrack)
+            {
+                return;
+            }
+
+            if (_state.TimingOffset != loadedOffset)
+            {
+                _state = _state with { TimingOffset = loadedOffset };
+                published = _state;
+            }
+        }
+
+        if (published is not null && !_disposed)
+        {
+            NotifyStateChanged(published);
+        }
+    }
+
     private async Task<(LyricsStatus Status, LyricsDocument? Document)> FetchAndAnnotateLyricsAsync(
         TrackIdentity track,
         VisualPreference preference,
+        bool forceRefresh,
         CancellationToken ct)
     {
-        var result = await _lyricsOrchestrator.GetLyricsAsync(track, ct).ConfigureAwait(false);
+        var result = forceRefresh
+            ? await _lyricsOrchestrator.GetLyricsAsync(track, forceRefresh: true, ct).ConfigureAwait(false)
+            : await _lyricsOrchestrator.GetLyricsAsync(track, ct).ConfigureAwait(false);
         if (result.Document is null || ct.IsCancellationRequested)
         {
             return (result.Status, null);
@@ -515,107 +685,24 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         }
     }
 
-    private OverlayPlaybackSnapshot BuildSnapshot(RuntimeStateBox state, long nowTimestamp)
-    {
-        var targetPalette = ResolveTargetPalette(state);
-        var activePalette = state.Settings.AutoSyncColors
-            ? state.PaletteMorph.Evaluate(nowTimestamp, _timestampFrequency)
-            : targetPalette;
-
-        if (state.IsDemoMode)
-        {
-            var demoDoc = state.DemoDocument ?? GetOrCreateAnnotatedDemoDocument(state.Settings.VisualPreference);
-            var elapsedSec = Math.Max(0L, nowTimestamp - state.DemoStartTimestamp) / (double)_timestampFrequency;
-            var loopSec = elapsedSec % DemoSongProvider.LoopDuration.TotalSeconds;
-            var rawPos = TimeSpan.FromSeconds(loopSec);
-            var effectivePos = TimingOffsetService.ComputeEffectiveLookupTime(rawPos, state.TimingOffset.Offset, DemoSongProvider.LoopDuration);
-            var slice = ActiveLyricSlice.Resolve(demoDoc, effectivePos);
-
-            return new OverlayPlaybackSnapshot(
-                Track: demoDoc.Track,
-                Document: demoDoc,
-                LyricsStatus: LyricsStatus.Synced,
-                PlaybackState: MediaPlaybackState.Playing,
-                PlayerKind: MediaPlayerKind.Unknown,
-                SourceAppUserModelId: "LyricPulse.Demo",
-                RawPosition: rawPos,
-                EffectivePosition: effectivePos,
-                ActiveSlice: slice,
-                ActivePalette: activePalette,
-                TargetPalette: targetPalette,
-                TimingOffset: state.TimingOffset,
-                Settings: state.Settings,
-                IsPlaying: true,
-                IsDemoMode: true,
-                IsFullscreenHidden: state.IsFullscreenHidden,
-                PausedSinceUtc: null,
-                LastOffsetNudgeUtc: state.LastOffsetNudgeUtc,
-                TrackGeneration: state.TrackGeneration,
-                SeekGeneration: state.SeekGeneration);
-        }
-
-        var session = state.LiveSession;
-        var rawLivePos = _mediaProvider.GetInterpolatedPosition();
-        var duration = state.LiveTrack?.Duration ?? session?.EndTime ?? TimeSpan.Zero;
-        var effectiveLivePos = TimingOffsetService.ComputeEffectiveLookupTime(rawLivePos, state.TimingOffset.Offset, duration);
-        var liveSlice = ActiveLyricSlice.Resolve(state.LiveDocument, effectiveLivePos);
-
-        return new OverlayPlaybackSnapshot(
-            Track: state.LiveTrack,
-            Document: state.LiveDocument,
-            LyricsStatus: state.LiveLyricsStatus,
-            PlaybackState: session?.PlaybackState ?? MediaPlaybackState.Stopped,
-            PlayerKind: session?.PlayerKind ?? MediaPlayerKind.Unknown,
-            SourceAppUserModelId: session?.SourceAppUserModelId,
-            RawPosition: rawLivePos,
-            EffectivePosition: effectiveLivePos,
-            ActiveSlice: liveSlice,
-            ActivePalette: activePalette,
-            TargetPalette: targetPalette,
-            TimingOffset: state.TimingOffset,
-            Settings: state.Settings,
-            IsPlaying: session?.PlaybackState == MediaPlaybackState.Playing,
-            IsDemoMode: false,
-            IsFullscreenHidden: state.IsFullscreenHidden,
-            PausedSinceUtc: state.PausedSinceUtc,
-            LastOffsetNudgeUtc: state.LastOffsetNudgeUtc,
-            TrackGeneration: state.TrackGeneration,
-            SeekGeneration: state.SeekGeneration);
-    }
-
-    private static AlbumAccentPalette ResolveTargetPalette(RuntimeStateBox state)
-    {
-        if (!state.Settings.AutoSyncColors)
-        {
-            return new AlbumAccentPalette(
-                state.Settings.ManualAccent1,
-                state.Settings.ManualAccent2,
-                state.Settings.ManualAccent3,
-                AlbumAccentPalette.Default.ScrimTint,
-                IsMonochromeFallback: false,
-                SourceAlbumHash: null);
-        }
-
-        return state.IsDemoMode ? DemoSongProvider.DemoPalette : state.LiveTargetPalette;
-    }
-
-    private PaletteMorphState CreatePaletteMorph(RuntimeStateBox currentState, AlbumAccentPalette targetPalette, long nowTimestamp)
-    {
-        var fromPalette = currentState.PaletteMorph.Evaluate(nowTimestamp, _timestampFrequency);
-        var durationSec = currentState.Settings.ReducedMotion ? ReducedMotionMorphDurationSeconds : NormalMorphDurationSeconds;
-        return new PaletteMorphState(fromPalette, targetPalette, nowTimestamp, durationSec);
-    }
+    private OverlayPlaybackSnapshot BuildSnapshot(RuntimeStateBox state, long nowTimestamp) =>
+        OverlaySnapshotBuilder.Build(
+            state,
+            nowTimestamp,
+            _timestampFrequency,
+            GetOrCreateAnnotatedDemoDocument,
+            _mediaProvider.GetInterpolatedPosition);
 
     private LyricsDocument GetOrCreateAnnotatedDemoDocument(VisualPreference preference)
     {
-        if (_cachedAnnotatedDemoDoc is not null && _cachedDemoVisualPreference == preference)
+        var cached = Volatile.Read(ref _cachedDemo);
+        if (cached is not null && cached.Preference == preference)
         {
-            return _cachedAnnotatedDemoDoc;
+            return cached.Document;
         }
 
         var annotated = _visualMatcher.AnnotateDocument(_demoSongProvider.GetDemoDocument(), preference);
-        _cachedAnnotatedDemoDoc = annotated;
-        _cachedDemoVisualPreference = preference;
+        Volatile.Write(ref _cachedDemo, new CachedDemoDocument(annotated, preference));
         return annotated;
     }
 
@@ -644,4 +731,6 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
 
     private void NotifyStateChanged(RuntimeStateBox state) =>
         StateChanged?.Invoke(this, BuildSnapshot(state, _timestampProvider()));
+
+    private sealed record CachedDemoDocument(LyricsDocument Document, VisualPreference Preference);
 }

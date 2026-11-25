@@ -48,7 +48,15 @@ public interface ILyricsProvider
 
 public interface ILyricsOrchestrator
 {
-    Task<LyricsResult> GetLyricsAsync(TrackIdentity track, CancellationToken cancellationToken = default);
+    Task<LyricsResult> GetLyricsAsync(
+        TrackIdentity track,
+        CancellationToken cancellationToken = default);
+
+    Task<LyricsResult> GetLyricsAsync(
+        TrackIdentity track,
+        bool forceRefresh,
+        CancellationToken cancellationToken = default);
+
     Task InvalidateCacheAsync(TrackIdentity track, CancellationToken cancellationToken = default);
 }
 

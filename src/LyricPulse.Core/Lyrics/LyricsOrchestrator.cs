@@ -34,7 +34,15 @@ public sealed class LyricsOrchestrator : ILyricsOrchestrator
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public Task<LyricsResult> GetLyricsAsync(TrackIdentity track, CancellationToken cancellationToken = default)
+    public Task<LyricsResult> GetLyricsAsync(
+        TrackIdentity track,
+        CancellationToken cancellationToken = default) =>
+        GetLyricsAsync(track, forceRefresh: false, cancellationToken);
+
+    public Task<LyricsResult> GetLyricsAsync(
+        TrackIdentity track,
+        bool forceRefresh,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(track);
         if (!track.IsValid)
@@ -42,7 +50,8 @@ public sealed class LyricsOrchestrator : ILyricsOrchestrator
             return Task.FromResult(new LyricsResult(LyricsStatus.NotFound, null));
         }
 
-        var sharedTask = _inFlight.GetOrAdd(track.CacheKey, _ => ExecuteCoalescedFetchAsync(track));
+        var flightKey = forceRefresh ? $"{track.CacheKey}:refresh" : track.CacheKey;
+        var sharedTask = _inFlight.GetOrAdd(flightKey, _ => ExecuteCoalescedFetchAsync(track, flightKey, forceRefresh));
         return cancellationToken.CanBeCanceled ? sharedTask.WaitAsync(cancellationToken) : sharedTask;
     }
 
@@ -52,7 +61,7 @@ public sealed class LyricsOrchestrator : ILyricsOrchestrator
         return _cache.RemoveAsync(track, cancellationToken);
     }
 
-    private async Task<LyricsResult> ExecuteCoalescedFetchAsync(TrackIdentity track)
+    private async Task<LyricsResult> ExecuteCoalescedFetchAsync(TrackIdentity track, string flightKey, bool forceRefresh)
     {
         using var pipelineCts = new CancellationTokenSource(PipelineTimeout);
         var ct = pipelineCts.Token;
@@ -69,11 +78,18 @@ public sealed class LyricsOrchestrator : ILyricsOrchestrator
                 }
             }
 
-            // Priority 1: Sharded disk cache lookup.
-            var cached = await _cache.TryGetAsync(track, ct).ConfigureAwait(false);
-            if (cached is not null)
+            // Priority 1: Sharded disk cache lookup (bypassed and purged when forceRefresh is requested).
+            if (forceRefresh)
             {
-                return cached;
+                await _cache.RemoveAsync(track, CancellationToken.None).ConfigureAwait(false);
+            }
+            else
+            {
+                var cached = await _cache.TryGetAsync(track, ct).ConfigureAwait(false);
+                if (cached is not null)
+                {
+                    return cached;
+                }
             }
 
             // Priority 2+: Ordered remote providers (LRCLIB -> NetEase).
@@ -132,7 +148,7 @@ public sealed class LyricsOrchestrator : ILyricsOrchestrator
         }
         finally
         {
-            _inFlight.TryRemove(track.CacheKey, out _);
+            _inFlight.TryRemove(flightKey, out _);
         }
     }
 }

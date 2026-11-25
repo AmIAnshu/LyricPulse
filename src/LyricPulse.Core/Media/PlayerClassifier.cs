@@ -21,7 +21,8 @@ public static class PlayerClassifier
         "winamp",
         "dopamine",
         "youtubemusicdesktop",
-        "cider"
+        "cider",
+        "itunes"
     ];
 
     private static readonly string[] BrowserTokens =

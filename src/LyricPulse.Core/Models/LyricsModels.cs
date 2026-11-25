@@ -27,7 +27,8 @@ public enum LyricsStatus
     Instrumental = 1,
     PlainOnly = 2,
     Synced = 3,
-    Error = 4
+    Error = 4,
+    Loading = 5
 }
 
 public enum VisualKind

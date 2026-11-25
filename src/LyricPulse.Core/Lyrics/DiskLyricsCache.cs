@@ -83,7 +83,8 @@ public sealed class DiskLyricsCache : ILyricsCache
         ArgumentNullException.ThrowIfNull(track);
         ArgumentNullException.ThrowIfNull(result);
 
-        if (result.Status == LyricsStatus.Error || !TryResolveSafeCachePath(track.CacheKey, out var filePath))
+        if (result.Status is LyricsStatus.Error or LyricsStatus.Loading ||
+            !TryResolveSafeCachePath(track.CacheKey, out var filePath))
         {
             return;
         }
