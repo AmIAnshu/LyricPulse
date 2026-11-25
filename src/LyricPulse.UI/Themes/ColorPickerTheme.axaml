@@ -1,0 +1,6 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Studio-themed overrides for Avalonia.Controls.ColorPicker aligning with MASTER.md -->
+  <SolidColorBrush x:Key="ColorViewContentBackgroundBrush" Color="Transparent"/>
+  <SolidColorBrush x:Key="ColorViewTabBackgroundBrush" Color="Transparent"/>
+</ResourceDictionary>

@@ -51,8 +51,7 @@ public static class TextShaperService
         var effectiveFont = ResolveEffectiveFont(text, font, fonts);
         if (fonts is not null)
         {
-            var cachedShaper = fonts.GetOrCreateShaper(effectiveFont.Typeface);
-            var shaped = cachedShaper.Shape(text, effectiveFont);
+            var shaped = fonts.ShapeSynchronized(effectiveFont.Typeface, text, effectiveFont);
             return float.IsFinite(shaped.Width) && shaped.Width > 0f ? shaped.Width : effectiveFont.MeasureText(text);
         }
 

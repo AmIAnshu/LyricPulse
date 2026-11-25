@@ -341,8 +341,7 @@ public sealed class LegibilityPipeline : IDisposable
             ClearBlobCache();
         }
 
-        var shaper = fonts.GetOrCreateShaper(effectiveFont.Typeface);
-        var blob = TextShaperService.ShapeToBlob(text, effectiveFont, out var advanceWidth, shaper);
+        var blob = fonts.ShapeToBlobSynchronized(effectiveFont.Typeface, text, effectiveFont, out var advanceWidth);
         if (blob is null)
         {
             return null;

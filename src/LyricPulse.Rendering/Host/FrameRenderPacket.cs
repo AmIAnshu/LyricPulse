@@ -31,6 +31,18 @@ public sealed record LyricSceneSnapshot(
 }
 
 /// <summary>
+/// Rendering host surface profile controlling backdrop compositing, Hero stage scaling,
+/// and anchor geometry without mutating global <see cref="AppSettings"/>.
+/// </summary>
+public enum StageRenderSurfaceMode
+{
+    DesktopOverlay = 0,
+    StageCanvas = 1,
+    GalleryCard = 2,
+    ObsBroadcast = 3
+}
+
+/// <summary>
 /// Immutable per-frame packet passed into <see cref="LyricDrawOperation"/> so the render thread
 /// never reads mutable ViewModel or control fields.
 /// </summary>
@@ -51,8 +63,37 @@ public sealed record FrameRenderPacket(
     OverlayBoundsConfig BoundsConfig,
     LyricSceneSnapshot SceneSnapshot,
     OverlayPlaybackSnapshot? PlaybackSnapshot = null,
-    DateTimeOffset? UtcNow = null)
+    DateTimeOffset? UtcNow = null,
+    StageRenderSurfaceMode SurfaceMode = StageRenderSurfaceMode.DesktopOverlay,
+    StageBackdropMode StageBackdrop = StageBackdropMode.TransparentOverlay,
+    float HeroScaleMultiplier = 1.0f,
+    float PartyEnergyLevel = AppSettings.DefaultPartyEnergyLevel,
+    bool ShowFollowingDot = true,
+    bool ShowColorSweepLayer = true,
+    SecondaryLineMode SecondaryLineMode = SecondaryLineMode.Off,
+    OverlayStyleId? StyleOverride = null)
 {
+    public OverlayStyleId EffectiveStyle => StyleOverride ?? ActiveStyle;
+
+    public bool IsCompactCard => SurfaceMode == StageRenderSurfaceMode.GalleryCard;
+
+    public bool ShouldDrawStageBackdrop =>
+        SurfaceMode is StageRenderSurfaceMode.StageCanvas or StageRenderSurfaceMode.GalleryCard &&
+        StageBackdrop != StageBackdropMode.TransparentOverlay;
+
+    public float SafeHeroScale =>
+        float.IsFinite(HeroScaleMultiplier) && HeroScaleMultiplier > 0f
+            ? Math.Clamp(HeroScaleMultiplier, 0.25f, 3.0f)
+            : 1.0f;
+
+    public float SafePartyEnergy =>
+        float.IsFinite(PartyEnergyLevel)
+            ? Math.Clamp(PartyEnergyLevel, AppSettings.MinPartyEnergyLevel, AppSettings.MaxPartyEnergyLevel)
+            : AppSettings.DefaultPartyEnergyLevel;
+
+    public float EffectiveHeroFontSizeDip =>
+        Math.Clamp(BaseFontSizeDip * SafeHeroScale, 10f, 220f);
+
     public static FrameRenderPacket CreateDefault(
         float viewportWidthDip,
         float viewportHeightDip,
@@ -78,7 +119,15 @@ public sealed record FrameRenderPacket(
             BoundsConfig: OverlayBoundsConfig.FromAnchorZone(defaults.AnchorZone, defaults.SafeMarginPx),
             SceneSnapshot: LyricSceneSnapshot.Empty,
             PlaybackSnapshot: null,
-            UtcNow: DateTimeOffset.UtcNow);
+            UtcNow: DateTimeOffset.UtcNow,
+            SurfaceMode: StageRenderSurfaceMode.DesktopOverlay,
+            StageBackdrop: StageBackdropMode.TransparentOverlay,
+            HeroScaleMultiplier: 1.0f,
+            PartyEnergyLevel: defaults.PartyEnergyLevel,
+            ShowFollowingDot: defaults.ShowFollowingDot,
+            ShowColorSweepLayer: defaults.ShowColorSweepLayer,
+            SecondaryLineMode: defaults.SecondaryLineMode,
+            StyleOverride: null);
     }
 }
 

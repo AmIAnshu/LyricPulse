@@ -19,6 +19,14 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        if (args.Length >= 2 && string.Equals(args[0], "--export-icon", StringComparison.OrdinalIgnoreCase))
+        {
+            var outPath = Path.GetFullPath(args[1]);
+            Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
+            File.WriteAllBytes(outPath, TrayIconFactory.RenderMultiSizeIcoBytes(TrayIconVisualState.Playing, isLightTaskbar: false));
+            return 0;
+        }
+
         var launchOptions = LaunchOptions.Parse(args);
         if (launchOptions.RunSmokeTest)
         {

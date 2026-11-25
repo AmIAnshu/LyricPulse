@@ -1,0 +1,108 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <ResourceDictionary.ThemeDictionaries>
+    <ResourceDictionary x:Key="Dark">
+      <SolidColorBrush x:Key="LpCanvasBrush" Color="#0C0D12"/>
+      <SolidColorBrush x:Key="LpSurfaceBrush" Color="#14161F"/>
+      <SolidColorBrush x:Key="LpSurfaceElevatedBrush" Color="#1C1F2B"/>
+      <SolidColorBrush x:Key="LpSurfaceSubtleBrush" Color="#101219"/>
+      <SolidColorBrush x:Key="LpStageBackgroundBrush" Color="#08090D"/>
+      <SolidColorBrush x:Key="LpGlassPillBrush" Color="#CC14161F"/>
+      <SolidColorBrush x:Key="LpGlassPillBorderBrush" Color="#2EFFFFFF"/>
+      <SolidColorBrush x:Key="LpTextPrimaryBrush" Color="#F4F6FA"/>
+      <SolidColorBrush x:Key="LpTextSecondaryBrush" Color="#A6B0C3"/>
+      <SolidColorBrush x:Key="LpTextTertiaryBrush" Color="#8490A7"/>
+      <SolidColorBrush x:Key="LpBorderDefaultBrush" Color="#2A2F42"/>
+      <SolidColorBrush x:Key="LpBorderStrongBrush" Color="#677294"/>
+      <SolidColorBrush x:Key="LpAccentPrimaryBrush" Color="#5B54EC"/>
+      <SolidColorBrush x:Key="LpAccentPrimaryHoverBrush" Color="#645DF0"/>
+      <SolidColorBrush x:Key="LpAccentPrimaryPressedBrush" Color="#5B54EC"/>
+      <SolidColorBrush x:Key="LpOnAccentPrimaryBrush" Color="#FFFFFF"/>
+      <SolidColorBrush x:Key="LpAccentTextBrush" Color="#A5B4FC"/>
+      <SolidColorBrush x:Key="LpAccentBorderBrush" Color="#818CF8"/>
+      <SolidColorBrush x:Key="LpAccentSoftBgBrush" Color="#1E2140"/>
+      <SolidColorBrush x:Key="LpLiveGreenBrush" Color="#22C55E"/>
+      <SolidColorBrush x:Key="LpLiveGreenTextBrush" Color="#4ADE80"/>
+      <SolidColorBrush x:Key="LpLiveGreenSoftBgBrush" Color="#10281B"/>
+      <SolidColorBrush x:Key="LpOnLiveGreenBrush" Color="#052E16"/>
+      <SolidColorBrush x:Key="LpWarningBrush" Color="#F59E0B"/>
+      <SolidColorBrush x:Key="LpWarningTextBrush" Color="#FBBF24"/>
+      <SolidColorBrush x:Key="LpWarningSoftBgBrush" Color="#2B2110"/>
+      <SolidColorBrush x:Key="LpDangerBrush" Color="#DC2626"/>
+      <SolidColorBrush x:Key="LpDangerTextBrush" Color="#FCA5A5"/>
+      <SolidColorBrush x:Key="LpDangerSoftBgBrush" Color="#2D1518"/>
+      <SolidColorBrush x:Key="LpOnDangerBrush" Color="#FFFFFF"/>
+      <SolidColorBrush x:Key="LpFocusRingBrush" Color="#A5B4FC"/>
+      <SolidColorBrush x:Key="LpMediaOutlineBrush" Color="#1AFFFFFF"/>
+      <SolidColorBrush x:Key="LpDrawerScrimBrush" Color="#99050609"/>
+      <BoxShadows x:Key="LpShadowCardHover">0 8 24 0 #4D000000</BoxShadows>
+      <BoxShadows x:Key="LpShadowPopover">0 12 32 0 #73000000</BoxShadows>
+      <BoxShadows x:Key="LpShadowDrawer">-8 0 28 0 #66000000</BoxShadows>
+    </ResourceDictionary>
+
+    <ResourceDictionary x:Key="Light">
+      <SolidColorBrush x:Key="LpCanvasBrush" Color="#F4F5F8"/>
+      <SolidColorBrush x:Key="LpSurfaceBrush" Color="#FFFFFF"/>
+      <SolidColorBrush x:Key="LpSurfaceElevatedBrush" Color="#EBEEF4"/>
+      <SolidColorBrush x:Key="LpSurfaceSubtleBrush" Color="#F8F9FB"/>
+      <SolidColorBrush x:Key="LpStageBackgroundBrush" Color="#0E1017"/>
+      <SolidColorBrush x:Key="LpGlassPillBrush" Color="#EBFFFFFF"/>
+      <SolidColorBrush x:Key="LpGlassPillBorderBrush" Color="#26111420"/>
+      <SolidColorBrush x:Key="LpTextPrimaryBrush" Color="#111420"/>
+      <SolidColorBrush x:Key="LpTextSecondaryBrush" Color="#475166"/>
+      <SolidColorBrush x:Key="LpTextTertiaryBrush" Color="#5B657B"/>
+      <SolidColorBrush x:Key="LpBorderDefaultBrush" Color="#D5DBE7"/>
+      <SolidColorBrush x:Key="LpBorderStrongBrush" Color="#737E99"/>
+      <SolidColorBrush x:Key="LpAccentPrimaryBrush" Color="#4338CA"/>
+      <SolidColorBrush x:Key="LpAccentPrimaryHoverBrush" Color="#3730A3"/>
+      <SolidColorBrush x:Key="LpAccentPrimaryPressedBrush" Color="#312E81"/>
+      <SolidColorBrush x:Key="LpOnAccentPrimaryBrush" Color="#FFFFFF"/>
+      <SolidColorBrush x:Key="LpAccentTextBrush" Color="#3730A3"/>
+      <SolidColorBrush x:Key="LpAccentBorderBrush" Color="#4338CA"/>
+      <SolidColorBrush x:Key="LpAccentSoftBgBrush" Color="#EEF2FF"/>
+      <SolidColorBrush x:Key="LpLiveGreenBrush" Color="#15803D"/>
+      <SolidColorBrush x:Key="LpLiveGreenTextBrush" Color="#166534"/>
+      <SolidColorBrush x:Key="LpLiveGreenSoftBgBrush" Color="#ECFDF3"/>
+      <SolidColorBrush x:Key="LpOnLiveGreenBrush" Color="#FFFFFF"/>
+      <SolidColorBrush x:Key="LpWarningBrush" Color="#B45309"/>
+      <SolidColorBrush x:Key="LpWarningTextBrush" Color="#92400E"/>
+      <SolidColorBrush x:Key="LpWarningSoftBgBrush" Color="#FEF3C7"/>
+      <SolidColorBrush x:Key="LpDangerBrush" Color="#DC2626"/>
+      <SolidColorBrush x:Key="LpDangerTextBrush" Color="#B91C1C"/>
+      <SolidColorBrush x:Key="LpDangerSoftBgBrush" Color="#FEE2E2"/>
+      <SolidColorBrush x:Key="LpOnDangerBrush" Color="#FFFFFF"/>
+      <SolidColorBrush x:Key="LpFocusRingBrush" Color="#3730A3"/>
+      <SolidColorBrush x:Key="LpMediaOutlineBrush" Color="#1A000000"/>
+      <SolidColorBrush x:Key="LpDrawerScrimBrush" Color="#66111420"/>
+      <BoxShadows x:Key="LpShadowCardHover">0 6 18 0 #1A111420</BoxShadows>
+      <BoxShadows x:Key="LpShadowPopover">0 12 28 0 #24111420</BoxShadows>
+      <BoxShadows x:Key="LpShadowDrawer">-6 0 24 0 #1F111420</BoxShadows>
+    </ResourceDictionary>
+  </ResourceDictionary.ThemeDictionaries>
+
+  <FontFamily x:Key="LpFontUi">Segoe UI Variable Text, Segoe UI, Inter, sans-serif</FontFamily>
+  <FontFamily x:Key="LpFontDisplay">Segoe UI Variable Display, fonts:LyricPulse#Jost, Segoe UI</FontFamily>
+  <FontFamily x:Key="LpFontMono">Cascadia Mono, Consolas, monospace</FontFamily>
+  <FontFamily x:Key="LpFontJost">fonts:LyricPulse#Jost</FontFamily>
+  <FontFamily x:Key="LpFontBodoni">fonts:LyricPulse#Bodoni Moda</FontFamily>
+  <FontFamily x:Key="LpFontMulish">fonts:LyricPulse#Mulish</FontFamily>
+  <FontFamily x:Key="LpFontNunito">fonts:LyricPulse#Nunito</FontFamily>
+
+  <x:Double x:Key="LpSpaceXs">4</x:Double>
+  <x:Double x:Key="LpSpaceSm">8</x:Double>
+  <x:Double x:Key="LpSpaceMd">12</x:Double>
+  <x:Double x:Key="LpSpaceLg">16</x:Double>
+  <x:Double x:Key="LpSpaceXl">24</x:Double>
+  <x:Double x:Key="LpSpace2Xl">32</x:Double>
+
+  <CornerRadius x:Key="LpRadiusBadge">6</CornerRadius>
+  <CornerRadius x:Key="LpRadiusControl">8</CornerRadius>
+  <CornerRadius x:Key="LpRadiusCard">12</CornerRadius>
+  <CornerRadius x:Key="LpRadiusDrawer">16,0,0,16</CornerRadius>
+  <CornerRadius x:Key="LpRadiusPill">999</CornerRadius>
+
+  <x:Double x:Key="LpIconXs">12</x:Double>
+  <x:Double x:Key="LpIconSm">16</x:Double>
+  <x:Double x:Key="LpIconMd">20</x:Double>
+  <x:Double x:Key="LpIconLg">24</x:Double>
+</ResourceDictionary>

@@ -24,6 +24,7 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
     public static readonly SKColor CursorRed = new(0xEF, 0x44, 0x44, 0xFF); // #EF4444
     private static readonly SKPoint[] CardCornerRadii = [new(14f, 14f), new(14f, 14f), new(14f, 14f), new(14f, 14f)];
 
+    private readonly AestheticsOverlayRenderer _aesthetics = new();
     private readonly SKPaint _cardBgPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _cardBorderPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.0f };
     private readonly SKPaint _cursorPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
@@ -47,6 +48,7 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
         _lineFadeIn = 1.0f;
         _blinkClockSec = 0.0;
         _lastLineIndex = -1;
+        _aesthetics.ResetDot();
     }
 
     public bool Advance(in FrameRenderPacket packet, in LifecycleFrameState lifecycle)
@@ -111,9 +113,9 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
         }
 
         var fontSize = ResolveMonoFontSize(packet);
-        var monoFont = context.Fonts.GetOrCreateFont(LyricFontId.SystemMono, fontSize);
+        var monoFont = context.Fonts.GetOrCreateFont(LyricFontId.SystemMono, fontSize, enforceMinOverlayFloor: !packet.IsCompactCard);
         var linePitch = fontSize * 1.38f;
-        var maxBlockWidth = Math.Min(packet.ViewportWidthDip * 0.72f, 920f);
+        var maxBlockWidth = Math.Min(packet.ViewportWidthDip * (packet.IsCompactCard ? 0.90f : 0.78f), packet.SurfaceMode == StageRenderSurfaceMode.StageCanvas ? 1320f : 920f);
 
         var gutterStr = FormatLineNumber(slice.ActiveLineIndex + 1);
         const string prefixStr = "> ";
@@ -132,16 +134,18 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
         var fitScale = TextShaperService.ComputeAutoFitScale(maxContentMeasure + 48f, maxBlockWidth, 0.96f);
         var scaledFontSize = fontSize * fitScale;
         var scaledLinePitch = linePitch * fitScale;
-        var blockWidth = Math.Clamp((maxContentMeasure * fitScale) + 56f, 300f, maxBlockWidth);
+        var minBlockW = packet.IsCompactCard ? 160f : 300f;
+        var blockWidth = Math.Clamp((maxContentMeasure * fitScale) + 56f, minBlockW, maxBlockWidth);
 
         // Fixed 3-row vertical budget keeps active line anchored stably when ghost next line fades in
-        const float padX = 20f;
-        const float padY = 16f;
+        var padX = packet.IsCompactCard ? 12f : 20f;
+        var padY = packet.IsCompactCard ? 10f : 16f;
         var blockHeight = (3f * scaledLinePitch) + (padY * 2f);
 
-        var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet);
-        var left = Math.Clamp(anchorX - (blockWidth * 0.5f), 16f, Math.Max(16f, packet.ViewportWidthDip - blockWidth - 16f));
-        var top = Math.Clamp(anchorY - (blockHeight * 0.5f), 16f, Math.Max(16f, packet.ViewportHeightDip - blockHeight - 16f));
+        var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet, stageAnchorX: 0.50f, stageAnchorY: 0.52f);
+        var margin = packet.IsCompactCard ? 8f : 16f;
+        var left = Math.Clamp(anchorX - (blockWidth * 0.5f), margin, Math.Max(margin, packet.ViewportWidthDip - blockWidth - margin));
+        var top = Math.Clamp(anchorY - (blockHeight * 0.5f), margin, Math.Max(margin, packet.ViewportHeightDip - blockHeight - margin));
         var cardRect = new SKRect(left, top, left + blockWidth, top + blockHeight);
 
         DrawCodeCardBackdrop(context.Canvas, cardRect, packet);
@@ -206,6 +210,13 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
         {
             context.Canvas.RestoreToCount(clipSave);
         }
+
+        StyleLayoutHelper.DrawSecondarySubline(
+            in context,
+            slice.CurrentLine,
+            cardRect.MidX,
+            cardRect.Bottom + Math.Max(16f, scaledFontSize * 0.72f),
+            scaledFontSize * 1.4f);
     }
 
     public void Dispose()
@@ -216,6 +227,7 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
         }
 
         _disposed = true;
+        _aesthetics.Dispose();
         _clipRoundRect.Dispose();
         _cursorBlur.Dispose();
         _cardBgPaint.Dispose();
@@ -330,6 +342,13 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
                 }
 
                 var wordWidth = TextShaperService.MeasureWidth(revealedText, monoFont, context.Fonts) * scale;
+                var scaledH = monoFont.Size * scale;
+                if (packet.ShowColorSweepLayer)
+                {
+                    var sweepRect = new SKRect(currentX, baselineY - (scaledH * 0.84f), currentX + Math.Max(wordWidth, 6f), baselineY + (scaledH * 0.14f));
+                    _aesthetics.DrawWordColorSweep(context.Canvas, sweepRect, slice.WordProgress, packet, lineAlpha * 0.85f);
+                }
+
                 DrawScaledMonoText(context, monoFont, revealedText, currentX, baselineY, scale, packet.Palette.AccentColor1, lineAlpha);
 
                 _underlinePaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha(0.55f * lineAlpha);
@@ -340,6 +359,7 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
         }
 
         DrawCursor(context.Canvas, currentX + 3f, baselineY, monoFont.Size * scale, isTypingActively, reducedMotion, lineAlpha);
+        _aesthetics.DrawFollowingDot(context.Canvas, packet, currentX + 5f, baselineY - (monoFont.Size * scale * 0.96f), Math.Clamp(monoFont.Size * scale * 0.11f, 2.5f, 5.5f), lineAlpha);
     }
 
     private void DrawCursor(
@@ -476,7 +496,9 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
     }
 
     private static float ResolveMonoFontSize(FrameRenderPacket packet) =>
-        Math.Clamp(packet.BaseFontSizeDip * 0.62f, 18f, 44f);
+        packet.IsCompactCard
+            ? Math.Clamp(packet.EffectiveHeroFontSizeDip * 0.62f, 10f, 26f)
+            : Math.Clamp(packet.EffectiveHeroFontSizeDip * 0.62f, 18f, 68f);
 
     private static string FormatLineNumber(int oneBasedIndex) =>
         Math.Max(1, oneBasedIndex).ToString("00", CultureInfo.InvariantCulture);

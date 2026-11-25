@@ -21,6 +21,8 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
     public const float ContextWordScale = 0.78f;
     public const float DepartingExitDurationSec = 0.14f;
 
+    private readonly AestheticsOverlayRenderer _aesthetics = new();
+
     private SpringState _scrollOffsetY = SpringState.AtRest(0f);
     private SpringState _activeScale = SpringState.AtRest(RestingActiveScale);
     private SpringState _lensStrength = SpringState.AtRest(MotionBlurMath.BaselineBulgeStrength);
@@ -32,6 +34,7 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
     private (int LineIndex, int WordIndex) _lastWordKey = (-1, -1);
     private string? _lastPrevWordText;
     private float _lastWordDurationSec = 0.32f;
+    private bool _disposed;
 
     internal bool AllowCpuShadersForTesting { get; set; }
 
@@ -48,6 +51,7 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
         _lastWordKey = (-1, -1);
         _lastPrevWordText = null;
         _lastWordDurationSec = 0.32f;
+        _aesthetics.ResetDot();
     }
 
     public bool Advance(in FrameRenderPacket packet, in LifecycleFrameState lifecycle)
@@ -94,9 +98,11 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
                     _scrollOffsetY = new SpringState(Value: slotPitch, Velocity: _scrollOffsetY.Velocity * 0.25f, Target: 0f);
                 }
 
-                _activeScale = new SpringState(Value: ContextWordScale, Velocity: 0f, Target: RestingActiveScale);
+                var energy = packet.SafePartyEnergy;
+                var targetScale = RestingActiveScale + ((energy - 1.0f) * 0.08f);
+                _activeScale = new SpringState(Value: ContextWordScale, Velocity: 0f, Target: targetScale);
                 var pacing = Math.Clamp(wordDurationSec / 0.32f, 0.42f, 1.35f);
-                var impulse = isLineTransition ? 2.0f : 1.5f * Math.Min(1.0f, pacing);
+                var impulse = (isLineTransition ? 2.0f : 1.5f * Math.Min(1.0f, pacing)) * Math.Clamp(energy, 0.7f, 1.35f);
                 var nextLens = _lensStrength.WithTarget(MotionBlurMath.BaselineBulgeStrength).WithImpulse(impulse);
                 _lensStrength = nextLens with
                 {
@@ -126,6 +132,7 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
             _scrollOffsetY = SpringState.AtRest(0f);
             _activeScale = SpringState.AtRest(1.00f);
             _lensStrength = SpringState.AtRest(0f);
+            _aesthetics.ResetDot();
             return _highlightFade < 0.999f;
         }
 
@@ -140,15 +147,24 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
             _lensStrength = _lensStrength with { Value = MotionBlurMath.MaxBulgeStrength };
         }
 
+        var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet);
+        var dotProgress = (float)Math.Clamp(slice.WordProgress, 0.0, 1.0);
+        var dotTargetX = anchorX + ((dotProgress - 0.5f) * Math.Min(packet.ViewportWidthDip * 0.28f, fontSize * 3.0f));
+        var dotTargetY = anchorY + (fontSize * 0.62f);
+        var dotActive = packet.ShowFollowingDot && _aesthetics.AdvanceDot(dotTargetX, dotTargetY, dt, reducedMotion: false, _lastWordDurationSec);
+
         return !_scrollOffsetY.IsAtRest ||
                !_activeScale.IsAtRest ||
                !_lensStrength.IsAtRest ||
+               dotActive ||
                _highlightFade < 0.999f ||
                _departingElapsedSec < DepartingExitDurationSec;
     }
 
     public void Render(in StyleRenderContext context, in LifecycleFrameState lifecycle)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
         var packet = context.Packet;
         var slice = StyleLayoutHelper.ResolveSlice(packet);
         var (prevWord, activeWord, nextWord, _, _) = StyleLayoutHelper.ResolveWordTriad(slice);
@@ -159,7 +175,7 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
 
         var fontId = packet.ActiveFontId;
         var fontSize = ResolveFontSize(packet);
-        var font = context.Fonts.GetOrCreateFont(fontId, fontSize);
+        var font = context.Fonts.GetOrCreateFont(fontId, fontSize, enforceMinOverlayFloor: !packet.IsCompactCard);
         var slotPitch = fontSize * SlotPitchRatio;
         var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet);
 
@@ -172,8 +188,8 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
         var (_, blurPadYPx) = blurDeadZone ? (0, 0) : MotionBlurMath.ComputeDirectionalPaddingPx(clampedVel);
         var blurPadYDip = blurPadYPx / Math.Max(dpi, 0.5f);
 
-        var layerWidthDip = Math.Clamp(Math.Max(maxWordWidth * fitScale * 1.85f, fontSize * 8.0f), 240f, packet.ViewportWidthDip);
-        var layerHeightDip = Math.Clamp((fontSize * 5.2f) + (blurPadYDip * 2f), 180f, packet.ViewportHeightDip);
+        var layerWidthDip = Math.Clamp(Math.Max(maxWordWidth * fitScale * 1.85f, fontSize * 8.0f), packet.IsCompactCard ? 120f : 240f, packet.ViewportWidthDip);
+        var layerHeightDip = Math.Clamp((fontSize * 5.2f) + (blurPadYDip * 2f), packet.IsCompactCard ? 100f : 180f, packet.ViewportHeightDip);
 
         // Clamp destRect strictly inside viewport so high DPI / BottomThird / 160% scale never clip
         var destRect = StyleLayoutHelper.ClampLayerRectToViewport(
@@ -218,97 +234,119 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
                 prevWord,
                 activeWord,
                 nextWord,
+                slice.WordProgress,
                 packet.ReducedMotion);
-            return;
         }
-
-        var physW = Math.Clamp((int)MathF.Ceiling(destRect.Width * dpi), 64, OffscreenSurfacePool.MaxSurfaceDimensionPx);
-        var physH = Math.Clamp((int)MathF.Ceiling(destRect.Height * dpi), 64, OffscreenSurfacePool.MaxSurfaceDimensionPx);
-
-        var bulgeSurface = context.SurfacePool.RentSurface(OffscreenSurfaceSlot.Bulge, context.GrContext, physW, physH);
-        var offCanvas = bulgeSurface.Canvas;
-        offCanvas.Clear(SKColors.Transparent);
-
-        var offSave = offCanvas.Save();
-        try
+        else
         {
-            offCanvas.Scale(dpi, dpi);
-            DrawTriadGlyphs(
-                offCanvas,
-                context,
-                font,
-                fontId,
-                destRect.Width * 0.5f,
-                destRect.Height * 0.5f,
-                slotPitch,
-                fitScale,
-                prevWord,
-                activeWord,
-                nextWord,
-                reducedMotion: false);
-        }
-        finally
-        {
-            offCanvas.RestoreToCount(offSave);
-        }
+            var physW = Math.Clamp((int)MathF.Ceiling(destRect.Width * dpi), 64, OffscreenSurfacePool.MaxSurfaceDimensionPx);
+            var physH = Math.Clamp((int)MathF.Ceiling(destRect.Height * dpi), 64, OffscreenSurfacePool.MaxSurfaceDimensionPx);
 
-        var sourceForBulge = bulgeSurface;
-        if (!context.Shaders.ShouldBypassMotionBlur(
-                context.IsGpuBackend,
-                packet.ReducedMotion,
-                velocityPxPerSec,
-                VerticalShutterFactor,
-                dpi,
-                out _,
-                AllowCpuShadersForTesting))
-        {
-            var blurSurface = context.SurfacePool.RentSurface(OffscreenSurfaceSlot.MotionBlur, context.GrContext, physW, physH);
-            blurSurface.Canvas.Clear(SKColors.Transparent);
-            var blurSave = blurSurface.Canvas.Save();
+            var bulgeSurface = context.SurfacePool.RentSurface(OffscreenSurfaceSlot.Bulge, context.GrContext, physW, physH);
+            var offCanvas = bulgeSurface.Canvas;
+            offCanvas.Clear(SKColors.Transparent);
+
+            var offSave = offCanvas.Save();
             try
             {
-                blurSurface.Canvas.Scale(dpi, dpi);
-                context.Shaders.ApplyDirectionalMotionBlur(
-                    blurSurface.Canvas,
-                    bulgeSurface,
-                    new SKRect(0f, 0f, destRect.Width, destRect.Height),
-                    physW,
-                    physH,
-                    dpi,
-                    velocityPxPerSec,
-                    VerticalShutterFactor,
-                    context.IsGpuBackend,
-                    packet.ReducedMotion,
-                    AllowCpuShadersForTesting);
+                offCanvas.Scale(dpi, dpi);
+                DrawTriadGlyphs(
+                    offCanvas,
+                    context,
+                    font,
+                    fontId,
+                    destRect.Width * 0.5f,
+                    destRect.Height * 0.5f,
+                    slotPitch,
+                    fitScale,
+                    prevWord,
+                    activeWord,
+                    nextWord,
+                    slice.WordProgress,
+                    reducedMotion: false);
             }
             finally
             {
-                blurSurface.Canvas.RestoreToCount(blurSave);
+                offCanvas.RestoreToCount(offSave);
             }
 
-            sourceForBulge = blurSurface;
+            var sourceForBulge = bulgeSurface;
+            if (!context.Shaders.ShouldBypassMotionBlur(
+                    context.IsGpuBackend,
+                    packet.ReducedMotion,
+                    velocityPxPerSec,
+                    VerticalShutterFactor,
+                    dpi,
+                    out _,
+                    AllowCpuShadersForTesting))
+            {
+                var blurSurface = context.SurfacePool.RentSurface(OffscreenSurfaceSlot.MotionBlur, context.GrContext, physW, physH);
+                blurSurface.Canvas.Clear(SKColors.Transparent);
+                var blurSave = blurSurface.Canvas.Save();
+                try
+                {
+                    blurSurface.Canvas.Scale(dpi, dpi);
+                    context.Shaders.ApplyDirectionalMotionBlur(
+                        blurSurface.Canvas,
+                        bulgeSurface,
+                        new SKRect(0f, 0f, destRect.Width, destRect.Height),
+                        physW,
+                        physH,
+                        dpi,
+                        velocityPxPerSec,
+                        VerticalShutterFactor,
+                        context.IsGpuBackend,
+                        packet.ReducedMotion,
+                        AllowCpuShadersForTesting);
+                }
+                finally
+                {
+                    blurSurface.Canvas.RestoreToCount(blurSave);
+                }
+
+                sourceForBulge = blurSurface;
+            }
+
+            var power = fontId == LyricFontId.BodoniModa ? 2.05f : MotionBlurMath.DefaultBulgePower;
+            var strength = MotionBlurMath.ClampBulgeStrength(_lensStrength.Value);
+
+            context.Shaders.ApplyEllipticalBulge(
+                context.Canvas,
+                sourceForBulge,
+                destRect,
+                physW,
+                physH,
+                dpi,
+                strength,
+                power,
+                context.IsGpuBackend,
+                packet.ReducedMotion,
+                AllowCpuShadersForTesting);
         }
 
-        var power = fontId == LyricFontId.BodoniModa ? 2.05f : MotionBlurMath.DefaultBulgePower;
-        var strength = MotionBlurMath.ClampBulgeStrength(_lensStrength.Value);
+        // Following Pulse Dot & optional bilingual sub-line rendered crisply above lens pass
+        var activeW = TextShaperService.MeasureWidth(activeWord.Text, font, context.Fonts) * fitScale;
+        var fallbackDotX = destRect.MidX + (((float)Math.Clamp(slice.WordProgress, 0.0, 1.0) - 0.5f) * activeW);
+        var fallbackDotY = destRect.MidY + (fontSize * fitScale * 0.62f);
+        _aesthetics.DrawFollowingDot(context.Canvas, packet, fallbackDotX, fallbackDotY, Math.Clamp(fontSize * 0.09f, 3.2f, 8f));
 
-        context.Shaders.ApplyEllipticalBulge(
-            context.Canvas,
-            sourceForBulge,
-            destRect,
-            physW,
-            physH,
-            dpi,
-            strength,
-            power,
-            context.IsGpuBackend,
-            packet.ReducedMotion,
-            AllowCpuShadersForTesting);
+        StyleLayoutHelper.DrawSecondarySubline(
+            in context,
+            slice.CurrentLine,
+            destRect.MidX,
+            destRect.Bottom + Math.Max(14f, fontSize * 0.25f),
+            fontSize * fitScale);
     }
 
     public void Dispose()
     {
-        // All SKPaint/SKSurface resources are shared via LegibilityPipeline and OffscreenSurfacePool.
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _aesthetics.Dispose();
     }
 
     private void DrawTriadGlyphs(
@@ -323,6 +361,7 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
         LyricWord? prevWord,
         LyricWord activeWord,
         LyricWord? nextWord,
+        double wordProgress,
         bool reducedMotion)
     {
         var packet = context.Packet;
@@ -384,6 +423,19 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
         var activeOpacity = reducedMotion ? (0.90f + (0.10f * highlightEased)) : 1.0f;
         var activeColor = StyleLayoutHelper.BlendSrgb(packet.Palette.AccentColor3, packet.Palette.AccentColor1, highlightEased);
 
+        var activeMeasuredW = TextShaperService.MeasureWidth(activeWord.Text, font, context.Fonts) * activeScale;
+        var activeH = font.Size * activeScale * 1.05f;
+        var sweepRect = new SKRect(
+            centerX - (activeMeasuredW * 0.5f),
+            centerY + scrollY - (activeH * 0.5f),
+            centerX + (activeMeasuredW * 0.5f),
+            centerY + scrollY + (activeH * 0.5f));
+        _aesthetics.DrawWordColorSweep(canvas, sweepRect, wordProgress, packet, activeOpacity);
+
+        var tiltDeg = !reducedMotion && packet.SafePartyEnergy > 1.05f
+            ? ((_lastWordKey.WordIndex % 2 == 0 ? 1f : -1f) * (packet.SafePartyEnergy - 1.0f) * 3.4f)
+            : 0f;
+
         DrawWordSlot(
             canvas,
             context,
@@ -395,7 +447,8 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
             activeScale,
             activeColor,
             opacity: activeOpacity,
-            glowColor: packet.Palette.AccentColor2);
+            glowColor: packet.Palette.AccentColor2,
+            tiltDegrees: tiltDeg);
     }
 
     private static void DrawWordSlot(
@@ -409,7 +462,8 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
         float scale,
         RgbColor fillColor,
         float opacity,
-        RgbColor? glowColor)
+        RgbColor? glowColor,
+        float tiltDegrees = 0f)
     {
         if (string.IsNullOrWhiteSpace(text) || opacity <= 0.004f)
         {
@@ -420,6 +474,11 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
         try
         {
             canvas.Translate(x, y);
+            if (MathF.Abs(tiltDegrees) > 0.05f)
+            {
+                canvas.RotateDegrees(tiltDegrees);
+            }
+
             canvas.Scale(scale, scale);
 
             font.GetFontMetrics(out var metrics);
@@ -444,11 +503,8 @@ public sealed class FisheyeStyleRenderer : IKineticStyleRenderer
         }
     }
 
-    private static float ResolveFontSize(FrameRenderPacket packet)
-    {
-        var metrics = FontAssetRegistry.GetOpticalMetrics(packet.ActiveFontId);
-        return Math.Max(packet.BaseFontSizeDip, metrics.MinOverlaySizeDip);
-    }
+    private static float ResolveFontSize(FrameRenderPacket packet) =>
+        StyleLayoutHelper.ResolveStyleFontSize(packet, styleMultiplier: 1.0f);
 
     private static float MeasureMaxTriadWidth(
         LyricWord? prev,

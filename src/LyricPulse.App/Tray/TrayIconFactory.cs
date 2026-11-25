@@ -59,11 +59,57 @@ public sealed class TrayIconFactory
             return cached;
         }
 
-        var pngBytes = RenderIconPngBytes(state, isLight, sizePx: 32);
-        using var stream = new MemoryStream(pngBytes, writable: false);
+        var icoBytes = RenderMultiSizeIcoBytes(state, isLight);
+        using var stream = new MemoryStream(icoBytes, writable: false);
         var icon = new WindowIcon(stream);
         _cache[key] = icon;
         return icon;
+    }
+
+    /// <summary>
+    /// Builds a standard multi-resolution PNG-compressed Windows <c>.ico</c> container
+    /// containing 16, 20, 24, 32, and 48 px frames for crisp rendering across 100%–300% DPI.
+    /// </summary>
+    public static byte[] RenderMultiSizeIcoBytes(TrayIconVisualState state, bool isLightTaskbar)
+    {
+        ReadOnlySpan<int> sizes = [16, 20, 24, 32, 48];
+        var frames = new byte[sizes.Length][];
+        for (var i = 0; i < sizes.Length; i++)
+        {
+            frames[i] = RenderIconPngBytes(state, isLightTaskbar, sizes[i]);
+        }
+
+        using var ms = new MemoryStream(16384);
+        using var writer = new BinaryWriter(ms);
+
+        // ICONDIR header (6 bytes)
+        writer.Write((ushort)0); // reserved
+        writer.Write((ushort)1); // type = 1 (icon)
+        writer.Write((ushort)sizes.Length);
+
+        var offset = 6 + (16 * sizes.Length);
+        for (var i = 0; i < sizes.Length; i++)
+        {
+            var dim = sizes[i];
+            var png = frames[i];
+            writer.Write((byte)(dim >= 256 ? 0 : dim)); // width
+            writer.Write((byte)(dim >= 256 ? 0 : dim)); // height
+            writer.Write((byte)0);                      // palette
+            writer.Write((byte)0);                      // reserved
+            writer.Write((ushort)1);                    // color planes
+            writer.Write((ushort)32);                   // bpp
+            writer.Write(png.Length);                   // data size
+            writer.Write(offset);                       // image offset
+            offset += png.Length;
+        }
+
+        for (var i = 0; i < frames.Length; i++)
+        {
+            writer.Write(frames[i]);
+        }
+
+        writer.Flush();
+        return ms.ToArray();
     }
 
     public static SKColor ResolveStatusDotColor(TrayIconVisualState state, bool isLightTaskbar) =>

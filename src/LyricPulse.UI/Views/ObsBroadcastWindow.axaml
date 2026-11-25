@@ -1,0 +1,26 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:LyricPulse.UI.ViewModels"
+        x:Class="LyricPulse.UI.Views.ObsBroadcastWindow"
+        x:DataType="vm:StageViewModel"
+        Title="LyricPulse OBS Chroma-Key Capture"
+        Width="960" Height="540"
+        MinWidth="480" MinHeight="270"
+        WindowStartupLocation="CenterScreen">
+  <Grid>
+    <Border x:Name="ChromaBackdrop" Background="#00FF00"/>
+    <ContentControl x:Name="CanvasHostSlot"/>
+
+    <!-- Minimal floating bar at top-right for chroma key color & close -->
+    <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="12" Padding="8,6"
+            CornerRadius="999" Background="#CC14161F" BorderBrush="#33FFFFFF" BorderThickness="1">
+      <StackPanel Orientation="Horizontal" Spacing="6">
+        <TextBlock Text="Chroma:" VerticalAlignment="Center" FontSize="12" Foreground="#F4F6FA" Margin="4,0"/>
+        <Button x:Name="GreenKeyBtn" Content="Green" FontSize="11" Padding="8,4" CornerRadius="6"/>
+        <Button x:Name="BlueKeyBtn" Content="Blue" FontSize="11" Padding="8,4" CornerRadius="6"/>
+        <Button x:Name="BlackKeyBtn" Content="Black" FontSize="11" Padding="8,4" CornerRadius="6"/>
+        <Button x:Name="CloseBtn" Content="Close" FontSize="11" Padding="8,4" CornerRadius="6"/>
+      </StackPanel>
+    </Border>
+  </Grid>
+</Window>

@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using LyricPulse.App.Platform;
 using LyricPulse.App.Tray;
@@ -12,6 +13,9 @@ using LyricPulse.Core.Runtime;
 using LyricPulse.Rendering.Fonts;
 using LyricPulse.Rendering.Host;
 using LyricPulse.Rendering.Shaders;
+using LyricPulse.Rendering.Styles;
+using LyricPulse.UI.ViewModels;
+using LyricPulse.UI.Views;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -29,6 +33,9 @@ public sealed class App : Application, IDisposable
     private IGlobalHotkeyService? _hotkeys;
     private FullscreenAutoHideMonitor? _fullscreenMonitor;
     private TrayController? _trayController;
+    private StageViewModel? _stageViewModel;
+    private StageWindow? _stageWindow;
+    private ObsBroadcastWindow? _obsWindow;
     private Window? _hiddenAnchorWindow;
     private AppSettings? _lastAppliedOverlaySettings;
     private ImmutableDictionary<HotkeyAction, string>? _lastRegisteredHotkeys;
@@ -60,7 +67,8 @@ public sealed class App : Application, IDisposable
 
     internal static bool ShouldReconcileOverlayLayout(AppSettings previous, AppSettings current)
     {
-        if (previous.LyricsVisible != current.LyricsVisible ||
+        if (previous.DesktopOverlayEnabled != current.DesktopOverlayEnabled ||
+            previous.LyricsVisible != current.LyricsVisible ||
             previous.HideDuringFullscreen != current.HideDuringFullscreen ||
             previous.AnchorZone != current.AnchorZone ||
             previous.SafeMarginPx != current.SafeMarginPx ||
@@ -125,7 +133,13 @@ public sealed class App : Application, IDisposable
         _overlayCoordinator.AttachAnchorWindow(_hiddenAnchorWindow);
 
         // Synchronously constructs TrayIcon + initial NativeMenu BEFORE awaiting GSMTC startup
-        _trayController = new TrayController(_runtime, trayIconFactory, () => desktop.Shutdown(0), trayLogger);
+        _trayController = new TrayController(
+            _runtime,
+            trayIconFactory,
+            () => desktop.Shutdown(0),
+            trayLogger,
+            onOpenStageRequested: openSettings => OpenOrFocusStageWindow(openSettings),
+            onToggleFullscreenRequested: ToggleStageFullscreen);
 
         _hotkeys = _services.GetService<IGlobalHotkeyService>();
         if (_hotkeys is not null)
@@ -147,7 +161,143 @@ public sealed class App : Application, IDisposable
             onShowRequested: () => _ = HandleSecondInstanceActivationAsync(forceDemo: false),
             onDemoRequested: () => _ = HandleSecondInstanceActivationAsync(forceDemo: true));
 
+        // Primary Studio Stage Window (starts immediately with Grainy Ambient Party backdrop + Live Gallery)
+        CreateAndShowPrimaryStageWindow(desktop);
+
         _ = StartRuntimeAsync();
+    }
+
+    private void CreateAndShowPrimaryStageWindow(IClassicDesktopStyleApplicationLifetime desktop)
+    {
+        if (_services is null || _runtime is null)
+        {
+            return;
+        }
+
+        var fonts = _services.GetRequiredService<FontAssetRegistry>();
+        var shaders = _services.GetRequiredService<ShaderLibrary>();
+        var telemetry = _services.GetRequiredService<FrameBudgetTelemetry>();
+        var rendererFactory = _services.GetRequiredService<ILyricSceneRendererFactory>();
+
+        _stageViewModel = new StageViewModel(
+            _runtime,
+            hotkeyValidator: ValidateAndRegisterSingleHotkey,
+            onObsWindowRequested: open => ToggleObsWindow(open),
+            onDisplaysRefreshRequested: RefreshStageDisplayList);
+
+        _stageViewModel.UpdateDisplays(MapMonitorDisplays(_overlayCoordinator?.EnumerateCurrentMonitors() ?? []));
+
+        _stageWindow = new StageWindow(_stageViewModel, fonts, shaders, telemetry, rendererFactory);
+        desktop.MainWindow = _stageWindow;
+        _stageWindow.Show();
+        ApplyRequestedTheme(_runtime.Settings.ThemeVariantMode);
+    }
+
+    private void OpenOrFocusStageWindow(bool openSettingsDrawer = false)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _stageWindow?.SurfaceAndFocus(openSettingsDrawer);
+        });
+    }
+
+    private void ToggleStageFullscreen()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_disposed || _stageViewModel is null || _stageWindow is null)
+            {
+                return;
+            }
+
+            _stageWindow.SurfaceAndFocus(openSettingsDrawer: false);
+            _stageViewModel.IsFullscreen = !_stageViewModel.IsFullscreen;
+        });
+    }
+
+    private void ToggleObsWindow(bool open)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_disposed || _services is null || _stageViewModel is null)
+            {
+                return;
+            }
+
+            if (open)
+            {
+                if (_obsWindow is null || !_obsWindow.IsVisible)
+                {
+                    var fonts = _services.GetRequiredService<FontAssetRegistry>();
+                    var shaders = _services.GetRequiredService<ShaderLibrary>();
+                    var telemetry = _services.GetRequiredService<FrameBudgetTelemetry>();
+                    var rendererFactory = _services.GetRequiredService<ILyricSceneRendererFactory>();
+                    _obsWindow = new ObsBroadcastWindow(_stageViewModel, fonts, shaders, telemetry, rendererFactory);
+                    _obsWindow.Closed += (_, _) => _obsWindow = null;
+                    _obsWindow.Show();
+                }
+                else
+                {
+                    _obsWindow.Activate();
+                }
+            }
+            else
+            {
+                _obsWindow?.Close();
+                _obsWindow = null;
+            }
+        });
+    }
+
+    private void RefreshStageDisplayList()
+    {
+        if (_disposed || _overlayCoordinator is null || _stageViewModel is null)
+        {
+            return;
+        }
+
+        _overlayCoordinator.ReconcileNow();
+        _stageViewModel.UpdateDisplays(MapMonitorDisplays(_overlayCoordinator.EnumerateCurrentMonitors()));
+    }
+
+    private static DisplayMonitorInfo[] MapMonitorDisplays(IReadOnlyList<MonitorDescriptor> monitors) =>
+        monitors.Select(static m => new DisplayMonitorInfo(
+            m.DisplayKey,
+            m.FriendlyName,
+            m.WorkingWidthPx,
+            m.WorkingHeightPx,
+            m.EffectiveDpiScale,
+            m.IsPrimary)).ToArray();
+
+    private (bool Ok, string? Error) ValidateAndRegisterSingleHotkey(HotkeyAction action, string gesture)
+    {
+        if (_hotkeys is null)
+        {
+            return (true, null);
+        }
+
+        var ok = _hotkeys.TryRegister(action, gesture, out var error);
+        return (ok, error);
+    }
+
+    private void ApplyRequestedTheme(ThemeVariantMode mode)
+    {
+        var target = mode switch
+        {
+            ThemeVariantMode.Dark => ThemeVariant.Dark,
+            ThemeVariantMode.Light => ThemeVariant.Light,
+            _ => ThemeVariant.Default
+        };
+
+        if (RequestedThemeVariant != target)
+        {
+            RequestedThemeVariant = target;
+        }
     }
 
     private async Task StartRuntimeAsync()
@@ -235,8 +385,11 @@ public sealed class App : Application, IDisposable
         }
 
         _trayController?.ApplySnapshot(snapshot);
+        _stageViewModel?.ApplySnapshot(snapshot);
 
         var settings = snapshot.Settings;
+        ApplyRequestedTheme(settings.ThemeVariantMode);
+
         if (_lastRegisteredHotkeys is null || !AreHotkeysEqual(_lastRegisteredHotkeys, settings.GlobalHotkeys))
         {
             RegisterGlobalHotkeys(settings);
@@ -246,10 +399,11 @@ public sealed class App : Application, IDisposable
         {
             _lastAppliedOverlaySettings = settings;
             _overlayCoordinator.UpdateSettings(settings);
+            _stageViewModel?.UpdateDisplays(MapMonitorDisplays(_overlayCoordinator.EnumerateCurrentMonitors()));
         }
 
         _overlayCoordinator.SetFullscreenPaused(snapshot.IsFullscreenHidden);
-        if (snapshot.IsLyricsVisible)
+        if (snapshot.IsLyricsVisible && settings.DesktopOverlayEnabled)
         {
             _overlayCoordinator.WakeAllCanvases();
         }
@@ -334,17 +488,16 @@ public sealed class App : Application, IDisposable
             {
                 await _runtime.SetDemoModeAsync(true).ConfigureAwait(false);
             }
-            else if (!snap.Settings.LyricsVisible)
-            {
-                await _runtime.ToggleLyricsVisibilityAsync().ConfigureAwait(false);
-            }
             else if (!snap.IsDemoMode && (!snap.IsPlaying || snap.LyricsStatus != LyricsStatus.Synced))
             {
-                // Until Phase 5 Gallery window arrives, surface Demo Mode so double-clicking always shows clear feedback.
                 await _runtime.SetDemoModeAsync(true).ConfigureAwait(false);
             }
 
-            Dispatcher.UIThread.Post(() => _overlayCoordinator?.WakeAllCanvases());
+            Dispatcher.UIThread.Post(() =>
+            {
+                _stageWindow?.SurfaceAndFocus(openSettingsDrawer: false);
+                _overlayCoordinator?.WakeAllCanvases();
+            });
         }
         catch (OperationCanceledException)
         {
@@ -390,6 +543,7 @@ public sealed class App : Application, IDisposable
         }
 
         _trayController?.SetHotkeyConflicts(conflicts);
+        _stageViewModel?.SetHotkeyConflicts(conflicts);
     }
 
     private static bool AreHotkeysEqual(
@@ -440,9 +594,20 @@ public sealed class App : Application, IDisposable
             return;
         }
 
-        // 1. FIRST on UI thread: remove tray icon & close all overlays immediately (stops RAF & SampleFrame()!)
+        // 1. FIRST on UI thread: remove tray icon, close Stage/OBS/overlays immediately (stops RAF & SampleFrame()!)
         _trayController?.Dispose();
         _trayController = null;
+
+        _obsWindow?.Close();
+        _obsWindow = null;
+
+        if (_stageWindow is not null)
+        {
+            _stageWindow.PrepareForShutdown();
+            _stageWindow.Close();
+            _stageWindow = null;
+        }
+        _stageViewModel = null;
 
         if (_overlayCoordinator is not null)
         {

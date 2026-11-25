@@ -22,8 +22,18 @@ internal static class StyleLayoutHelper
         "my", "your", "our", "his", "her", "so", "as", "by", "this", "that", "with", "into", "from"
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
-    public static (float AnchorX, float AnchorY) ComputeAnchorPoint(FrameRenderPacket packet)
+    public static (float AnchorX, float AnchorY) ComputeAnchorPoint(
+        FrameRenderPacket packet,
+        float stageAnchorX = 0.50f,
+        float stageAnchorY = 0.50f)
     {
+        if (packet.SurfaceMode is StageRenderSurfaceMode.StageCanvas or StageRenderSurfaceMode.GalleryCard)
+        {
+            return (
+                packet.ViewportWidthDip * Math.Clamp(stageAnchorX, 0.1f, 0.9f),
+                packet.ViewportHeightDip * Math.Clamp(stageAnchorY, 0.1f, 0.9f));
+        }
+
         var safeMargin = Math.Clamp(packet.BoundsConfig.SafeMarginPx / Math.Max(packet.RenderScaling, 0.5f), 16f, 120f);
         var minX = Math.Min(safeMargin + 40f, packet.ViewportWidthDip * 0.45f);
         var maxX = Math.Max(minX, packet.ViewportWidthDip - minX);
@@ -34,6 +44,138 @@ internal static class StyleLayoutHelper
         var y = Math.Clamp((float)(packet.ViewportHeightDip * packet.BoundsConfig.AnchorY), minY, maxY);
         return (x, y);
     }
+
+    public static float ResolveStyleFontSize(
+        FrameRenderPacket packet,
+        float styleMultiplier = 1.0f,
+        LyricFontId? fontOverride = null)
+    {
+        var fontId = fontOverride ?? packet.ActiveFontId;
+        var scaled = packet.EffectiveHeroFontSizeDip * styleMultiplier;
+        if (packet.IsCompactCard)
+        {
+            return Math.Clamp(scaled, 11f, 64f);
+        }
+
+        var metrics = FontAssetRegistry.GetOpticalMetrics(fontId);
+        return Math.Clamp(Math.Max(scaled, metrics.MinOverlaySizeDip), metrics.MinOverlaySizeDip, 200f);
+    }
+
+    public static WordVisualMatch? ResolveWordVisual(
+        LyricWord word,
+        FrameRenderPacket packet,
+        bool allowTrackMoodFallback = false)
+    {
+        if (word.Visual is not null)
+        {
+            return word.Visual;
+        }
+
+        if (allowTrackMoodFallback &&
+            !IsConnectorWord(word.Text) &&
+            packet.PlaybackSnapshot?.TrackMoodVisual is { } moodVisual)
+        {
+            return moodVisual;
+        }
+
+        return null;
+    }
+
+    public static string? ResolveSecondaryLineText(LyricLine? line, SecondaryLineMode mode)
+    {
+        if (line is null || mode == SecondaryLineMode.Off)
+        {
+            return null;
+        }
+
+        return mode switch
+        {
+            SecondaryLineMode.Translation => string.IsNullOrWhiteSpace(line.TranslationText) ? null : line.TranslationText.Trim(),
+            SecondaryLineMode.Romanization => string.IsNullOrWhiteSpace(line.RomanizedText) ? null : line.RomanizedText.Trim(),
+            _ => null
+        };
+    }
+
+    public static void DrawSecondarySubline(
+        in StyleRenderContext context,
+        LyricLine? line,
+        float centerX,
+        float baselineY,
+        float primaryFontSize,
+        float opacity = 0.72f)
+    {
+        var packet = context.Packet;
+        var text = ResolveSecondaryLineText(line, packet.SecondaryLineMode);
+        if (string.IsNullOrWhiteSpace(text) || opacity <= 0.004f)
+        {
+            return;
+        }
+
+        var subSize = Math.Clamp(primaryFontSize * 0.42f, packet.IsCompactCard ? 9f : 14f, 34f);
+        var subFont = context.Fonts.GetOrCreateFont(LyricFontId.Mulish, subSize, enforceMinOverlayFloor: false);
+        var measured = TextShaperService.MeasureWidth(text, subFont, context.Fonts);
+        var fit = TextShaperService.ComputeAutoFitScale(measured, packet.ViewportWidthDip, 0.80f);
+
+        var clampedY = Math.Clamp(baselineY, subSize + 8f, Math.Max(subSize + 8f, packet.ViewportHeightDip - 12f));
+        var save = context.Canvas.Save();
+        try
+        {
+            context.Canvas.Translate(centerX, clampedY);
+            context.Canvas.Scale(fit, fit);
+            context.Legibility.DrawLegibleText(
+                context.Canvas,
+                text,
+                0f,
+                0f,
+                SKTextAlign.Center,
+                subFont,
+                LyricFontId.Mulish,
+                packet.Palette.AccentColor3,
+                opacity: Math.Clamp(opacity, 0f, 1f),
+                fonts: context.Fonts);
+        }
+        finally
+        {
+            context.Canvas.RestoreToCount(save);
+        }
+    }
+
+    public static uint DeterministicHash(int lineIndex, string? text)
+    {
+        unchecked
+        {
+            var hash = 2166136261u;
+            hash = (hash ^ (uint)lineIndex) * 16777619u;
+            if (!string.IsNullOrEmpty(text))
+            {
+                foreach (var c in text)
+                {
+                    hash = (hash ^ c) * 16777619u;
+                }
+            }
+
+            return hash;
+        }
+    }
+
+    /// <summary>
+    /// Canonical staggered Neon Horizon phase offsets for Gallery live preview cards
+    /// per MOTION_AND_STYLES.md section 7.3 so all 10 cards showcase their signature lyrics asynchronously.
+    /// </summary>
+    public static double GetGalleryPreviewPhaseOffsetSeconds(OverlayStyleId styleId) => styleId switch
+    {
+        OverlayStyleId.Fisheye => 0.2,
+        OverlayStyleId.FisheyeVisual => 3.0,
+        OverlayStyleId.Codestyle => 14.4,
+        OverlayStyleId.CodestyleVisual => 17.3,
+        OverlayStyleId.VisualStack => 5.9,
+        OverlayStyleId.Constellation => 8.8,
+        OverlayStyleId.SpidersWeb => 11.7,
+        OverlayStyleId.NodeLine => 20.1,
+        OverlayStyleId.KineticWall => 28.6,
+        OverlayStyleId.Messages => 22.9,
+        _ => 0.2
+    };
 
     /// <summary>
     /// Clamps a centered offscreen layer rectangle strictly within the overlay viewport

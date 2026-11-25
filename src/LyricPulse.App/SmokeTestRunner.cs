@@ -8,6 +8,7 @@ using LyricPulse.Rendering.Host;
 using LyricPulse.Rendering.Legibility;
 using LyricPulse.Rendering.Shaders;
 using LyricPulse.Rendering.Styles;
+using LyricPulse.UI.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using SkiaSharp;
 
@@ -31,7 +32,7 @@ internal static class SmokeTestRunner
         var shaders = services.GetRequiredService<ShaderLibrary>();
         if (!shaders.AreAllShadersReady)
         {
-            await Console.Error.WriteLineAsync($"[FAIL] SkSL shader compilation failed: bulge='{shaders.BulgeCompileError}', blur='{shaders.MotionBlurCompileError}'").ConfigureAwait(false);
+            await Console.Error.WriteLineAsync($"[FAIL] SkSL shader compilation failed: bulge='{shaders.BulgeCompileError}', blur='{shaders.MotionBlurCompileError}', partyMesh='{shaders.PartyMeshCompileError}'").ConfigureAwait(false);
             return 2;
         }
 
@@ -49,15 +50,16 @@ internal static class SmokeTestRunner
         using var surfacePool = new OffscreenSurfacePool();
         using var legibility = new LegibilityPipeline();
 
-        var mvpStyles = new[] { OverlayStyleId.Fisheye, OverlayStyleId.Codestyle, OverlayStyleId.VisualStack };
+        var allStyles = Enum.GetValues<OverlayStyleId>();
         var renderInfo = new SKImageInfo(640, 240, SKColorType.Bgra8888, SKAlphaType.Premul);
 
-        foreach (var styleId in mvpStyles)
+        foreach (var styleId in allStyles)
         {
+            var phaseSec = LyricStyleRouter.GetGalleryPreviewPhaseOffsetSeconds(styleId);
             var styledSnap = demoSnapshot with
             {
-                ActiveSlice = ActiveLyricSlice.Resolve(annotatedDemo, TimeSpan.FromSeconds(1.5)),
-                Settings = settings with { ActiveStyle = styleId }
+                ActiveSlice = ActiveLyricSlice.Resolve(annotatedDemo, TimeSpan.FromSeconds(phaseSec)),
+                Settings = settings with { ActiveStyle = styleId, LyricsVisible = true }
             };
 
             var packet = OverlayFrameAdapter.FromPlaybackSnapshot(
@@ -65,8 +67,9 @@ internal static class SmokeTestRunner
                 viewportWidthDip: 640f,
                 viewportHeightDip: 240f,
                 renderScaling: 1.0f,
-                renderTimeSeconds: 1.5,
-                deltaSeconds: 1f / 60f);
+                renderTimeSeconds: phaseSec,
+                deltaSeconds: 1f / 60f,
+                surfaceMode: StageRenderSurfaceMode.StageCanvas);
 
             router.AdvancePhysics(in packet);
 
@@ -93,17 +96,26 @@ internal static class SmokeTestRunner
 
         foreach (var state in Enum.GetValues<TrayIconVisualState>())
         {
-            var png = TrayIconFactory.RenderIconPngBytes(state, isLightTaskbar: false);
-            if (png.Length < 100)
+            var ico = TrayIconFactory.RenderMultiSizeIcoBytes(state, isLightTaskbar: false);
+            if (ico.Length < 400)
             {
-                await Console.Error.WriteLineAsync($"[FAIL] Tray icon synthesis failed for state {state}.").ConfigureAwait(false);
+                await Console.Error.WriteLineAsync($"[FAIL] Tray multi-size ICO synthesis failed for state {state}.").ConfigureAwait(false);
                 return 4;
             }
         }
 
+        // Verify Phase 5 StageViewModel + 10-card live Gallery metadata
+        var stageVm = new StageViewModel(runtime);
+        stageVm.ApplySnapshot(demoSnapshot);
+        if (stageVm.StyleCards.Count != 10 || stageVm.StudioPresets.Length != 4)
+        {
+            await Console.Error.WriteLineAsync("[FAIL] StageViewModel failed 10-style / 4-preset initialization.").ConfigureAwait(false);
+            return 5;
+        }
+
         var trayState = TrayMenuState.FromSnapshot(demoSnapshot);
         await Console.Out.WriteLineAsync(
-            $"[PASS] LyricPulse Phase 3 smoke test succeeded | Fonts=5 | Shaders=OK | DemoLines={annotatedDemo.Lines.Length} | Styles=Fisheye,Codestyle,VisualStack | TrayHeader='{trayState.HeaderPrimaryLine}'").ConfigureAwait(false);
+            $"[PASS] LyricPulse Phase 5 smoke test succeeded | Fonts=5 | Shaders=3/3 OK | DemoLines={annotatedDemo.Lines.Length} | Styles={allStyles.Length}/10 | StageCards={stageVm.StyleCards.Count} | TrayHeader='{trayState.HeaderPrimaryLine}'").ConfigureAwait(false);
         return 0;
     }
 }

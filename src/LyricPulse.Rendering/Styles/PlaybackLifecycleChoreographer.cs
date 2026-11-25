@@ -121,9 +121,13 @@ public sealed class PlaybackLifecycleChoreographer : IDisposable
 
         // Strict Synced-only gate: PlainOnly / Loading / NotFound / Instrumental / Error never freeze Line 1
         var hasSyncedLyrics = snapshot.Document is not null && snapshot.LyricsStatus == LyricsStatus.Synced;
-        var (toastText, toastOpacity, toastAnimating) = EvaluateOffsetToast(snapshot, hasSyncedLyrics, utcNow);
+        var (toastText, toastOpacity, toastAnimating) = packet.IsCompactCard
+            ? (null, 0f, false)
+            : EvaluateOffsetToast(snapshot, hasSyncedLyrics, utcNow);
 
-        var hasRenderableLyrics = snapshot.IsLyricsVisible &&
+        var surfaceAllowsLyrics = packet.SurfaceMode is StageRenderSurfaceMode.GalleryCard or StageRenderSurfaceMode.StageCanvas ||
+                                  snapshot.IsLyricsVisible;
+        var hasRenderableLyrics = surfaceAllowsLyrics &&
                                   hasSyncedLyrics &&
                                   snapshot.PlaybackState is MediaPlaybackState.Playing or MediaPlaybackState.Paused;
 

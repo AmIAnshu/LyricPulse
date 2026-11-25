@@ -6,6 +6,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="LyricPulse.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\LyricPulse.Core\LyricPulse.Core.csproj" />
     <ProjectReference Include="..\LyricPulse.Rendering\LyricPulse.Rendering.csproj" />
   </ItemGroup>

@@ -28,9 +28,11 @@ public sealed record TrayMenuState(
     string TooltipText,
     TrayIconVisualState IconState,
     bool IsLyricsVisible,
+    bool IsDesktopOverlayEnabled,
     string? ShowLyricsGestureHint,
     string? HotkeyConflictNotice,
     ImmutableArray<TrayStyleOption> PinnedStyles,
+    ImmutableArray<TrayStyleOption> AllStyles,
     string TimingOffsetHeader,
     ImmutableArray<TrayOffsetOption> OffsetOptions,
     bool CanNudgeOffset,
@@ -63,9 +65,12 @@ public sealed record TrayMenuState(
         var tooltip = BuildTooltip(snapshot, hasTrack, conflictNotice is not null);
 
         var pinned = BuildPinnedStyleOptions(settings);
+        var allStyles = Enum.GetValues<OverlayStyleId>()
+            .Select(id => new TrayStyleOption(id, GetStyleDisplayName(id), id == settings.ActiveStyle))
+            .ToImmutableArray();
         var offsetSec = snapshot.TimingOffset.Offset.TotalSeconds;
         var hasNonZeroOffset = Math.Abs(offsetSec) >= 0.005;
-        var canNudge = hasSyncedLyrics && snapshot.IsLyricsVisible;
+        var canNudge = hasSyncedLyrics && (snapshot.IsLyricsVisible || snapshot.IsStageWindowOpen);
 
         var offsetHeader = FormatTimingOffsetHeader(snapshot.TimingOffset.Offset);
         var offsetOptions = ImmutableArray.Create(
@@ -103,9 +108,11 @@ public sealed record TrayMenuState(
             TooltipText: tooltip,
             IconState: iconState,
             IsLyricsVisible: settings.LyricsVisible,
+            IsDesktopOverlayEnabled: settings.DesktopOverlayEnabled,
             ShowLyricsGestureHint: toggleHint,
             HotkeyConflictNotice: conflictNotice,
             PinnedStyles: pinned,
+            AllStyles: allStyles,
             TimingOffsetHeader: offsetHeader,
             OffsetOptions: offsetOptions,
             CanNudgeOffset: canNudge,
@@ -135,6 +142,7 @@ public sealed record TrayMenuState(
                TooltipText == other.TooltipText &&
                IconState == other.IconState &&
                IsLyricsVisible == other.IsLyricsVisible &&
+               IsDesktopOverlayEnabled == other.IsDesktopOverlayEnabled &&
                ShowLyricsGestureHint == other.ShowLyricsGestureHint &&
                HotkeyConflictNotice == other.HotkeyConflictNotice &&
                TimingOffsetHeader == other.TimingOffsetHeader &&
@@ -147,6 +155,7 @@ public sealed record TrayMenuState(
                IsOsReducedMotion == other.IsOsReducedMotion &&
                ReducedMotionLabel == other.ReducedMotionLabel &&
                PinnedStyles.SequenceEqual(other.PinnedStyles) &&
+               AllStyles.SequenceEqual(other.AllStyles) &&
                OffsetOptions.SequenceEqual(other.OffsetOptions);
     }
 
@@ -158,6 +167,7 @@ public sealed record TrayMenuState(
         hc.Add(TooltipText);
         hc.Add(IconState);
         hc.Add(IsLyricsVisible);
+        hc.Add(IsDesktopOverlayEnabled);
         hc.Add(HotkeyConflictNotice);
         hc.Add(TimingOffsetHeader);
         hc.Add(CanRetryLyricsFetch);

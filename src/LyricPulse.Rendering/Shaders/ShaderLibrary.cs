@@ -1,3 +1,4 @@
+using LyricPulse.Core.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SkiaSharp;
@@ -5,14 +6,15 @@ using SkiaSharp;
 namespace LyricPulse.Rendering.Shaders;
 
 /// <summary>
-/// Compiles and caches embedded SkSL runtime shaders (<c>EllipticalBulge.sksl</c> and
-/// <c>DirectionalMotionBlur13.sksl</c>) once with thread-safe zero-allocation uniform reuse,
-/// null-snapshot TDR guards, and automatic software/ReducedMotion bypass.
+/// Compiles and caches embedded SkSL runtime shaders (<c>EllipticalBulge.sksl</c>,
+/// <c>DirectionalMotionBlur13.sksl</c>, and <c>AmbientPartyMesh.sksl</c>) once with thread-safe
+/// zero-allocation uniform reuse, null-snapshot TDR guards, and automatic software/ReducedMotion bypass.
 /// </summary>
 public sealed class ShaderLibrary : IDisposable
 {
     public const string EllipticalBulgeResourceName = "LyricPulse.Rendering.Shaders.EllipticalBulge.sksl";
     public const string DirectionalMotionBlurResourceName = "LyricPulse.Rendering.Shaders.DirectionalMotionBlur13.sksl";
+    public const string AmbientPartyMeshResourceName = "LyricPulse.Rendering.Shaders.AmbientPartyMesh.sksl";
 
     private static readonly SKSamplingOptions LinearSampling = new(SKFilterMode.Linear, SKMipmapMode.None);
 
@@ -28,12 +30,16 @@ public sealed class ShaderLibrary : IDisposable
     private readonly SKRuntimeEffectUniforms? _motionBlurUniforms;
     private readonly SKRuntimeEffectChildren? _motionBlurChildren;
 
+    private readonly SKRuntimeEffect? _partyMeshEffect;
+    private readonly SKRuntimeEffectUniforms? _partyMeshUniforms;
+
     private bool _disposed;
 
     public ShaderLibrary(ILogger<ShaderLibrary>? logger = null)
         : this(
             LoadEmbeddedShaderSource(EllipticalBulgeResourceName),
             LoadEmbeddedShaderSource(DirectionalMotionBlurResourceName),
+            LoadEmbeddedShaderSource(AmbientPartyMeshResourceName),
             logger)
     {
     }
@@ -42,9 +48,24 @@ public sealed class ShaderLibrary : IDisposable
         string bulgeSksl,
         string motionBlurSksl,
         ILogger<ShaderLibrary>? logger = null) =>
-        new(bulgeSksl, motionBlurSksl, logger);
+        new(
+            bulgeSksl,
+            motionBlurSksl,
+            LoadEmbeddedShaderSource(AmbientPartyMeshResourceName),
+            logger);
 
-    internal ShaderLibrary(string bulgeSksl, string motionBlurSksl, ILogger<ShaderLibrary>? logger = null)
+    public static ShaderLibrary CreateFromSources(
+        string bulgeSksl,
+        string motionBlurSksl,
+        string partyMeshSksl,
+        ILogger<ShaderLibrary>? logger = null) =>
+        new(bulgeSksl, motionBlurSksl, partyMeshSksl, logger);
+
+    internal ShaderLibrary(
+        string bulgeSksl,
+        string motionBlurSksl,
+        string partyMeshSksl,
+        ILogger<ShaderLibrary>? logger = null)
     {
         _logger = logger ?? NullLogger<ShaderLibrary>.Instance;
 
@@ -63,17 +84,28 @@ public sealed class ShaderLibrary : IDisposable
             _motionBlurUniforms = new SKRuntimeEffectUniforms(_motionBlurEffect);
             _motionBlurChildren = new SKRuntimeEffectChildren(_motionBlurEffect);
         }
+
+        _partyMeshEffect = CompileEffect("AmbientPartyMesh", partyMeshSksl, out var partyError);
+        PartyMeshCompileError = partyError;
+        if (_partyMeshEffect is not null)
+        {
+            _partyMeshUniforms = new SKRuntimeEffectUniforms(_partyMeshEffect);
+        }
     }
 
     public bool IsBulgeReady => _bulgeEffect is not null;
 
     public bool IsMotionBlurReady => _motionBlurEffect is not null;
 
-    public bool AreAllShadersReady => IsBulgeReady && IsMotionBlurReady;
+    public bool IsPartyMeshReady => _partyMeshEffect is not null;
+
+    public bool AreAllShadersReady => IsBulgeReady && IsMotionBlurReady && IsPartyMeshReady;
 
     public string? BulgeCompileError { get; }
 
     public string? MotionBlurCompileError { get; }
+
+    public string? PartyMeshCompileError { get; }
 
     public static string LoadEmbeddedShaderSource(string resourceName)
     {
@@ -259,6 +291,85 @@ public sealed class ShaderLibrary : IDisposable
         }
     }
 
+    /// <summary>
+    /// Draws the GPU-accelerated grainy, slow-breathing, beat-reactive Ambient Party Mesh backdrop
+    /// (<c>AmbientPartyMesh.sksl</c>). Returns <c>false</c> when bypassed (Reduced Motion, software mode,
+    /// or compile failure) so callers can draw the static zero-CPU gradient fallback.
+    /// </summary>
+    public bool DrawAmbientPartyMesh(
+        SKCanvas targetCanvas,
+        SKRect logicalDestRect,
+        float dpiScale,
+        float timeSeconds,
+        float energyLevel,
+        AlbumAccentPalette palette,
+        bool isGpuBackend = true,
+        bool reducedMotion = false,
+        bool allowCpuForTesting = false)
+    {
+        ArgumentNullException.ThrowIfNull(targetCanvas);
+        ArgumentNullException.ThrowIfNull(palette);
+
+        if (logicalDestRect.Width <= 0f || logicalDestRect.Height <= 0f)
+        {
+            return false;
+        }
+
+        if ((!isGpuBackend && !allowCpuForTesting) || reducedMotion || !IsPartyMeshReady)
+        {
+            return false;
+        }
+
+        lock (_shaderSync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            if (_partyMeshEffect is null || _partyMeshUniforms is null)
+            {
+                return false;
+            }
+
+            var safeDpi = float.IsFinite(dpiScale) && dpiScale > 0f ? dpiScale : 1.0f;
+            var physW = Math.Max(1, (int)MathF.Ceiling(logicalDestRect.Width * safeDpi));
+            var physH = Math.Max(1, (int)MathF.Ceiling(logicalDestRect.Height * safeDpi));
+
+            Span<float> resSpan = stackalloc float[2];
+            resSpan[0] = physW;
+            resSpan[1] = physH;
+
+            Span<float> c1 = stackalloc float[3];
+            c1[0] = palette.AccentColor1.R / 255f;
+            c1[1] = palette.AccentColor1.G / 255f;
+            c1[2] = palette.AccentColor1.B / 255f;
+
+            Span<float> c2 = stackalloc float[3];
+            c2[0] = palette.AccentColor2.R / 255f;
+            c2[1] = palette.AccentColor2.G / 255f;
+            c2[2] = palette.AccentColor2.B / 255f;
+
+            Span<float> c3 = stackalloc float[3];
+            c3[0] = palette.AccentColor3.R / 255f;
+            c3[1] = palette.AccentColor3.G / 255f;
+            c3[2] = palette.AccentColor3.B / 255f;
+
+            _partyMeshUniforms["iResolution"] = (ReadOnlySpan<float>)resSpan;
+            _partyMeshUniforms["iTime"] = float.IsFinite(timeSeconds) ? timeSeconds : 0f;
+            _partyMeshUniforms["iEnergy"] = float.IsFinite(energyLevel) ? Math.Clamp(energyLevel, 0.5f, 1.85f) : 1.0f;
+            _partyMeshUniforms["iColor1"] = (ReadOnlySpan<float>)c1;
+            _partyMeshUniforms["iColor2"] = (ReadOnlySpan<float>)c2;
+            _partyMeshUniforms["iColor3"] = (ReadOnlySpan<float>)c3;
+
+            using var runtimeShader = _partyMeshEffect.ToShader(_partyMeshUniforms);
+            if (runtimeShader is null)
+            {
+                return false;
+            }
+
+            DrawPhysicalShaderRectLocked(targetCanvas, runtimeShader, logicalDestRect, physW, physH, safeDpi);
+            return true;
+        }
+    }
+
     public void Dispose()
     {
         lock (_shaderSync)
@@ -275,6 +386,8 @@ public sealed class ShaderLibrary : IDisposable
             _motionBlurUniforms?.Dispose();
             _motionBlurChildren?.Dispose();
             _motionBlurEffect?.Dispose();
+            _partyMeshUniforms?.Dispose();
+            _partyMeshEffect?.Dispose();
             _blitPaint.Dispose();
         }
     }

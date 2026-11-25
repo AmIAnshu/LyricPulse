@@ -187,15 +187,14 @@ public sealed class FontAssetRegistry : IDisposable
     /// (Antialias edging, Subpixel=true, LinearMetrics=true, NEVER ClearType SubpixelAntialias).
     /// Cached instances remain alive until <see cref="Dispose"/> so concurrent render threads never hit freed handles.
     /// </summary>
-    public SKFont GetOrCreateFont(LyricFontId id, float sizeDip)
+    public SKFont GetOrCreateFont(LyricFontId id, float sizeDip, bool enforceMinOverlayFloor = true)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         var metrics = GetOpticalMetrics(id);
-        var clampedSize = Math.Clamp(
-            float.IsFinite(sizeDip) ? Math.Max(sizeDip, metrics.MinOverlaySizeDip) : 48f,
-            8f,
-            256f);
+        var rawSize = float.IsFinite(sizeDip) ? sizeDip : 48f;
+        var flooredSize = enforceMinOverlayFloor ? Math.Max(rawSize, metrics.MinOverlaySizeDip) : rawSize;
+        var clampedSize = Math.Clamp(flooredSize, 8f, 256f);
 
         var quantizedHalfDip = (int)MathF.Round(clampedSize * 2f);
         var key = new FontCacheKey(id, quantizedHalfDip);
@@ -261,6 +260,7 @@ public sealed class FontAssetRegistry : IDisposable
 
     /// <summary>
     /// Returns a cached HarfBuzz <see cref="SKShaper"/> for the specified typeface (owned and disposed by registry).
+    /// Prefer <see cref="ShapeSynchronized"/> or <see cref="ShapeToBlobSynchronized"/> for concurrent Gallery/Overlay threads.
     /// </summary>
     public SKShaper GetOrCreateShaper(SKTypeface typeface)
     {
@@ -269,15 +269,55 @@ public sealed class FontAssetRegistry : IDisposable
 
         lock (_cacheLock)
         {
-            if (_shaperCache.TryGetValue(typeface.Handle, out var existing))
-            {
-                return existing;
-            }
-
-            var shaper = new SKShaper(typeface);
-            _shaperCache[typeface.Handle] = shaper;
-            return shaper;
+            return GetOrCreateShaperLocked(typeface);
         }
+    }
+
+    /// <summary>
+    /// Thread-safely shapes text with the cached HarfBuzz <see cref="SKShaper"/> under synchronization so
+    /// concurrent Gallery cards and live overlays never race on a shared native shaper buffer.
+    /// </summary>
+    public SKShaper.Result ShapeSynchronized(SKTypeface typeface, string text, SKFont font)
+    {
+        ArgumentNullException.ThrowIfNull(typeface);
+        ArgumentNullException.ThrowIfNull(font);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        lock (_cacheLock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var shaper = GetOrCreateShaperLocked(typeface);
+            return shaper.Shape(text, font);
+        }
+    }
+
+    /// <summary>
+    /// Thread-safely shapes text into a positioned <see cref="SKTextBlob"/> (caller owns disposal).
+    /// </summary>
+    public SKTextBlob? ShapeToBlobSynchronized(SKTypeface typeface, string text, SKFont font, out float advanceWidth)
+    {
+        ArgumentNullException.ThrowIfNull(typeface);
+        ArgumentNullException.ThrowIfNull(font);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        lock (_cacheLock)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var shaper = GetOrCreateShaperLocked(typeface);
+            return TextShaperService.ShapeToBlob(text, font, out advanceWidth, shaper);
+        }
+    }
+
+    private SKShaper GetOrCreateShaperLocked(SKTypeface typeface)
+    {
+        if (_shaperCache.TryGetValue(typeface.Handle, out var existing))
+        {
+            return existing;
+        }
+
+        var shaper = new SKShaper(typeface);
+        _shaperCache[typeface.Handle] = shaper;
+        return shaper;
     }
 
     /// <summary>
@@ -515,7 +555,7 @@ public sealed class FontAssetRegistry : IDisposable
 
     private static SKTypeface ResolveSystemTypeface(SKFontStyleWeight preferredWeight, params string[] preferredFamilies)
     {
-        var style = new SKFontStyle(preferredWeight, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
+        using var style = new SKFontStyle(preferredWeight, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
         foreach (var family in preferredFamilies)
         {
             var matched = SKFontManager.Default.MatchFamily(family, style)

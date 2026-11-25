@@ -139,12 +139,14 @@ public sealed class KineticStylesMvpTests
     }
 
     [Fact]
-    public void LyricStyleRouter_FallsBackToFisheyeForPhase4StylesAndResetsStateOnTrackChange()
+    public void LyricStyleRouter_ResolvesAllTenStylesFallsBackForUnknownAndResetsStateOnTrackChange()
     {
         using var router = new LyricStyleRouter();
 
-        router.RegisteredStyles.Should().Contain([OverlayStyleId.Fisheye, OverlayStyleId.Codestyle, OverlayStyleId.VisualStack]);
-        router.ResolveRenderer(OverlayStyleId.Constellation).StyleId.Should().Be(OverlayStyleId.Fisheye);
+        router.RegisteredStyles.Should().HaveCount(10);
+        router.RegisteredStyles.Should().Contain(Enum.GetValues<OverlayStyleId>());
+        router.ResolveRenderer(OverlayStyleId.Constellation).StyleId.Should().Be(OverlayStyleId.Constellation);
+        router.ResolveRenderer((OverlayStyleId)999).StyleId.Should().Be(OverlayStyleId.Fisheye);
         router.ResolveRenderer(OverlayStyleId.Codestyle).StyleId.Should().Be(OverlayStyleId.Codestyle);
         router.ResolveRenderer(OverlayStyleId.VisualStack).StyleId.Should().Be(OverlayStyleId.VisualStack);
 

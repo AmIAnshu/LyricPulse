@@ -40,6 +40,9 @@ public sealed class MultiMonitorOverlayCoordinator : IDisposable
 
     public int ActiveOverlayCount => _overlays.Count;
 
+    public IReadOnlyList<MonitorDescriptor> EnumerateCurrentMonitors() =>
+        _anchorWindow is null ? [] : EnumerateMonitors(_anchorWindow.Screens.All);
+
     /// <summary>Raised when Windows broadcasts WM_SETTINGCHANGE (e.g. Light/Dark taskbar or Animation Effects change).</summary>
     public event EventHandler? SystemSettingsChanged;
 
@@ -187,7 +190,9 @@ public sealed class MultiMonitorOverlayCoordinator : IDisposable
     }
 
     private bool ShouldOverlaysBeVisible() =>
-        _currentSettings.LyricsVisible && !(_isFullscreenPaused && _currentSettings.HideDuringFullscreen);
+        _currentSettings.DesktopOverlayEnabled &&
+        _currentSettings.LyricsVisible &&
+        !(_isFullscreenPaused && _currentSettings.HideDuringFullscreen);
 
     private void ApplyVisibilityState()
     {

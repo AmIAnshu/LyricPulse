@@ -1,0 +1,408 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:LyricPulse.UI.ViewModels"
+             xmlns:m="clr-namespace:LyricPulse.Core.Models;assembly=LyricPulse.Core"
+             x:Class="LyricPulse.UI.Views.SettingsView"
+             x:DataType="vm:StageViewModel"
+             Background="{DynamicResource LpSurfaceBrush}"
+             BorderBrush="{DynamicResource LpBorderDefaultBrush}"
+             BorderThickness="1,0,0,0">
+  <Grid RowDefinitions="52,*,56">
+    <!-- Sticky Header -->
+    <Border Grid.Row="0"
+            Padding="20,0,12,0"
+            BorderBrush="{DynamicResource LpBorderDefaultBrush}"
+            BorderThickness="0,0,0,1">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Text="Settings"
+                   VerticalAlignment="Center"
+                   FontSize="16"
+                   FontWeight="SemiBold"
+                   Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+        <Button Grid.Column="1"
+                Width="40" Height="40"
+                Background="Transparent"
+                CornerRadius="8"
+                Cursor="Hand"
+                Command="{Binding ToggleSettingsDrawerCommand}"
+                ToolTip.Tip="Close (Esc)"
+                AutomationProperties.Name="Close Settings">
+          <PathIcon Data="{StaticResource LpIconDismiss}"
+                    Width="16" Height="16"
+                    Foreground="{DynamicResource LpTextSecondaryBrush}"/>
+        </Button>
+      </Grid>
+    </Border>
+
+    <!-- Scrollable Body -->
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+      <StackPanel Margin="20,16,20,24" Spacing="20">
+
+        <!-- 1. Typography -->
+        <StackPanel Spacing="10">
+          <TextBlock Text="Typography" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+          <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="8">
+            <RadioButton Grid.Row="0" Grid.Column="0" GroupName="LyricFont"
+                         IsChecked="{Binding IsJostSelected, Mode=OneWay}"
+                         Command="{Binding SelectFontCommand}" CommandParameter="Jost"
+                         Cursor="Hand" Padding="10,8" CornerRadius="8"
+                         Background="{DynamicResource LpSurfaceElevatedBrush}">
+              <StackPanel Spacing="2">
+                <TextBlock Text="Aa" FontFamily="{StaticResource LpFontJost}" FontSize="20" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+                <TextBlock Text="Jost" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+                <TextBlock Text="Geometric sans" FontSize="11" Foreground="{DynamicResource LpTextTertiaryBrush}"/>
+              </StackPanel>
+            </RadioButton>
+            <RadioButton Grid.Row="0" Grid.Column="1" GroupName="LyricFont"
+                         IsChecked="{Binding IsBodoniSelected, Mode=OneWay}"
+                         Command="{Binding SelectFontCommand}" CommandParameter="Bodoni Moda"
+                         Cursor="Hand" Padding="10,8" CornerRadius="8"
+                         Background="{DynamicResource LpSurfaceElevatedBrush}">
+              <StackPanel Spacing="2">
+                <TextBlock Text="Aa" FontFamily="{StaticResource LpFontBodoni}" FontSize="20" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+                <TextBlock Text="Bodoni Moda" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+                <TextBlock Text="Editorial serif" FontSize="11" Foreground="{DynamicResource LpTextTertiaryBrush}"/>
+              </StackPanel>
+            </RadioButton>
+            <RadioButton Grid.Row="1" Grid.Column="0" GroupName="LyricFont"
+                         IsChecked="{Binding IsMulishSelected, Mode=OneWay}"
+                         Command="{Binding SelectFontCommand}" CommandParameter="Mulish"
+                         Cursor="Hand" Padding="10,8" CornerRadius="8"
+                         Background="{DynamicResource LpSurfaceElevatedBrush}">
+              <StackPanel Spacing="2">
+                <TextBlock Text="Aa" FontFamily="{StaticResource LpFontMulish}" FontSize="20" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+                <TextBlock Text="Mulish" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+                <TextBlock Text="Clean humanist" FontSize="11" Foreground="{DynamicResource LpTextTertiaryBrush}"/>
+              </StackPanel>
+            </RadioButton>
+            <RadioButton Grid.Row="1" Grid.Column="1" GroupName="LyricFont"
+                         IsChecked="{Binding IsNunitoSelected, Mode=OneWay}"
+                         Command="{Binding SelectFontCommand}" CommandParameter="Nunito"
+                         Cursor="Hand" Padding="10,8" CornerRadius="8"
+                         Background="{DynamicResource LpSurfaceElevatedBrush}">
+              <StackPanel Spacing="2">
+                <TextBlock Text="Aa" FontFamily="{StaticResource LpFontNunito}" FontSize="20" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+                <TextBlock Text="Nunito" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+                <TextBlock Text="Rounded soft" FontSize="11" Foreground="{DynamicResource LpTextTertiaryBrush}"/>
+              </StackPanel>
+            </RadioButton>
+          </Grid>
+          <TextBlock Text="Codestyle uses monospace and Messages uses system chat typography."
+                     FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource LpTextTertiaryBrush}"/>
+
+          <!-- Lyric Scale -->
+          <Grid ColumnDefinitions="*,Auto" Margin="0,4,0,0">
+            <TextBlock Text="Lyric Scale" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+            <TextBlock Grid.Column="1" Text="{Binding FontScalePercent, StringFormat='{}{0}%'}"
+                       FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="12"
+                       Foreground="{DynamicResource LpAccentTextBrush}"/>
+          </Grid>
+          <Slider Minimum="60" Maximum="160" TickFrequency="5" IsSnapToTickEnabled="True"
+                  Value="{Binding FontScalePercent}"
+                  AutomationProperties.Name="Lyric text scale percentage"/>
+
+          <!-- Fullscreen Hero Stage Scale -->
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Stage Hero Size" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+            <TextBlock Grid.Column="1" Text="{Binding FullscreenStageScalePercent, StringFormat='{}{0}%'}"
+                       FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="12"
+                       Foreground="{DynamicResource LpAccentTextBrush}"/>
+          </Grid>
+          <Slider Minimum="120" Maximum="260" TickFrequency="5" IsSnapToTickEnabled="True"
+                  Value="{Binding FullscreenStageScalePercent}"
+                  AutomationProperties.Name="Stage hero typography scale"/>
+        </StackPanel>
+
+        <Border Height="1" Background="{DynamicResource LpBorderDefaultBrush}"/>
+
+        <!-- 2. Party Aesthetics & Color Mode -->
+        <StackPanel Spacing="10">
+          <TextBlock Text="Party Aesthetics &amp; Color" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+
+          <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+            <RadioButton Grid.Column="0" GroupName="BackdropMode"
+                         IsChecked="{Binding IsAmbientPartyMesh, Mode=OneWay}"
+                         Command="{Binding SelectBackdropModeCommand}" CommandParameter="{x:Static m:StageBackdropMode.AmbientPartyMesh}"
+                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                         Content="Ambient Mesh" CornerRadius="8"/>
+            <RadioButton Grid.Column="1" GroupName="BackdropMode"
+                         IsChecked="{Binding IsPureBlackBackdrop, Mode=OneWay}"
+                         Command="{Binding SelectBackdropModeCommand}" CommandParameter="{x:Static m:StageBackdropMode.PureBlack}"
+                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                         Content="Pure Black" CornerRadius="8"/>
+          </Grid>
+
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Following Beat Dot" VerticalAlignment="Center" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+            <ToggleSwitch Grid.Column="1" IsChecked="{Binding ShowFollowingDot}" OnContent="" OffContent=""/>
+          </Grid>
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Color-Changing Sweep Layer" VerticalAlignment="Center" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+            <ToggleSwitch Grid.Column="1" IsChecked="{Binding ShowColorSweepLayer}" OnContent="" OffContent=""/>
+          </Grid>
+
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Party Motion Energy" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+            <TextBlock Grid.Column="1" Text="{Binding PartyEnergyPercent, StringFormat='{}{0}%'}"
+                       FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="12"
+                       Foreground="{DynamicResource LpAccentTextBrush}"/>
+          </Grid>
+          <Slider Minimum="50" Maximum="150" TickFrequency="5" IsSnapToTickEnabled="True"
+                  Value="{Binding PartyEnergyPercent}"
+                  AutomationProperties.Name="Party animation energy"/>
+
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Auto-Sync Album Colors" VerticalAlignment="Center" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+            <ToggleSwitch Grid.Column="1" IsChecked="{Binding AutoSyncColors}" OnContent="" OffContent=""/>
+          </Grid>
+
+          <!-- Manual 3-Accent ColorPickers (visible when Auto-Sync is off) -->
+          <StackPanel Spacing="8" IsVisible="{Binding !AutoSyncColors}">
+            <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+              <TextBlock Text="Accent 1 (Primary Sung)" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
+              <ColorPicker Grid.Column="1" Color="{Binding ManualColor1, Mode=TwoWay}" IsAlphaEnabled="False" Height="32"/>
+            </Grid>
+            <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+              <TextBlock Text="Accent 2 (Glow / Icons)" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
+              <ColorPicker Grid.Column="1" Color="{Binding ManualColor2, Mode=TwoWay}" IsAlphaEnabled="False" Height="32"/>
+            </Grid>
+            <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+              <TextBlock Text="Accent 3 (Ambient / Context)" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
+              <ColorPicker Grid.Column="1" Color="{Binding ManualColor3, Mode=TwoWay}" IsAlphaEnabled="False" Height="32"/>
+            </Grid>
+
+            <!-- 4 Studio Presets -->
+            <TextBlock Text="Quick Studio Presets" FontSize="12" Foreground="{DynamicResource LpTextTertiaryBrush}"/>
+            <ItemsControl ItemsSource="{Binding StudioPresets}">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <WrapPanel Orientation="Horizontal"/>
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:ColorPresetOption">
+                  <Button Margin="0,0,6,6" Padding="10,6" CornerRadius="8" Cursor="Hand"
+                          Background="{DynamicResource LpSurfaceElevatedBrush}"
+                          Command="{Binding $parent[UserControl].((vm:StageViewModel)DataContext).ApplyColorPresetCommand}"
+                          CommandParameter="{Binding}">
+                    <TextBlock Text="{Binding Name}" FontSize="12" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+                  </Button>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+
+          <!-- Bilingual Sub-line -->
+          <TextBlock Text="Bilingual Sub-line" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
+          <Grid ColumnDefinitions="*,*,*" ColumnSpacing="6">
+            <Button Grid.Column="0" Content="Off" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectSecondaryLineCommand}" CommandParameter="{x:Static m:SecondaryLineMode.Off}"/>
+            <Button Grid.Column="1" Content="Translate" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectSecondaryLineCommand}" CommandParameter="{x:Static m:SecondaryLineMode.Translation}"/>
+            <Button Grid.Column="2" Content="Romanize" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectSecondaryLineCommand}" CommandParameter="{x:Static m:SecondaryLineMode.Romanization}"/>
+          </Grid>
+        </StackPanel>
+
+        <Border Height="1" Background="{DynamicResource LpBorderDefaultBrush}"/>
+
+        <!-- 3. Screen, Desktop Overlay & Displays -->
+        <StackPanel Spacing="10">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Displays &amp; Desktop Overlay" VerticalAlignment="Center" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+            <Button Grid.Column="1" Width="36" Height="36" Background="Transparent" CornerRadius="8" Cursor="Hand"
+                    Command="{Binding RefreshDisplaysCommand}" ToolTip.Tip="Refresh Displays"
+                    AutomationProperties.Name="Refresh displays">
+              <PathIcon Data="{StaticResource LpIconRefresh}" Width="16" Height="16" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
+            </Button>
+          </Grid>
+
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel>
+              <TextBlock Text="Transparent Desktop Overlay" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+              <TextBlock Text="Click-through lyrics over other apps" FontSize="11" Foreground="{DynamicResource LpTextTertiaryBrush}"/>
+            </StackPanel>
+            <ToggleSwitch Grid.Column="1" IsChecked="{Binding DesktopOverlayEnabled}" OnContent="" OffContent=""/>
+          </Grid>
+
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Overlay Opacity" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+            <TextBlock Grid.Column="1" Text="{Binding OverlayOpacityPercent, StringFormat='{}{0}%'}"
+                       FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="12"
+                       Foreground="{DynamicResource LpAccentTextBrush}"/>
+          </Grid>
+          <Slider Minimum="25" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True"
+                  Value="{Binding OverlayOpacityPercent}"/>
+
+          <!-- 5-Zone Safe Anchor Grid -->
+          <TextBlock Text="Overlay Safe Position" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
+          <Border Background="{DynamicResource LpStageBackgroundBrush}" BorderBrush="{DynamicResource LpBorderStrongBrush}"
+                  BorderThickness="1" CornerRadius="8" Padding="8" Height="96">
+            <Grid RowDefinitions="Auto,*,Auto,Auto" ColumnDefinitions="*,*,*">
+              <Button Grid.Row="0" Grid.Column="1" Content="Top" FontSize="11" HorizontalAlignment="Center" Padding="10,3"
+                      Command="{Binding SelectAnchorZoneCommand}" CommandParameter="{x:Static m:AnchorZone.TopCenter}"/>
+              <Button Grid.Row="1" Grid.Column="1" Content="Center" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="10,3"
+                      Command="{Binding SelectAnchorZoneCommand}" CommandParameter="{x:Static m:AnchorZone.MiddleCenter}"/>
+              <Button Grid.Row="2" Grid.Column="0" Content="B-Left" FontSize="11" HorizontalAlignment="Left" Padding="8,3"
+                      Command="{Binding SelectAnchorZoneCommand}" CommandParameter="{x:Static m:AnchorZone.BottomLeft}"/>
+              <Button Grid.Row="2" Grid.Column="1" Content="B-Third" FontSize="11" HorizontalAlignment="Center" Padding="8,3"
+                      Command="{Binding SelectAnchorZoneCommand}" CommandParameter="{x:Static m:AnchorZone.BottomThird}"/>
+              <Button Grid.Row="2" Grid.Column="2" Content="B-Right" FontSize="11" HorizontalAlignment="Right" Padding="8,3"
+                      Command="{Binding SelectAnchorZoneCommand}" CommandParameter="{x:Static m:AnchorZone.BottomRight}"/>
+              <Border Grid.Row="3" Grid.ColumnSpan="3" Height="3" Margin="0,4,0,0" CornerRadius="2" Background="#475569"/>
+            </Grid>
+          </Border>
+
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Taskbar Safe Margin" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+            <TextBlock Grid.Column="1" Text="{Binding SafeMarginPx, StringFormat='{}{0} px'}"
+                       FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="12"
+                       Foreground="{DynamicResource LpTextSecondaryBrush}"/>
+          </Grid>
+          <Slider Minimum="16" Maximum="120" TickFrequency="4" IsSnapToTickEnabled="True" Value="{Binding SafeMarginPx}"/>
+
+          <!-- Monitor List -->
+          <ItemsControl ItemsSource="{Binding Displays}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:DisplayOptionViewModel">
+                <Border Margin="0,0,0,6" Padding="10,8" CornerRadius="8"
+                        Background="{DynamicResource LpSurfaceElevatedBrush}"
+                        BorderBrush="{DynamicResource LpBorderDefaultBrush}" BorderThickness="1">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel>
+                      <TextBlock Text="{Binding HeaderText}" FontSize="12" FontWeight="SemiBold"
+                                 TextTrimming="CharacterEllipsis" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+                      <TextBlock Text="{Binding TelemetryText}" FontSize="11"
+                                 FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum"
+                                 Foreground="{DynamicResource LpTextSecondaryBrush}"/>
+                    </StackPanel>
+                    <ToggleSwitch Grid.Column="1" IsChecked="{Binding IsEnabled}" OnContent="" OffContent=""/>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <Border IsVisible="{Binding AllDisplaysDisabled}" Padding="10" CornerRadius="8"
+                  Background="{DynamicResource LpWarningSoftBgBrush}">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+              <TextBlock Text="Overlay disabled on all displays." VerticalAlignment="Center" FontSize="12"
+                         TextWrapping="Wrap" Foreground="{DynamicResource LpWarningTextBrush}"/>
+              <Button Grid.Column="1" Content="Enable Primary" Command="{Binding EnablePrimaryDisplayCommand}"/>
+            </Grid>
+          </Border>
+
+          <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Height="36" CornerRadius="8"
+                  Command="{Binding ToggleObsWindowCommand}">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <PathIcon Data="{StaticResource LpIconBroadcast}" Width="16" Height="16"/>
+              <TextBlock Text="OBS Chroma-Key Capture Window" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Button>
+        </StackPanel>
+
+        <Border Height="1" Background="{DynamicResource LpBorderDefaultBrush}"/>
+
+        <!-- 4. Theme, Media & Accessibility -->
+        <StackPanel Spacing="10">
+          <TextBlock Text="Theme &amp; Accessibility" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+
+          <Grid ColumnDefinitions="*,*,*" ColumnSpacing="6">
+            <Button Grid.Column="0" Content="System" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectThemeVariantCommand}" CommandParameter="{x:Static m:ThemeVariantMode.System}"/>
+            <Button Grid.Column="1" Content="Dark" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectThemeVariantCommand}" CommandParameter="{x:Static m:ThemeVariantMode.Dark}"/>
+            <Button Grid.Column="2" Content="Light" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectThemeVariantCommand}" CommandParameter="{x:Static m:ThemeVariantMode.Light}"/>
+          </Grid>
+
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Follow All Media Players" VerticalAlignment="Center" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+            <ToggleSwitch Grid.Column="1" IsChecked="{Binding UniversalPlayerMode}" OnContent="" OffContent=""/>
+          </Grid>
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Auto-Hide in Fullscreen Games" VerticalAlignment="Center" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+            <ToggleSwitch Grid.Column="1" IsChecked="{Binding HideDuringFullscreen}" OnContent="" OffContent=""/>
+          </Grid>
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel>
+              <TextBlock Text="Reduced Motion" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+              <TextBlock IsVisible="{Binding IsOsReducedMotion}" Text="Synced with Windows setting"
+                         FontSize="11" Foreground="{DynamicResource LpAccentTextBrush}"/>
+            </StackPanel>
+            <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReducedMotion}" OnContent="" OffContent=""/>
+          </Grid>
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="High-Contrast Text Scrim" VerticalAlignment="Center" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+            <ToggleSwitch Grid.Column="1" IsChecked="{Binding HighContrastScrim}" OnContent="" OffContent=""/>
+          </Grid>
+
+          <TextBlock Text="Ambient Scrim Intensity" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
+          <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="4">
+            <Button Grid.Column="0" Content="Off" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectScrimIntensityCommand}" CommandParameter="{x:Static m:ScrimIntensity.Off}"/>
+            <Button Grid.Column="1" Content="Subtle" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectScrimIntensityCommand}" CommandParameter="{x:Static m:ScrimIntensity.Subtle}"/>
+            <Button Grid.Column="2" Content="Balanced" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectScrimIntensityCommand}" CommandParameter="{x:Static m:ScrimIntensity.Balanced}"/>
+            <Button Grid.Column="3" Content="Strong" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectScrimIntensityCommand}" CommandParameter="{x:Static m:ScrimIntensity.Strong}"/>
+          </Grid>
+        </StackPanel>
+
+        <Border Height="1" Background="{DynamicResource LpBorderDefaultBrush}"/>
+
+        <!-- 5. Global Hotkeys -->
+        <StackPanel Spacing="8">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Global Hotkeys" VerticalAlignment="Center" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+            <Button Grid.Column="1" Content="Reset" FontSize="12" Background="Transparent" Command="{Binding ResetHotkeysCommand}"/>
+          </Grid>
+
+          <ItemsControl ItemsSource="{Binding HotkeyRows}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:HotkeyBindingViewModel">
+                <StackPanel Margin="0,0,0,6" Spacing="4">
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Text="{Binding Label}" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+                    <Button Grid.Column="1" MinHeight="30" Padding="10,4" CornerRadius="6" Cursor="Hand"
+                            Content="{Binding DisplayButtonText}"
+                            FontFamily="{StaticResource LpFontMono}" FontSize="11"
+                            Command="{Binding BeginRecordCommand}" CommandParameter="{Binding Action}"/>
+                  </Grid>
+                  <TextBlock IsVisible="{Binding HasError}" Text="{Binding ErrorMessage}"
+                             FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource LpDangerTextBrush}"/>
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+
+      </StackPanel>
+    </ScrollViewer>
+
+    <!-- Sticky Footer with 2-Step Reset -->
+    <Border Grid.Row="2"
+            Padding="20,8"
+            BorderBrush="{DynamicResource LpBorderDefaultBrush}"
+            BorderThickness="0,1,0,0">
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Text="LyricPulse · Open Source" VerticalAlignment="Center" FontSize="12"
+                   Foreground="{DynamicResource LpTextTertiaryBrush}"/>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+          <Button IsVisible="{Binding !IsResetConfirmArmed}"
+                  Content="Reset Defaults"
+                  Command="{Binding ArmResetCommand}"/>
+          <Button IsVisible="{Binding IsResetConfirmArmed}"
+                  Content="Confirm Reset"
+                  Background="{DynamicResource LpDangerBrush}"
+                  Foreground="{DynamicResource LpOnDangerBrush}"
+                  Command="{Binding ConfirmResetCommand}"/>
+          <Button IsVisible="{Binding IsResetConfirmArmed}"
+                  Content="Cancel"
+                  Command="{Binding CancelResetCommand}"/>
+        </StackPanel>
+      </Grid>
+    </Border>
+  </Grid>
+</UserControl>
