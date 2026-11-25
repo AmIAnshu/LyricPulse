@@ -11,6 +11,8 @@ namespace LyricPulse.Rendering;
 
 /// <summary>
 /// Dependency injection registration extensions for LyricPulse.Rendering services.
+/// Uses <see cref="ILyricSceneRendererFactory"/> for per-overlay renderers so root ServiceProvider
+/// never retains transient IDisposable Skia resource graphs.
 /// </summary>
 public static class RenderingServiceCollectionExtensions
 {
@@ -22,13 +24,10 @@ public static class RenderingServiceCollectionExtensions
         services.AddSingleton<ShaderLibrary>();
         services.AddSingleton<FrameBudgetTelemetry>();
         services.AddSingleton<IAlbumColorExtractor, SkiaAlbumColorExtractor>();
+        services.AddSingleton<ILyricSceneRendererFactory, LyricSceneRendererFactory>();
         services.AddTransient<OffscreenSurfacePool>();
         services.AddTransient<LegibilityPipeline>();
-        services.AddTransient<PlaybackLifecycleChoreographer>();
-        services.AddTransient<IKineticStyleRenderer, FisheyeStyleRenderer>();
-        services.AddTransient<IKineticStyleRenderer, CodestyleStyleRenderer>();
-        services.AddTransient<IKineticStyleRenderer, VisualStackStyleRenderer>();
-        services.AddTransient<ILyricSceneRenderer, LyricStyleRouter>();
+        services.AddTransient<ILyricSceneRenderer>(static sp => sp.GetRequiredService<ILyricSceneRendererFactory>().CreateRenderer());
 
         return services;
     }

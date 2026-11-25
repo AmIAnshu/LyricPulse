@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Platform;
 using LyricPulse.Core.Abstractions;
+using LyricPulse.Core.Models;
 using LyricPulse.Rendering.Host;
 
 namespace LyricPulse.App.Platform;
@@ -10,25 +11,30 @@ namespace LyricPulse.App.Platform;
 /// <summary>
 /// Borderless, transparent, always-on-top click-through desktop overlay window sized strictly
 /// within <c>screen.WorkingArea</c> using <see cref="WindowState.Normal"/> (never Maximized overshoot).
+/// Stores mutable <see cref="CurrentBoundsConfig"/> updated atomically in <see cref="ApplyPlacement"/>
+/// so runtime AnchorZone / SafeMarginPx / PerDisplayBounds changes take effect immediately.
 /// </summary>
 public sealed class OverlayWindow : Window, IDisposable
 {
     private readonly IOverlayWindowPlatform _platform;
     private readonly LyricCanvasControl _canvas;
+    private OverlayBoundsConfig _currentBoundsConfig;
     private bool _disposed;
 
     public OverlayWindow(
         string displayKey,
         IOverlayWindowPlatform platform,
-        LyricCanvasControl canvas)
+        OverlayWindowPlacement initialPlacement,
+        Func<OverlayWindow, LyricCanvasControl> canvasFactory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(displayKey);
         ArgumentNullException.ThrowIfNull(platform);
-        ArgumentNullException.ThrowIfNull(canvas);
+        ArgumentNullException.ThrowIfNull(initialPlacement);
+        ArgumentNullException.ThrowIfNull(canvasFactory);
 
         DisplayKey = displayKey;
         _platform = platform;
-        _canvas = canvas;
+        _currentBoundsConfig = initialPlacement.BoundsConfig;
 
         Title = $"LyricPulse Overlay ({displayKey})";
         WindowState = WindowState.Normal;
@@ -46,6 +52,7 @@ public sealed class OverlayWindow : Window, IDisposable
         Focusable = false;
         IsHitTestVisible = false;
 
+        _canvas = canvasFactory(this);
         Content = _canvas;
     }
 
@@ -53,14 +60,18 @@ public sealed class OverlayWindow : Window, IDisposable
 
     public LyricCanvasControl CanvasControl => _canvas;
 
+    public OverlayBoundsConfig CurrentBoundsConfig => Volatile.Read(ref _currentBoundsConfig);
+
     public void ApplyPlacement(OverlayWindowPlacement placement)
     {
         ArgumentNullException.ThrowIfNull(placement);
+        Volatile.Write(ref _currentBoundsConfig, placement.BoundsConfig);
         WindowState = WindowState.Normal;
         Position = new PixelPoint(placement.PositionXPx, placement.PositionYPx);
         Width = placement.WidthDip;
         Height = placement.HeightDip;
         ApplyWin32ClickThrough();
+        _canvas.RequestWake();
     }
 
     public void ApplyWin32ClickThrough()

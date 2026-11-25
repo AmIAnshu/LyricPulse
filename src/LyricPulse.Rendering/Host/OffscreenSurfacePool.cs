@@ -38,17 +38,17 @@ public sealed class OffscreenSurfacePool : IDisposable
     /// Validates the active <see cref="GRContext"/> handle and purges pooled GPU surfaces immediately
     /// if the context changed (monitor sleep/wake, GPU TDR, or backend switch).
     /// </summary>
-    public bool EnsureContextCurrent(GRContext? grContext)
+    public bool EnsureContextCurrent(GRContext? grContext) =>
+        EnsureContextHandleCurrent(grContext?.Handle ?? 0, grContext is not null && grContext.IsAbandoned);
+
+    internal bool EnsureContextHandleCurrent(nint currentHandle, bool isAbandoned)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        var currentHandle = grContext?.Handle ?? 0;
-        var abandoned = grContext is not null && grContext.IsAbandoned;
-
-        if (abandoned || currentHandle != _lastGrContextHandle)
+        if (isAbandoned || currentHandle != _lastGrContextHandle)
         {
             ReleaseAllSurfaces();
-            _lastGrContextHandle = abandoned ? 0 : currentHandle;
+            _lastGrContextHandle = isAbandoned ? 0 : currentHandle;
             _purgeCount++;
             return true;
         }

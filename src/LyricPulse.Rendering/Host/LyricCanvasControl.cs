@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
@@ -14,8 +15,9 @@ namespace LyricPulse.Rendering.Host;
 
 /// <summary>
 /// GPU-accelerated SkiaSharp Avalonia control driven by vsync-aligned
-/// <see cref="TopLevel.RequestAnimationFrame"/>. Automatically halts animation frames when idle,
-/// hidden, or detached to guarantee &lt;3% idle CPU.
+/// <see cref="TopLevel.RequestAnimationFrame"/>. Synchronizes physics advancement,
+/// compositor rendering, GPU surface release, and renderer disposal under a dedicated lock
+/// so native Skia handles are never accessed or freed concurrently across UI and compositor threads.
 /// </summary>
 public sealed class LyricCanvasControl : Control, IDisposable
 {
@@ -25,6 +27,8 @@ public sealed class LyricCanvasControl : Control, IDisposable
     private readonly LegibilityPipeline _legibility;
     private readonly FrameBudgetTelemetry _telemetry;
     private readonly Func<float, float, float, double, float, FrameRenderPacket> _packetFactory;
+    private readonly Lock _renderSync = new();
+    private readonly bool _ownsRenderer;
 
     private ILyricSceneRenderer _renderer;
     private TopLevel? _topLevel;
@@ -43,7 +47,8 @@ public sealed class LyricCanvasControl : Control, IDisposable
         ILyricSceneRenderer renderer,
         Func<float, float, float, double, float, FrameRenderPacket>? packetFactory = null,
         OffscreenSurfacePool? surfacePool = null,
-        LegibilityPipeline? legibility = null)
+        LegibilityPipeline? legibility = null,
+        bool ownsRenderer = true)
     {
         ArgumentNullException.ThrowIfNull(fonts);
         ArgumentNullException.ThrowIfNull(shaders);
@@ -54,6 +59,7 @@ public sealed class LyricCanvasControl : Control, IDisposable
         _shaders = shaders;
         _telemetry = telemetry;
         _renderer = renderer;
+        _ownsRenderer = ownsRenderer;
         _surfacePool = surfacePool ?? new OffscreenSurfacePool();
         _legibility = legibility ?? new LegibilityPipeline();
         _packetFactory = packetFactory ?? FrameRenderPacket.CreateDefault;
@@ -67,7 +73,21 @@ public sealed class LyricCanvasControl : Control, IDisposable
     public void SetRenderer(ILyricSceneRenderer renderer)
     {
         ArgumentNullException.ThrowIfNull(renderer);
-        _renderer = renderer;
+        lock (_renderSync)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (_ownsRenderer && !ReferenceEquals(_renderer, renderer) && _renderer is IDisposable oldDisposable)
+            {
+                oldDisposable.Dispose();
+            }
+
+            _renderer = renderer;
+        }
+
         RequestWake();
     }
 
@@ -76,7 +96,7 @@ public sealed class LyricCanvasControl : Control, IDisposable
     /// </summary>
     public void RequestWake()
     {
-        if (_disposed || !_isAttached || !IsVisible)
+        if (Volatile.Read(ref _disposed) || !_isAttached || !IsVisible)
         {
             return;
         }
@@ -90,28 +110,44 @@ public sealed class LyricCanvasControl : Control, IDisposable
 
     public void ReleaseGpuResources()
     {
-        _surfacePool.ReleaseAllSurfaces();
+        lock (_renderSync)
+        {
+            if (!_disposed)
+            {
+                _surfacePool.ReleaseAllSurfaces();
+            }
+        }
     }
 
     public void Dispose()
     {
-        if (_disposed)
+        lock (_renderSync)
         {
-            return;
-        }
+            if (_disposed)
+            {
+                return;
+            }
 
-        _disposed = true;
-        _isAttached = false;
-        _rafScheduled = false;
-        _topLevel = null;
-        _surfacePool.Dispose();
-        _legibility.Dispose();
+            _disposed = true;
+            _isAttached = false;
+            _rafScheduled = false;
+            _topLevel = null;
+
+            if (_ownsRenderer && _renderer is IDisposable disposableRenderer)
+            {
+                disposableRenderer.Dispose();
+            }
+
+            _surfacePool.Dispose();
+            _legibility.Dispose();
+        }
     }
 
+    [ExcludeFromCodeCoverage]
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        if (_disposed)
+        if (Volatile.Read(ref _disposed))
         {
             return;
         }
@@ -125,15 +161,17 @@ public sealed class LyricCanvasControl : Control, IDisposable
         }
     }
 
+    [ExcludeFromCodeCoverage]
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
         _isAttached = false;
         _rafScheduled = false;
         _topLevel = null;
-        _surfacePool.ReleaseAllSurfaces();
+        ReleaseGpuResources();
     }
 
+    [ExcludeFromCodeCoverage]
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -150,10 +188,11 @@ public sealed class LyricCanvasControl : Control, IDisposable
         }
     }
 
+    [ExcludeFromCodeCoverage]
     public override void Render(DrawingContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (_disposed || !IsVisible)
+        if (Volatile.Read(ref _disposed) || !IsVisible)
         {
             return;
         }
@@ -172,20 +211,13 @@ public sealed class LyricCanvasControl : Control, IDisposable
             _lastRenderTimeSeconds,
             _lastDeltaSeconds);
 
-        context.Custom(new LyricDrawOperation(
-            bounds,
-            packet,
-            _renderer,
-            _fonts,
-            _shaders,
-            _surfacePool,
-            _legibility,
-            _telemetry));
+        context.Custom(new LyricDrawOperation(this, bounds, packet));
     }
 
+    [ExcludeFromCodeCoverage]
     private void ScheduleNextFrame()
     {
-        if (_disposed || !_isAttached || !IsVisible || _rafScheduled || _topLevel is null)
+        if (Volatile.Read(ref _disposed) || !_isAttached || !IsVisible || _rafScheduled || _topLevel is null)
         {
             return;
         }
@@ -194,15 +226,21 @@ public sealed class LyricCanvasControl : Control, IDisposable
         _topLevel.RequestAnimationFrame(OnAnimationFrame);
     }
 
+    [ExcludeFromCodeCoverage]
     private void OnAnimationFrame(TimeSpan frameTime)
     {
         _rafScheduled = false;
-        if (_disposed || !_isAttached || !IsVisible)
+        if (Volatile.Read(ref _disposed) || !_isAttached || !IsVisible)
         {
             return;
         }
 
-        var hasActiveMotion = AdvanceAnimationFrame(frameTime, (float)Math.Max(Bounds.Width, 1.0), (float)Math.Max(Bounds.Height, 1.0), (float)(_topLevel?.RenderScaling ?? 1.0));
+        var hasActiveMotion = AdvanceAnimationFrame(
+            frameTime,
+            (float)Math.Max(Bounds.Width, 1.0),
+            (float)Math.Max(Bounds.Height, 1.0),
+            (float)(_topLevel?.RenderScaling ?? 1.0));
+
         InvalidateVisual();
 
         if (hasActiveMotion)
@@ -229,16 +267,15 @@ public sealed class LyricCanvasControl : Control, IDisposable
             _lastRenderTimeSeconds,
             dt);
 
-        return _renderer.AdvancePhysics(in packet);
+        lock (_renderSync)
+        {
+            return !_disposed && _renderer.AdvancePhysics(in packet);
+        }
     }
 
     internal void RenderToCanvas(SKCanvas canvas, GRContext? grContext, float widthDip, float heightDip, float scaling)
     {
         ArgumentNullException.ThrowIfNull(canvas);
-        if (_disposed)
-        {
-            return;
-        }
 
         var packet = _packetFactory(
             Math.Max(widthDip, 1f),
@@ -247,62 +284,57 @@ public sealed class LyricCanvasControl : Control, IDisposable
             _lastRenderTimeSeconds,
             _lastDeltaSeconds);
 
-        ExecuteSkiaRender(canvas, grContext, packet, _renderer, _fonts, _shaders, _surfacePool, _legibility, _telemetry);
+        RenderSynchronized(canvas, grContext, packet);
     }
 
-    private static void ExecuteSkiaRender(
-        SKCanvas canvas,
-        GRContext? grContext,
-        FrameRenderPacket packet,
-        ILyricSceneRenderer renderer,
-        FontAssetRegistry fonts,
-        ShaderLibrary shaders,
-        OffscreenSurfacePool surfacePool,
-        LegibilityPipeline legibility,
-        FrameBudgetTelemetry telemetry)
+    private void RenderSynchronized(SKCanvas canvas, GRContext? grContext, FrameRenderPacket packet)
     {
-        var startTimestamp = Stopwatch.GetTimestamp();
-        surfacePool.EnsureContextCurrent(grContext);
-
-        var isGpuBackend = grContext is not null && !grContext.IsAbandoned;
-        var shadersEnabled = isGpuBackend && !packet.ReducedMotion && shaders.AreAllShadersReady;
-
-        var saveCount = canvas.Save();
-        try
+        lock (_renderSync)
         {
-            canvas.ClipRect(new SKRect(0f, 0f, packet.ViewportWidthDip, packet.ViewportHeightDip));
+            if (_disposed)
+            {
+                return;
+            }
 
-            var renderCtx = new StyleRenderContext(
-                Canvas: canvas,
-                GrContext: grContext,
-                Fonts: fonts,
-                Shaders: shaders,
-                SurfacePool: surfacePool,
-                Legibility: legibility,
-                Packet: packet,
-                IsGpuBackend: isGpuBackend,
-                ShadersEnabled: shadersEnabled);
+            var startTimestamp = Stopwatch.GetTimestamp();
+            _surfacePool.EnsureContextCurrent(grContext);
 
-            renderer.Render(in renderCtx);
+            var isGpuBackend = grContext is not null && !grContext.IsAbandoned;
+            var shadersEnabled = isGpuBackend && !packet.ReducedMotion && _shaders.AreAllShadersReady;
+
+            var saveCount = canvas.Save();
+            try
+            {
+                canvas.ClipRect(new SKRect(0f, 0f, packet.ViewportWidthDip, packet.ViewportHeightDip));
+
+                var renderCtx = new StyleRenderContext(
+                    Canvas: canvas,
+                    GrContext: grContext,
+                    Fonts: _fonts,
+                    Shaders: _shaders,
+                    SurfacePool: _surfacePool,
+                    Legibility: _legibility,
+                    Packet: packet,
+                    IsGpuBackend: isGpuBackend,
+                    ShadersEnabled: shadersEnabled);
+
+                _renderer.Render(in renderCtx);
+            }
+            finally
+            {
+                canvas.RestoreToCount(saveCount);
+            }
+
+            var elapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+            _telemetry.RecordFrame(elapsedMs, isGpuBackend, packet.ReducedMotion, _shaders.AreAllShadersReady);
         }
-        finally
-        {
-            canvas.RestoreToCount(saveCount);
-        }
-
-        var elapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
-        telemetry.RecordFrame(elapsedMs, isGpuBackend, packet.ReducedMotion, shaders.AreAllShadersReady);
     }
 
+    [ExcludeFromCodeCoverage]
     private sealed class LyricDrawOperation(
+        LyricCanvasControl owner,
         Rect bounds,
-        FrameRenderPacket packet,
-        ILyricSceneRenderer renderer,
-        FontAssetRegistry fonts,
-        ShaderLibrary shaders,
-        OffscreenSurfacePool surfacePool,
-        LegibilityPipeline legibility,
-        FrameBudgetTelemetry telemetry) : ICustomDrawOperation
+        FrameRenderPacket packet) : ICustomDrawOperation
     {
         public Rect Bounds => bounds;
 
@@ -312,7 +344,7 @@ public sealed class LyricCanvasControl : Control, IDisposable
 
         public void Dispose()
         {
-            // Shared rendering resources are owned by LyricCanvasControl/DI container.
+            // Shared rendering resources are owned by LyricCanvasControl.
         }
 
         public void Render(ImmediateDrawingContext context)
@@ -324,16 +356,7 @@ public sealed class LyricCanvasControl : Control, IDisposable
             }
 
             using var lease = leaseFeature.Lease();
-            ExecuteSkiaRender(
-                lease.SkCanvas,
-                lease.GrContext,
-                packet,
-                renderer,
-                fonts,
-                shaders,
-                surfacePool,
-                legibility,
-                telemetry);
+            owner.RenderSynchronized(lease.SkCanvas, lease.GrContext, packet);
         }
     }
 }

@@ -33,7 +33,8 @@ public static class Program
             }
         }
 
-        using var singleInstance = SingleInstanceGuard.TryAcquirePrimaryOrSignalExisting();
+        using var singleInstance = SingleInstanceGuard.TryAcquirePrimaryOrSignalExisting(
+            requestDemoMode: launchOptions.StartInDemoMode);
         if (singleInstance is null)
         {
             return 0;

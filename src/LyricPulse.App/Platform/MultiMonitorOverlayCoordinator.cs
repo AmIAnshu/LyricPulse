@@ -1,4 +1,3 @@
-using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Platform;
 using Avalonia.Threading;
@@ -10,14 +9,14 @@ namespace LyricPulse.App.Platform;
 
 /// <summary>
 /// Manages per-monitor transparent click-through <see cref="OverlayWindow"/> instances across
-/// mixed-DPI displays with 250ms debounced hotplug, DPI-change, and sleep/wake reconciliation.
+/// mixed-DPI displays with 250ms debounced hotplug, DPI-change, sleep/wake, and WM_SETTINGCHANGE hooks.
 /// </summary>
 public sealed class MultiMonitorOverlayCoordinator : IDisposable
 {
     public static readonly TimeSpan HotplugDebounceDelay = TimeSpan.FromMilliseconds(250);
 
     private readonly IOverlayWindowPlatform _platform;
-    private readonly Func<OverlayWindowPlacement, LyricCanvasControl> _canvasFactory;
+    private readonly Func<OverlayWindow, LyricCanvasControl> _canvasFactory;
     private readonly Dictionary<string, OverlayWindow> _overlays = new(StringComparer.OrdinalIgnoreCase);
 
     private Window? _anchorWindow;
@@ -30,7 +29,7 @@ public sealed class MultiMonitorOverlayCoordinator : IDisposable
 
     public MultiMonitorOverlayCoordinator(
         IOverlayWindowPlatform platform,
-        Func<OverlayWindowPlacement, LyricCanvasControl> canvasFactory)
+        Func<OverlayWindow, LyricCanvasControl> canvasFactory)
     {
         ArgumentNullException.ThrowIfNull(platform);
         ArgumentNullException.ThrowIfNull(canvasFactory);
@@ -40,6 +39,9 @@ public sealed class MultiMonitorOverlayCoordinator : IDisposable
     }
 
     public int ActiveOverlayCount => _overlays.Count;
+
+    /// <summary>Raised when Windows broadcasts WM_SETTINGCHANGE (e.g. Light/Dark taskbar or Animation Effects change).</summary>
+    public event EventHandler? SystemSettingsChanged;
 
     public void AttachAnchorWindow(Window anchorWindow)
     {
@@ -122,7 +124,12 @@ public sealed class MultiMonitorOverlayCoordinator : IDisposable
 
         foreach (var placement in placements)
         {
-            activeKeys.Add(placement.DisplayKey);
+            if (!activeKeys.Add(placement.DisplayKey))
+            {
+                // Guard against duplicate display keys overwriting an active window
+                continue;
+            }
+
             if (_overlays.TryGetValue(placement.DisplayKey, out var existing))
             {
                 existing.ApplyPlacement(placement);
@@ -133,14 +140,15 @@ public sealed class MultiMonitorOverlayCoordinator : IDisposable
             }
             else
             {
-                var canvas = _canvasFactory(placement);
-                var overlay = new OverlayWindow(placement.DisplayKey, _platform, canvas);
+                var overlay = new OverlayWindow(placement.DisplayKey, _platform, placement, _canvasFactory);
                 overlay.ApplyPlacement(placement);
                 _overlays[placement.DisplayKey] = overlay;
+
                 if (ShouldOverlaysBeVisible())
                 {
                     overlay.Show();
-                    overlay.ApplyWin32ClickThrough();
+                    // Re-apply placement AFTER Show() so mixed-DPI secondary monitors settle to target monitor DPI
+                    overlay.ApplyPlacement(placement);
                 }
             }
         }
@@ -188,12 +196,13 @@ public sealed class MultiMonitorOverlayCoordinator : IDisposable
         {
             if (shouldShow)
             {
-                overlay.SetOverlayPaused(paused: false);
                 if (!overlay.IsVisible)
                 {
                     overlay.Show();
                     overlay.ApplyWin32ClickThrough();
                 }
+
+                overlay.SetOverlayPaused(paused: false);
             }
             else
             {
@@ -260,6 +269,10 @@ public sealed class MultiMonitorOverlayCoordinator : IDisposable
         else if (msg == Win32Native.WM_POWERBROADCAST && wParam == Win32Native.PBT_APMRESUMEAUTOMATIC)
         {
             ScheduleReconcile(invalidateGpu: true);
+        }
+        else if (msg == Win32Native.WM_SETTINGCHANGE)
+        {
+            Dispatcher.UIThread.Post(() => SystemSettingsChanged?.Invoke(this, EventArgs.Empty));
         }
 
         return 0;

@@ -1,18 +1,20 @@
 using System.Collections.Frozen;
-using Avalonia;
+using System.Text;
 using Avalonia.Platform;
 using SkiaSharp;
+using SkiaSharp.HarfBuzz;
 
 namespace LyricPulse.Rendering.Fonts;
 
 /// <summary>
-/// App-lifetime SkiaSharp 3 typeface and SKFont singleton cache.
+/// App-lifetime SkiaSharp 3 typeface, SKFont, fallback typeface, and HarfBuzz SKShaper singleton cache.
 /// Loads all 5 bundled open-source static TTFs via AssetLoader -&gt; SKData.Create -&gt; SKTypeface.FromData
-/// (never SKTypeface.FromStream) and resolves system fallbacks for CJK, RTL, Emoji, Mono, and UI scripts.
+/// (avoiding unsafe stream-backed typefaces), caches all OS fallback typefaces so zero native handles leak,
+/// and never disposes cached SKFont instances while render threads may hold references.
 /// </summary>
 public sealed class FontAssetRegistry : IDisposable
 {
-    public const int MaxCachedFonts = 64;
+    public const int MaxCachedFonts = 256;
 
     private static readonly FrozenDictionary<LyricFontId, FontOpticalMetrics> OpticalCatalog =
         new Dictionary<LyricFontId, FontOpticalMetrics>
@@ -85,6 +87,11 @@ public sealed class FontAssetRegistry : IDisposable
 
     private readonly Dictionary<LyricFontId, SKTypeface> _bundledTypefaces = new(5);
     private readonly Dictionary<FontCacheKey, SKFont> _fontCache = new(MaxCachedFonts);
+    private readonly Dictionary<FallbackFontCacheKey, SKFont> _fallbackFontCache = new(64);
+    private readonly Dictionary<int, SKTypeface> _fallbackCodepointCache = new(64);
+    private readonly Dictionary<string, SKTypeface> _ownedFallbackTypefaces = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<nint, SKShaper> _shaperCache = new(16);
+    private readonly List<SKFont> _retiredFonts = [];
     private readonly Lock _cacheLock = new();
 
     private readonly SKTypeface _fallbackMono;
@@ -104,9 +111,9 @@ public sealed class FontAssetRegistry : IDisposable
             }
         }
 
-        _fallbackMono = ResolveSystemTypeface("Cascadia Mono", "Consolas", "Courier New");
-        _fallbackUi = ResolveSystemTypeface("Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI");
-        _fallbackEmoji = ResolveSystemTypeface("Segoe UI Emoji");
+        _fallbackMono = ResolveSystemTypeface(SKFontStyleWeight.SemiBold, "Cascadia Mono", "Consolas", "Courier New");
+        _fallbackUi = ResolveSystemTypeface(SKFontStyleWeight.Normal, "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI");
+        _fallbackEmoji = ResolveSystemTypeface(SKFontStyleWeight.Normal, "Segoe UI Emoji");
     }
 
     public static IReadOnlyDictionary<LyricFontId, FontOpticalMetrics> AllOpticalMetrics => OpticalCatalog;
@@ -178,6 +185,7 @@ public sealed class FontAssetRegistry : IDisposable
     /// <summary>
     /// Returns a cached SkiaSharp 3 SKFont configured for transparent layered compositing
     /// (Antialias edging, Subpixel=true, LinearMetrics=true, NEVER ClearType SubpixelAntialias).
+    /// Cached instances remain alive until <see cref="Dispose"/> so concurrent render threads never hit freed handles.
     /// </summary>
     public SKFont GetOrCreateFont(LyricFontId id, float sizeDip)
     {
@@ -189,7 +197,6 @@ public sealed class FontAssetRegistry : IDisposable
             8f,
             256f);
 
-        // Quantize to 0.5 DIP steps to bound cache cardinality while preserving smooth scaling.
         var quantizedHalfDip = (int)MathF.Round(clampedSize * 2f);
         var key = new FontCacheKey(id, quantizedHalfDip);
 
@@ -202,12 +209,74 @@ public sealed class FontAssetRegistry : IDisposable
 
             if (_fontCache.Count >= MaxCachedFonts)
             {
-                ClearFontCacheLocked();
+                // Retire into deferred disposal list (never dispose while render threads could read them!)
+                foreach (var oldFont in _fontCache.Values)
+                {
+                    _retiredFonts.Add(oldFont);
+                }
+
+                _fontCache.Clear();
             }
 
             var font = CreateConfiguredFont(GetTypeface(id), quantizedHalfDip * 0.5f);
             _fontCache[key] = font;
             return font;
+        }
+    }
+
+    /// <summary>
+    /// Returns a cached <see cref="SKFont"/> for a registry-owned fallback typeface at the requested size.
+    /// </summary>
+    public SKFont GetOrCreateFallbackFont(SKTypeface fallbackTypeface, float sizeDip)
+    {
+        ArgumentNullException.ThrowIfNull(fallbackTypeface);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var clampedSize = Math.Clamp(float.IsFinite(sizeDip) ? sizeDip : 48f, 8f, 256f);
+        var quantizedHalfDip = (int)MathF.Round(clampedSize * 2f);
+        var key = new FallbackFontCacheKey(fallbackTypeface.Handle, quantizedHalfDip);
+
+        lock (_cacheLock)
+        {
+            if (_fallbackFontCache.TryGetValue(key, out var existing))
+            {
+                return existing;
+            }
+
+            if (_fallbackFontCache.Count >= MaxCachedFonts)
+            {
+                foreach (var oldFont in _fallbackFontCache.Values)
+                {
+                    _retiredFonts.Add(oldFont);
+                }
+
+                _fallbackFontCache.Clear();
+            }
+
+            var font = CreateConfiguredFont(fallbackTypeface, quantizedHalfDip * 0.5f);
+            _fallbackFontCache[key] = font;
+            return font;
+        }
+    }
+
+    /// <summary>
+    /// Returns a cached HarfBuzz <see cref="SKShaper"/> for the specified typeface (owned and disposed by registry).
+    /// </summary>
+    public SKShaper GetOrCreateShaper(SKTypeface typeface)
+    {
+        ArgumentNullException.ThrowIfNull(typeface);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        lock (_cacheLock)
+        {
+            if (_shaperCache.TryGetValue(typeface.Handle, out var existing))
+            {
+                return existing;
+            }
+
+            var shaper = new SKShaper(typeface);
+            _shaperCache[typeface.Handle] = shaper;
+            return shaper;
         }
     }
 
@@ -229,18 +298,98 @@ public sealed class FontAssetRegistry : IDisposable
     }
 
     /// <summary>
-    /// Resolves a system fallback typeface for CJK, RTL, Cyrillic, Devanagari, or Emoji codepoints
-    /// missing from the primary SIL OFL typeface.
+    /// Resolves and caches a registry-owned system fallback typeface for CJK, RTL, Cyrillic,
+    /// Devanagari, or Emoji codepoints missing from the primary SIL OFL typeface.
+    /// Callers must NOT dispose the returned <see cref="SKTypeface"/>.
     /// </summary>
     public SKTypeface MatchFallbackForCodepoint(int codepoint)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        return SKFontManager.Default.MatchCharacter(codepoint) ?? _fallbackEmoji;
+
+        lock (_cacheLock)
+        {
+            if (_fallbackCodepointCache.TryGetValue(codepoint, out var cached))
+            {
+                return cached;
+            }
+
+            var matched = SKFontManager.Default.MatchCharacter(codepoint);
+            if (matched is null)
+            {
+                _fallbackCodepointCache[codepoint] = _fallbackEmoji;
+                return _fallbackEmoji;
+            }
+
+            var familyKey = !string.IsNullOrWhiteSpace(matched.FamilyName)
+                ? matched.FamilyName
+                : $"cp_{codepoint:X}";
+
+            if (_ownedFallbackTypefaces.TryGetValue(familyKey, out var existingFamily))
+            {
+                matched.Dispose();
+                _fallbackCodepointCache[codepoint] = existingFamily;
+                return existingFamily;
+            }
+
+            _ownedFallbackTypefaces[familyKey] = matched;
+            _fallbackCodepointCache[codepoint] = matched;
+            return matched;
+        }
     }
 
     /// <summary>
-    /// Selects either the requested primary typeface or an OS fallback typeface if any character
-    /// in the text cannot be represented by the primary typeface (prevents tofu boxes).
+    /// Checks whether <paramref name="text"/> requires either OS font fallback (missing glyph in primary font)
+    /// or HarfBuzz complex-script shaping (RTL, Indic, combining marks, non-ASCII).
+    /// </summary>
+    public static bool InspectScriptRequirements(
+        SKFont primaryFont,
+        ReadOnlySpan<char> text,
+        out int firstMissingCodepoint,
+        out bool needsHarfBuzzShaping)
+    {
+        ArgumentNullException.ThrowIfNull(primaryFont);
+        firstMissingCodepoint = 0;
+        needsHarfBuzzShaping = false;
+
+        if (text.IsEmpty)
+        {
+            return false;
+        }
+
+        var remaining = text;
+        while (!remaining.IsEmpty)
+        {
+            var status = Rune.DecodeFromUtf16(remaining, out var rune, out var charsConsumed);
+            remaining = remaining[Math.Max(1, charsConsumed)..];
+
+            if (status != System.Buffers.OperationStatus.Done)
+            {
+                continue;
+            }
+
+            var cp = rune.Value;
+            if (cp > 0x7F)
+            {
+                needsHarfBuzzShaping = true;
+            }
+
+            if (Rune.IsWhiteSpace(rune))
+            {
+                continue;
+            }
+
+            if (firstMissingCodepoint == 0 && !primaryFont.ContainsGlyph(cp))
+            {
+                firstMissingCodepoint = cp;
+            }
+        }
+
+        return firstMissingCodepoint != 0 || needsHarfBuzzShaping;
+    }
+
+    /// <summary>
+    /// Selects either the requested primary typeface or a cached registry-owned OS fallback typeface
+    /// if any character in the text cannot be represented by the primary typeface (prevents tofu boxes).
     /// </summary>
     public SKTypeface ResolveTypefaceForText(LyricFontId primaryId, ReadOnlySpan<char> text)
     {
@@ -252,33 +401,9 @@ public sealed class FontAssetRegistry : IDisposable
             return primary;
         }
 
-        using var probeFont = CreateConfiguredFont(primary, 24f);
-        for (var i = 0; i < text.Length; i++)
-        {
-            var c = text[i];
-            if (char.IsWhiteSpace(c))
-            {
-                continue;
-            }
-
-            int codepoint;
-            if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
-            {
-                codepoint = char.ConvertToUtf32(c, text[i + 1]);
-                i++;
-            }
-            else
-            {
-                codepoint = c;
-            }
-
-            if (!probeFont.ContainsGlyph(codepoint))
-            {
-                return MatchFallbackForCodepoint(codepoint);
-            }
-        }
-
-        return primary;
+        var probeFont = GetOrCreateFont(primaryId, 24f);
+        InspectScriptRequirements(probeFont, text, out var missingCp, out _);
+        return missingCp != 0 ? MatchFallbackForCodepoint(missingCp) : primary;
     }
 
     public static SKFont CreateConfiguredFont(SKTypeface typeface, float sizeDip)
@@ -304,7 +429,41 @@ public sealed class FontAssetRegistry : IDisposable
 
         lock (_cacheLock)
         {
-            ClearFontCacheLocked();
+            foreach (var shaper in _shaperCache.Values)
+            {
+                shaper.Dispose();
+            }
+
+            _shaperCache.Clear();
+
+            foreach (var font in _fontCache.Values)
+            {
+                font.Dispose();
+            }
+
+            _fontCache.Clear();
+
+            foreach (var font in _fallbackFontCache.Values)
+            {
+                font.Dispose();
+            }
+
+            _fallbackFontCache.Clear();
+
+            foreach (var retired in _retiredFonts)
+            {
+                retired.Dispose();
+            }
+
+            _retiredFonts.Clear();
+
+            foreach (var owned in _ownedFallbackTypefaces.Values)
+            {
+                owned.Dispose();
+            }
+
+            _ownedFallbackTypefaces.Clear();
+            _fallbackCodepointCache.Clear();
         }
 
         foreach (var tf in _bundledTypefaces.Values)
@@ -328,16 +487,6 @@ public sealed class FontAssetRegistry : IDisposable
         {
             _fallbackEmoji.Dispose();
         }
-    }
-
-    private void ClearFontCacheLocked()
-    {
-        foreach (var font in _fontCache.Values)
-        {
-            font.Dispose();
-        }
-
-        _fontCache.Clear();
     }
 
     private static SKTypeface LoadBundledTypeface(string avaresUri, Func<Uri, Stream> assetOpener)
@@ -364,11 +513,13 @@ public sealed class FontAssetRegistry : IDisposable
         }
     }
 
-    private static SKTypeface ResolveSystemTypeface(params string[] preferredFamilies)
+    private static SKTypeface ResolveSystemTypeface(SKFontStyleWeight preferredWeight, params string[] preferredFamilies)
     {
+        var style = new SKFontStyle(preferredWeight, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
         foreach (var family in preferredFamilies)
         {
-            var matched = SKFontManager.Default.MatchFamily(family);
+            var matched = SKFontManager.Default.MatchFamily(family, style)
+                          ?? SKFontManager.Default.MatchFamily(family);
             if (matched is not null && !string.IsNullOrWhiteSpace(matched.FamilyName) &&
                 matched.FamilyName.Contains(family.Split(' ')[0], StringComparison.OrdinalIgnoreCase))
             {
@@ -382,4 +533,6 @@ public sealed class FontAssetRegistry : IDisposable
     }
 
     private readonly record struct FontCacheKey(LyricFontId FontId, int QuantizedHalfDip);
+
+    private readonly record struct FallbackFontCacheKey(nint TypefaceHandle, int QuantizedHalfDip);
 }

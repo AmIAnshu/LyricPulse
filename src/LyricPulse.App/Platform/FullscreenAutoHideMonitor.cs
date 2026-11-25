@@ -64,7 +64,7 @@ public sealed class FullscreenAutoHideMonitor : IFullscreenDetector, IDisposable
         {
             _pollTask?.Wait(TimeSpan.FromMilliseconds(500));
         }
-        catch (AggregateException)
+        catch (AggregateException ex) when (ex.InnerExceptions.All(static inner => inner is OperationCanceledException))
         {
             // Expected on cancellation.
         }

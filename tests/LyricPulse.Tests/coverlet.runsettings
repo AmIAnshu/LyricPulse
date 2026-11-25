@@ -6,7 +6,7 @@
         <Configuration>
           <Format>cobertura</Format>
           <ExcludeByAttribute>Obsolete,GeneratedCodeAttribute,CompilerGeneratedAttribute,ExcludeFromCodeCoverageAttribute</ExcludeByAttribute>
-          <Exclude>[LyricPulse.Core]WinRT.*,[LyricPulse.Core]System.Text.RegularExpressions.Generated.*,[LyricPulse.Core]LyricPulse.Core.Serialization.*,[LyricPulse.Core]LyricPulse.Core.CoreLogMessages,[LyricPulse.Rendering]LyricPulse.Rendering.RenderingLogMessages</Exclude>
+          <Exclude>[LyricPulse.Core]WinRT.*,[LyricPulse.Core]System.Text.RegularExpressions.Generated.*,[LyricPulse.Core]LyricPulse.Core.Serialization.*,[LyricPulse.Core]LyricPulse.Core.CoreLogMessages,[LyricPulse.Rendering]LyricPulse.Rendering.RenderingLogMessages,[LyricPulse.App]LyricPulse.App.AppLogMessages</Exclude>
         </Configuration>
       </DataCollector>
     </DataCollectors>

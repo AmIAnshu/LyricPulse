@@ -42,7 +42,7 @@ public static class OverlayFrameAdapter
             ViewportHeightDip: Math.Max(1f, viewportHeightDip),
             RenderScaling: float.IsFinite(renderScaling) && renderScaling > 0f ? renderScaling : 1.0f,
             GlobalOpacity: (float)Math.Clamp(settings.OverlayOpacity, AppSettings.MinOverlayOpacity, AppSettings.MaxOverlayOpacity),
-            ReducedMotion: settings.ReducedMotion || systemReducedMotion,
+            ReducedMotion: snapshot.IsEffectiveReducedMotion || systemReducedMotion,
             HighContrastScrim: settings.HighContrastScrim,
             ScrimIntensity: settings.ScrimIntensity,
             ActiveFontId: FontAssetRegistry.ResolveFontId(settings.FontFamily),

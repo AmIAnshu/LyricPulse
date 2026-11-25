@@ -11,19 +11,22 @@ half4 main(float2 fragCoord) {
     float r = length(norm);
 
     // Guard pow(0.0, iPower) against ANGLE D3D11 / GLSL ES undefined behavior
-    // Clamp r <= 1.0 so corners outside the unit ellipse never fold back onto the center
+    // Clamp r <= 1.0 and strength <= 0.30 so radial warp stays strictly monotonic (f'(r) > 0, zero fold-back)
     float rClamped = min(r, 1.0);
     float radial = (rClamped > 0.0001) ? pow(rClamped, iPower) : 0.0;
 
-    // LOCKED CONVEX BULGE SIGN: factor < 1 samples closer to center -> outward magnification
-    float clampedStrength = clamp(abs(iStrength), 0.0, 0.40);
+    // LOCKED CONVEX BULGE SIGN: factor < 1 samples closer to center -> true convex outward magnification
+    float clampedStrength = clamp(abs(iStrength), 0.0, 0.30);
     float factor = max(1.0 - clampedStrength * radial, 0.15);
     float2 samplePos = iCenter + d * factor;
 
-    // Hard boundary transparent discard prevents edge pixel smearing on transparent overlays
-    if (samplePos.x < 0.0 || samplePos.y < 0.0 || samplePos.x > iSize.x || samplePos.y > iSize.y) {
+    // Smooth transparent border feather guarantees strictly alpha == 0 at all 4 offscreen corners
+    // (0.975 outer threshold covers pixel centers at (0.5, 0.5) even on compact 64x64 layers)
+    float borderMetric = max(abs(norm.x), abs(norm.y));
+    float edgeFade = 1.0 - smoothstep(0.84, 0.975, borderMetric);
+    if (edgeFade <= 0.001) {
         return half4(0.0);
     }
 
-    return content.eval(samplePos);
+    return content.eval(samplePos) * half(edgeFade);
 }

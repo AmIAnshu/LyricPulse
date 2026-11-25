@@ -12,9 +12,9 @@ namespace LyricPulse.Rendering.Styles;
 
 /// <summary>
 /// Style #3 — Codestyle: live-typed monospace lyrics (<c>Cascadia Mono</c> -&gt; <c>Consolas</c>)
-/// with tabular gutter line numbers (<c>01</c>, <c>02</c>), syntax token coloring,
-/// character-by-character typing reveal under a blinking <c>#EF4444</c> cursor (530ms cadence),
-/// and zero post-process distortion shaders.
+/// with tabular gutter line numbers (<c>01</c>, <c>02</c>), syntax token coloring, grapheme-safe
+/// character typing reveal under a blinking <c>#EF4444</c> cursor (530ms cadence), stable 3-row
+/// height (zero mid-line vertical snap), cached blur/round-rect resources, and zero post-process shaders.
 /// </summary>
 public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
 {
@@ -22,12 +22,15 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
     public const double TypingRevealFraction = 0.78;     // Rest complete for final 22% of beat
 
     public static readonly SKColor CursorRed = new(0xEF, 0x44, 0x44, 0xFF); // #EF4444
+    private static readonly SKPoint[] CardCornerRadii = [new(14f, 14f), new(14f, 14f), new(14f, 14f), new(14f, 14f)];
 
     private readonly SKPaint _cardBgPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _cardBorderPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.0f };
     private readonly SKPaint _cursorPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _cursorGlowPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _underlinePaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKRoundRect _clipRoundRect = new();
+    private readonly SKImageFilter _cursorBlur = SKImageFilter.CreateBlur(6.0f, 6.0f);
     private readonly StringBuilder _lineScratch = new(128);
 
     private SpringState _lineScrollOffsetY = SpringState.AtRest(0f);
@@ -113,22 +116,28 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
         var maxBlockWidth = Math.Min(packet.ViewportWidthDip * 0.72f, 920f);
 
         var gutterStr = FormatLineNumber(slice.ActiveLineIndex + 1);
-        var prefixStr = "> ";
+        const string prefixStr = "> ";
         var activeFullLine = BuildFullLineText(slice.CurrentLine);
-        var fullMeasure = TextShaperService.MeasureWidth(gutterStr + "  " + prefixStr + activeFullLine, monoFont);
-        var fitScale = TextShaperService.ComputeAutoFitScale(fullMeasure + 44f, maxBlockWidth, 0.96f);
+        var prevText = slice.PreviousLine is not null ? $"// {slice.PreviousLine.RawText}" : string.Empty;
+        var showNext = slice.NextLine is not null &&
+                       (slice.LineProgress >= 0.68 || (slice.TimeUntilNextLine?.TotalMilliseconds ?? 9999) <= 500);
+        var nextText = showNext && slice.NextLine is not null ? $"   {slice.NextLine.RawText}" : string.Empty;
 
+        // Measure all visible lines so long previous comments are never sliced off mid-word
+        var activeMeasure = TextShaperService.MeasureWidth(gutterStr + "  " + prefixStr + activeFullLine, monoFont, context.Fonts);
+        var prevMeasure = string.IsNullOrEmpty(prevText) ? 0f : TextShaperService.MeasureWidth(prevText, monoFont, context.Fonts);
+        var nextMeasure = string.IsNullOrEmpty(nextText) ? 0f : TextShaperService.MeasureWidth(nextText, monoFont, context.Fonts);
+        var maxContentMeasure = Math.Max(activeMeasure, Math.Max(prevMeasure, nextMeasure));
+
+        var fitScale = TextShaperService.ComputeAutoFitScale(maxContentMeasure + 48f, maxBlockWidth, 0.96f);
         var scaledFontSize = fontSize * fitScale;
         var scaledLinePitch = linePitch * fitScale;
-        var blockWidth = Math.Clamp((fullMeasure * fitScale) + 54f, 280f, maxBlockWidth);
+        var blockWidth = Math.Clamp((maxContentMeasure * fitScale) + 56f, 300f, maxBlockWidth);
 
-        var showPrev = slice.PreviousLine is not null;
-        var showNext = slice.NextLine is not null && (slice.LineProgress >= 0.68 || (slice.TimeUntilNextLine?.TotalMilliseconds ?? 9999) <= 500);
-        var visibleRows = 1 + (showPrev ? 1 : 0) + (showNext ? 1 : 0);
-
+        // Fixed 3-row vertical budget keeps active line anchored stably when ghost next line fades in
         const float padX = 20f;
         const float padY = 16f;
-        var blockHeight = (visibleRows * scaledLinePitch) + (padY * 2f);
+        var blockHeight = (3f * scaledLinePitch) + (padY * 2f);
 
         var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet);
         var left = Math.Clamp(anchorX - (blockWidth * 0.5f), 16f, Math.Max(16f, packet.ViewportWidthDip - blockWidth - 16f));
@@ -140,21 +149,24 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
         var clipSave = context.Canvas.Save();
         try
         {
-            context.Canvas.ClipRoundRect(new SKRoundRect(cardRect, 14f, 14f), antialias: true);
+            _clipRoundRect.SetRectRadii(cardRect, CardCornerRadii);
+            context.Canvas.ClipRoundRect(_clipRoundRect, antialias: true);
 
             var scrollY = packet.ReducedMotion ? 0f : _lineScrollOffsetY.Value * fitScale;
             var contentLeft = cardRect.Left + padX;
-            var cursorRowY = cardRect.Top + padY + (showPrev ? scaledLinePitch : 0f) + scrollY;
-            var lineAlpha = packet.ReducedMotion ? Ease.Highlight(_lineFadeIn) : 1.0f;
+            var availableTextWidthDip = Math.Max(60f, blockWidth - (padX * 2f));
+            var activeRowTopY = cardRect.Top + padY + scaledLinePitch + scrollY;
+            var lineAlpha = packet.ReducedMotion ? (0.90f + (0.10f * Ease.Highlight(_lineFadeIn))) : 1.0f;
 
-            // Past line: dim comment syntax "// <previous line>"
-            if (showPrev && slice.PreviousLine is not null)
+            // Row 0 (Past line): dim comment syntax "// <previous line>"
+            if (!string.IsNullOrEmpty(prevText))
             {
+                var fittedPrev = TrimToFitWidth(prevText, monoFont, fitScale, availableTextWidthDip, context.Fonts);
                 var prevBaseline = cardRect.Top + padY + (scaledFontSize * 0.88f) + scrollY;
                 DrawScaledMonoText(
                     context,
                     monoFont,
-                    $"// {slice.PreviousLine.RawText}",
+                    fittedPrev,
                     contentLeft,
                     prevBaseline,
                     fitScale,
@@ -162,8 +174,8 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
                     opacity: 0.48f * lineAlpha);
             }
 
-            // Active line: tabular gutter + syntax prefix + typed words + blinking #EF4444 cursor
-            var activeBaseline = cursorRowY + (scaledFontSize * 0.88f);
+            // Row 1 (Active line): stably anchored middle row
+            var activeBaseline = activeRowTopY + (scaledFontSize * 0.88f);
             DrawActiveTypedLine(
                 context,
                 monoFont,
@@ -174,19 +186,20 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
                 lineAlpha,
                 packet.ReducedMotion);
 
-            // Upcoming line: faint autocomplete ghost hint
-            if (showNext && slice.NextLine is not null)
+            // Row 2 (Upcoming line): faint autocomplete ghost hint (never shifts Row 1!)
+            if (!string.IsNullOrEmpty(nextText))
             {
-                var nextBaseline = cursorRowY + scaledLinePitch + (scaledFontSize * 0.88f);
+                var fittedNext = TrimToFitWidth(nextText, monoFont, fitScale, availableTextWidthDip, context.Fonts);
+                var nextBaseline = activeRowTopY + scaledLinePitch + (scaledFontSize * 0.88f);
                 DrawScaledMonoText(
                     context,
                     monoFont,
-                    $"   {slice.NextLine.RawText}",
+                    fittedNext,
                     contentLeft,
                     nextBaseline,
                     fitScale,
                     packet.Palette.AccentColor3,
-                    opacity: 0.24f * lineAlpha);
+                    opacity: 0.28f * lineAlpha);
             }
         }
         finally
@@ -203,6 +216,8 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
         }
 
         _disposed = true;
+        _clipRoundRect.Dispose();
+        _cursorBlur.Dispose();
         _cardBgPaint.Dispose();
         _cardBorderPaint.Dispose();
         _cursorPaint.Dispose();
@@ -237,7 +252,7 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
 
         canvas.DrawRoundRect(rect, 14f, 14f, _cardBgPaint);
 
-        _cardBorderPaint.Color = new SKColor(0xFF, 0xFF, 0xFF, 28);
+        _cardBorderPaint.Color = new SKColor(0xFF, 0xFF, 0xFF, packet.HighContrastScrim ? (byte)0x26 : (byte)28);
         canvas.DrawRoundRect(rect, 14f, 14f, _cardBorderPaint);
     }
 
@@ -256,17 +271,17 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
 
         var gutter = FormatLineNumber(slice.ActiveLineIndex + 1) + "  ";
         DrawScaledMonoText(context, monoFont, gutter, currentX, baselineY, scale, packet.Palette.AccentColor3, 0.48f * lineAlpha);
-        currentX += TextShaperService.MeasureWidth(gutter, monoFont) * scale;
+        currentX += TextShaperService.MeasureWidth(gutter, monoFont, context.Fonts) * scale;
 
         const string prefix = "> ";
         DrawScaledMonoText(context, monoFont, prefix, currentX, baselineY, scale, packet.Palette.AccentColor2, 0.80f * lineAlpha);
-        currentX += TextShaperService.MeasureWidth(prefix, monoFont) * scale;
+        currentX += TextShaperService.MeasureWidth(prefix, monoFont, context.Fonts) * scale;
 
         var words = slice.CurrentLine!.Words;
         if (words.IsEmpty)
         {
             DrawScaledMonoText(context, monoFont, slice.CurrentLine.RawText, currentX, baselineY, scale, packet.Palette.AccentColor1, lineAlpha);
-            currentX += TextShaperService.MeasureWidth(slice.CurrentLine.RawText, monoFont) * scale;
+            currentX += TextShaperService.MeasureWidth(slice.CurrentLine.RawText, monoFont, context.Fonts) * scale;
             DrawCursor(context.Canvas, currentX + 3f, baselineY, monoFont.Size * scale, isTypingActively: false, reducedMotion, lineAlpha);
             return;
         }
@@ -275,7 +290,7 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
             ? slice.ActiveWordIndex
             : 0;
 
-        var spaceWidth = TextShaperService.MeasureWidth(" ", monoFont) * scale;
+        var spaceWidth = TextShaperService.MeasureWidth(" ", monoFont, context.Fonts) * scale;
         var isTypingActively = false;
 
         for (var i = 0; i <= activeIdx; i++)
@@ -292,7 +307,7 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
                 var tokenColor = isKeyword ? packet.Palette.AccentColor2 : packet.Palette.AccentColor1;
                 var tokenOpacity = (isKeyword ? 0.84f : 0.88f) * lineAlpha;
                 DrawScaledMonoText(context, monoFont, word.Text, currentX, baselineY, scale, tokenColor, tokenOpacity);
-                currentX += TextShaperService.MeasureWidth(word.Text, monoFont) * scale;
+                currentX += TextShaperService.MeasureWidth(word.Text, monoFont, context.Fonts) * scale;
             }
             else
             {
@@ -307,14 +322,16 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
                     isTypingActively = normalizedTyping < 0.999 &&
                                        (packet.PlaybackSnapshot?.IsPlaying ?? true);
 
-                    var revealedChars = Math.Clamp((int)Math.Ceiling(normalizedTyping * word.Text.Length), 1, word.Text.Length);
-                    revealedText = revealedChars >= word.Text.Length ? word.Text : word.Text[..revealedChars];
+                    var graphemeCount = StyleLayoutHelper.CountGraphemes(word.Text);
+                    var revealedElements = Math.Clamp((int)Math.Ceiling(normalizedTyping * graphemeCount), 1, Math.Max(1, graphemeCount));
+                    revealedText = revealedElements >= graphemeCount
+                        ? word.Text
+                        : StyleLayoutHelper.SliceByGraphemes(word.Text, revealedElements);
                 }
 
-                var wordWidth = TextShaperService.MeasureWidth(revealedText, monoFont) * scale;
+                var wordWidth = TextShaperService.MeasureWidth(revealedText, monoFont, context.Fonts) * scale;
                 DrawScaledMonoText(context, monoFont, revealedText, currentX, baselineY, scale, packet.Palette.AccentColor1, lineAlpha);
 
-                // Subtle 2px underline beneath active typed token
                 _underlinePaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha(0.55f * lineAlpha);
                 context.Canvas.DrawRect(currentX, baselineY + 4f, Math.Max(wordWidth, 2f), 2f, _underlinePaint);
 
@@ -345,18 +362,15 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
         var caretTop = baselineY - (scaledFontSize * 0.86f);
         var rect = new SKRect(x, caretTop, x + caretW, caretTop + caretH);
 
-        using (var blur = SKImageFilter.CreateBlur(5f, 5f))
+        _cursorGlowPaint.Color = CursorRed.WithAlpha((byte)Math.Clamp(MathF.Round(140f * opacity), 0f, 255f));
+        _cursorGlowPaint.ImageFilter = _cursorBlur;
+        try
         {
-            _cursorGlowPaint.Color = CursorRed.WithAlpha((byte)Math.Clamp(MathF.Round(140f * opacity), 0f, 255f));
-            _cursorGlowPaint.ImageFilter = blur;
-            try
-            {
-                canvas.DrawRoundRect(rect, 1.5f, 1.5f, _cursorGlowPaint);
-            }
-            finally
-            {
-                _cursorGlowPaint.ImageFilter = null;
-            }
+            canvas.DrawRoundRect(rect, 1.5f, 1.5f, _cursorGlowPaint);
+        }
+        finally
+        {
+            _cursorGlowPaint.ImageFilter = null;
         }
 
         _cursorPaint.Color = CursorRed.WithAlpha((byte)Math.Clamp(MathF.Round(255f * opacity), 0f, 255f));
@@ -392,12 +406,52 @@ public sealed class CodestyleStyleRenderer : IKineticStyleRenderer
                 monoFont,
                 LyricFontId.SystemMono,
                 fillColor,
-                opacity: opacity);
+                opacity: opacity,
+                fonts: context.Fonts);
         }
         finally
         {
             context.Canvas.RestoreToCount(save);
         }
+    }
+
+    private static string TrimToFitWidth(
+        string text,
+        SKFont font,
+        float scale,
+        float maxWidthDip,
+        FontAssetRegistry fonts)
+    {
+        if (TextShaperService.MeasureWidth(text, font, fonts) * scale <= maxWidthDip)
+        {
+            return text;
+        }
+
+        var totalGraphemes = StyleLayoutHelper.CountGraphemes(text);
+        if (totalGraphemes <= 4)
+        {
+            return text;
+        }
+
+        var lo = 1;
+        var hi = totalGraphemes - 1;
+        var best = 1;
+        while (lo <= hi)
+        {
+            var mid = lo + ((hi - lo) >> 1);
+            var candidate = StyleLayoutHelper.SliceByGraphemes(text, mid) + "\u2026";
+            if (TextShaperService.MeasureWidth(candidate, font, fonts) * scale <= maxWidthDip)
+            {
+                best = mid;
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid - 1;
+            }
+        }
+
+        return StyleLayoutHelper.SliceByGraphemes(text, best).TrimEnd() + "\u2026";
     }
 
     private string BuildFullLineText(LyricLine line)

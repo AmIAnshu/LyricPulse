@@ -29,17 +29,18 @@ public readonly record struct LifecycleFrameState(
 
 /// <summary>
 /// Implements MOTION_AND_STYLES.md section 8.1 playback lifecycle choreography:
-/// - Pause dim (300ms -> 0.45 opacity, hold until 8.0s paused, then 450ms fade to 0.00)
+/// - Pause dim (300ms -&gt; 0.62 opacity, hold until 8.0s paused, then 450ms fade to 0.00)
+/// - Strict suppression of PlainOnly / Loading / NotFound / Error so unsynced lines never freeze
 /// - Track change crossfade on TrackGeneration change
-/// - Instrumental gap fade + 450ms vocal pre-wake + subtle 3-dot indicator
-/// - Transient 1.2s tabular-mono timing offset toast HUD
+/// - Instrumental gap fade + 450ms vocal pre-wake + high-contrast 3-dot indicator (suppressed on post-song outro)
+/// - Transient 1.2s high-contrast tabular-mono timing offset toast HUD
 /// </summary>
 public sealed class PlaybackLifecycleChoreographer : IDisposable
 {
     public const float PauseDimDurationSeconds = 0.30f;
     public const float PauseHoldLimitSeconds = 8.00f;
     public const float PauseAutoHideFadeSeconds = 0.45f;
-    public const float PauseDimOpacity = 0.45f;
+    public const float PauseDimOpacity = 0.62f;
 
     public const float NormalFadeRatePerSec = 1f / 0.18f;
     public const float ReducedMotionFadeRatePerSec = 1f / 0.14f;
@@ -50,9 +51,15 @@ public sealed class PlaybackLifecycleChoreographer : IDisposable
     public const double OffsetToastFadeOutSeconds = 0.18;
     public const double OffsetToastFadeInSeconds = 0.10;
 
+    private static readonly RgbColor ToastHighContrastText = new(0xF8, 0xFA, 0xFC); // #F8FAFC (>= 15:1 on #D90B0C16)
+    private static readonly SKColor ToastBackdropBase = new(0x0B, 0x0C, 0x16, 0xD9); // #D90B0C16
+    private static readonly SKColor DotHaloBase = new(0x05, 0x05, 0x10, 0xB8);       // #B8050510
+
     private readonly SKPaint _toastBgPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _toastAccentBarPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _toastBorderPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.0f };
     private readonly SKPaint _dotPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _dotHaloPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
 
     private float _contentOpacity;
     private float _instrumentalOpacity;
@@ -112,13 +119,12 @@ public sealed class PlaybackLifecycleChoreographer : IDisposable
             _trackFadeIn = Math.Min(1f, _trackFadeIn + (dt * trackFadeRate));
         }
 
-        // Compute timing offset toast (1.2s hold + 180ms fade out)
-        var (toastText, toastOpacity, toastAnimating) = EvaluateOffsetToast(snapshot, utcNow);
+        // Strict Synced-only gate: PlainOnly / Loading / NotFound / Instrumental / Error never freeze Line 1
+        var hasSyncedLyrics = snapshot.Document is not null && snapshot.LyricsStatus == LyricsStatus.Synced;
+        var (toastText, toastOpacity, toastAnimating) = EvaluateOffsetToast(snapshot, hasSyncedLyrics, utcNow);
 
-        // Hard visibility / missing-lyrics gate: fade cleanly to 0% transparent
         var hasRenderableLyrics = snapshot.IsLyricsVisible &&
-                                  snapshot.Document is not null &&
-                                  snapshot.LyricsStatus is LyricsStatus.Synced or LyricsStatus.PlainOnly &&
+                                  hasSyncedLyrics &&
                                   snapshot.PlaybackState is MediaPlaybackState.Playing or MediaPlaybackState.Paused;
 
         if (!hasRenderableLyrics)
@@ -139,7 +145,7 @@ public sealed class PlaybackLifecycleChoreographer : IDisposable
                 IsAnimating: stillFading);
         }
 
-        // Pause dim (300ms -> 0.45) and 8.0s idle fade-out -> 0.00
+        // Pause dim (300ms -> 0.62) and 8.0s idle fade-out -> 0.00
         var isPaused = !snapshot.IsDemoMode && snapshot.PlaybackState == MediaPlaybackState.Paused;
         float pauseMultiplier;
         bool pauseCountdownActive;
@@ -166,7 +172,7 @@ public sealed class PlaybackLifecycleChoreographer : IDisposable
             pauseCountdownActive = false;
         }
 
-        // Instrumental gap handling + 450ms vocal pre-wake
+        // Instrumental gap handling + 450ms vocal pre-wake (suppress dots on post-song outro)
         var slice = snapshot.ActiveSlice;
         var inPreWake = slice.TimeUntilNextLine is { } untilNext &&
                         untilNext.TotalMilliseconds >= 0.0 &&
@@ -174,6 +180,7 @@ public sealed class PlaybackLifecycleChoreographer : IDisposable
 
         var inSuppressedInstrumental = slice.IsInInstrumentalGap && !inPreWake;
         var showInstrumentalDots = inSuppressedInstrumental &&
+                                   !slice.IsPostSongOutro &&
                                    !snapshot.Settings.HideDuringInstrumentals &&
                                    !isPaused;
 
@@ -185,7 +192,6 @@ public sealed class PlaybackLifecycleChoreographer : IDisposable
 
         if (isPaused)
         {
-            // Follow exact pause envelope directly so 300ms dim & 8.0s->8.45s fade trace deterministically
             _contentOpacity = targetLyricAlpha;
         }
         else
@@ -265,10 +271,13 @@ public sealed class PlaybackLifecycleChoreographer : IDisposable
             return "Offset: 0.0s (Reset)";
         }
 
+        var atLimit = Math.Abs(seconds) >= TimingOffsetState.MaxOffset.TotalSeconds - 0.01;
         var absStr = Math.Abs(seconds).ToString("0.0", CultureInfo.InvariantCulture);
+        var direction = seconds < 0 ? "Earlier" : "Later";
+        var limitTag = atLimit ? " · Limit" : string.Empty;
         return seconds < 0
-            ? $"Offset: \u2212{absStr}s (Earlier)"
-            : $"Offset: +{absStr}s (Later)";
+            ? $"Offset: \u2212{absStr}s ({direction}{limitTag})"
+            : $"Offset: +{absStr}s ({direction}{limitTag})";
     }
 
     public void DrawInstrumentalIndicator(in StyleRenderContext context, in LifecycleFrameState lifecycle)
@@ -280,18 +289,25 @@ public sealed class PlaybackLifecycleChoreographer : IDisposable
         }
 
         var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(context.Packet);
-        var radius = Math.Clamp(context.Packet.BaseFontSizeDip * 0.11f, 3.5f, 7.0f);
-        var spacing = radius * 3.4f;
+        var radius = Math.Clamp(context.Packet.BaseFontSizeDip * 0.11f, 3.8f, 7.0f);
+        var spacing = radius * 3.5f;
         var baseOpacity = lifecycle.InstrumentalOpacity * context.Packet.GlobalOpacity;
+
+        // Subtle dark obsidian pill halo guarantees >= 7:1 dot contrast over pure #FFFFFF web pages
+        var pillW = (spacing * 2f) + (radius * 4.4f);
+        var pillH = radius * 3.8f;
+        var haloRect = new SKRect(anchorX - (pillW * 0.5f), anchorY - (pillH * 0.5f), anchorX + (pillW * 0.5f), anchorY + (pillH * 0.5f));
+        _dotHaloPaint.Color = LegibilityStyleSpec.ScaleAlpha(DotHaloBase, baseOpacity);
+        context.Canvas.DrawRoundRect(haloRect, pillH * 0.5f, pillH * 0.5f, _dotHaloPaint);
 
         for (var i = -1; i <= 1; i++)
         {
             var wave = context.Packet.ReducedMotion
-                ? 0.55f
-                : 0.35f + (0.45f * (0.5f + (0.5f * MathF.Sin((lifecycle.InstrumentalPulsePhase * MathF.Tau) - ((i + 1) * 0.9f)))));
+                ? 0.80f
+                : 0.55f + (0.45f * (0.5f + (0.5f * MathF.Sin((lifecycle.InstrumentalPulsePhase * MathF.Tau) - ((i + 1) * 0.9f)))));
 
             var dotX = anchorX + (i * spacing);
-            _dotPaint.Color = context.Packet.Palette.AccentColor2.ToSkColorWithAlpha(baseOpacity * wave);
+            _dotPaint.Color = context.Packet.Palette.AccentColor1.ToSkColorWithAlpha(baseOpacity * wave);
             context.Canvas.DrawCircle(dotX, anchorY, radius, _dotPaint);
         }
     }
@@ -307,18 +323,20 @@ public sealed class PlaybackLifecycleChoreographer : IDisposable
         var canvas = context.Canvas;
         var packet = context.Packet;
         var toastFont = context.Fonts.GetOrCreateFont(LyricFontId.SystemMono, 18f);
-        var textWidth = TextShaperService.MeasureWidth(lifecycle.OffsetToastText, toastFont);
+        var textWidth = TextShaperService.MeasureWidth(lifecycle.OffsetToastText, toastFont, context.Fonts);
 
-        const float padX = 14f;
+        const float accentBarW = 3.5f;
+        const float padLeft = 16f;
+        const float padRight = 14f;
         const float padY = 8f;
-        var pillW = textWidth + (padX * 2f);
+        var pillW = textWidth + padLeft + padRight + accentBarW;
         var pillH = toastFont.Size + (padY * 2f);
 
         var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet);
-        var preferredY = anchorY + (packet.BaseFontSizeDip * 2.15f);
+        var preferredY = anchorY + (packet.BaseFontSizeDip * 2.25f);
         if (preferredY + (pillH * 0.5f) > packet.ViewportHeightDip - 24f)
         {
-            preferredY = Math.Max(28f + (pillH * 0.5f), anchorY - (packet.BaseFontSizeDip * 2.15f));
+            preferredY = Math.Max(28f + (pillH * 0.5f), anchorY - (packet.BaseFontSizeDip * 2.25f));
         }
 
         var left = Math.Clamp(anchorX - (pillW * 0.5f), 16f, Math.Max(16f, packet.ViewportWidthDip - pillW - 16f));
@@ -326,25 +344,31 @@ public sealed class PlaybackLifecycleChoreographer : IDisposable
         var rect = new SKRect(left, top, left + pillW, top + pillH);
         var alpha = lifecycle.OffsetToastOpacity;
 
-        _toastBgPaint.Color = new SKColor(0x0B, 0x0C, 0x16, (byte)Math.Clamp(MathF.Round(214f * alpha), 0f, 255f));
+        _toastBgPaint.Color = LegibilityStyleSpec.ScaleAlpha(ToastBackdropBase, alpha);
         canvas.DrawRoundRect(rect, 10f, 10f, _toastBgPaint);
 
-        _toastBorderPaint.Color = new SKColor(0xFF, 0xFF, 0xFF, (byte)Math.Clamp(MathF.Round(42f * alpha), 0f, 255f));
+        // High-contrast AccentColor1 left accent bar
+        var barRect = new SKRect(rect.Left + 4f, rect.Top + 6f, rect.Left + 4f + accentBarW, rect.Bottom - 6f);
+        _toastAccentBarPaint.Color = packet.Palette.AccentColor1.ToSkColorWithAlpha(alpha);
+        canvas.DrawRoundRect(barRect, 2f, 2f, _toastAccentBarPaint);
+
+        _toastBorderPaint.Color = new SKColor(0xFF, 0xFF, 0xFF, (byte)Math.Clamp(MathF.Round(46f * alpha), 0f, 255f));
         canvas.DrawRoundRect(rect, 10f, 10f, _toastBorderPaint);
 
         var baselineY = rect.MidY + (toastFont.Size * 0.34f);
         context.Legibility.DrawLegibleText(
             canvas,
             lifecycle.OffsetToastText,
-            rect.MidX,
+            rect.Left + padLeft + accentBarW,
             baselineY,
-            SKTextAlign.Center,
+            SKTextAlign.Left,
             toastFont,
             LyricFontId.SystemMono,
-            packet.Palette.AccentColor1,
+            ToastHighContrastText,
             opacity: alpha,
             activeGlowColor: null,
-            includeStrokeHalo: false);
+            includeStrokeHalo: false,
+            fonts: context.Fonts);
     }
 
     public void Dispose()
@@ -356,15 +380,18 @@ public sealed class PlaybackLifecycleChoreographer : IDisposable
 
         _disposed = true;
         _toastBgPaint.Dispose();
+        _toastAccentBarPaint.Dispose();
         _toastBorderPaint.Dispose();
         _dotPaint.Dispose();
+        _dotHaloPaint.Dispose();
     }
 
     private static (string? Text, float Opacity, bool Animating) EvaluateOffsetToast(
         OverlayPlaybackSnapshot snapshot,
+        bool hasSyncedLyrics,
         DateTimeOffset utcNow)
     {
-        if (snapshot.LastOffsetNudgeUtc is not { } nudgeUtc)
+        if (!snapshot.IsLyricsVisible || !hasSyncedLyrics || snapshot.LastOffsetNudgeUtc is not { } nudgeUtc)
         {
             return (null, 0f, false);
         }

@@ -176,8 +176,8 @@ public sealed class ShaderLibraryTests
         MathF.Abs(extreme.Y).Should().BeLessThanOrEqualTo(22.0f * 1.5f);
         MathF.Abs(extreme.Y).Should().BeGreaterThan(21.5f * 1.5f);
 
-        // Bulge clamps & directional padding math
-        MotionBlurMath.ClampBulgeStrength(0.95f).Should().Be(0.40f);
+        // Bulge clamps & directional padding math (monotonic ceiling = 0.30)
+        MotionBlurMath.ClampBulgeStrength(0.95f).Should().Be(0.30f);
         MotionBlurMath.ClampBulgeStrength(-0.24f).Should().Be(0.24f);
         MotionBlurMath.ClampBulgeStrength(float.NaN).Should().Be(0.0f);
         MotionBlurMath.ClampBulgePower(1.0f).Should().Be(1.85f);

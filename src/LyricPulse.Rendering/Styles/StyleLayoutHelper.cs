@@ -1,16 +1,18 @@
 using System.Collections.Frozen;
+using System.Globalization;
+using System.Text;
 using LyricPulse.Core.Models;
 using LyricPulse.Core.Runtime;
-using LyricPulse.Rendering.Color;
 using LyricPulse.Rendering.Fonts;
 using LyricPulse.Rendering.Host;
+using LyricPulse.Rendering.Legibility;
 using SkiaSharp;
 
 namespace LyricPulse.Rendering.Styles;
 
 /// <summary>
-/// Shared immutable word-stream, safe-zone anchor, keyword classification, and Fluent/Emoji visual
-/// drawing utilities reused across kinetic lyric style renderers.
+/// Shared immutable word-stream, safe-zone anchor, viewport clamping, grapheme-safe slicing,
+/// and contrast-guarded Fluent/Emoji visual drawing utilities reused across kinetic lyric renderers.
 /// </summary>
 internal static class StyleLayoutHelper
 {
@@ -33,6 +35,26 @@ internal static class StyleLayoutHelper
         return (x, y);
     }
 
+    /// <summary>
+    /// Clamps a centered offscreen layer rectangle strictly within the overlay viewport
+    /// so high DPI (150%-200%) + 160% FontScale + BottomThird never clip glyphs off-screen.
+    /// </summary>
+    public static SKRect ClampLayerRectToViewport(
+        float desiredCenterX,
+        float desiredCenterY,
+        float layerWidthDip,
+        float layerHeightDip,
+        float viewportWidthDip,
+        float viewportHeightDip)
+    {
+        var clampedW = Math.Clamp(layerWidthDip, 1f, Math.Max(1f, viewportWidthDip));
+        var clampedH = Math.Clamp(layerHeightDip, 1f, Math.Max(1f, viewportHeightDip));
+
+        var left = Math.Clamp(desiredCenterX - (clampedW * 0.5f), 0f, Math.Max(0f, viewportWidthDip - clampedW));
+        var top = Math.Clamp(desiredCenterY - (clampedH * 0.5f), 0f, Math.Max(0f, viewportHeightDip - clampedH));
+        return new SKRect(left, top, left + clampedW, top + clampedH);
+    }
+
     public static ActiveLyricSlice ResolveSlice(FrameRenderPacket packet)
     {
         if (packet.PlaybackSnapshot is { } snap)
@@ -48,12 +70,12 @@ internal static class StyleLayoutHelper
         return ActiveLyricSlice.Empty;
     }
 
-    public static (LyricWord? Previous, LyricWord? Active, LyricWord? Next, int GlobalWordIndex, float WordDurationSec)
+    public static (LyricWord? Previous, LyricWord? Active, LyricWord? Next, (int LineIndex, int WordIndex) WordKey, float WordDurationSec)
         ResolveWordTriad(ActiveLyricSlice slice)
     {
         if (slice.CurrentLine is null || slice.CurrentLine.Words.IsEmpty)
         {
-            return (null, null, null, -1, 0.32f);
+            return (null, null, null, (-1, -1), 0.32f);
         }
 
         var words = slice.CurrentLine.Words;
@@ -75,8 +97,7 @@ internal static class StyleLayoutHelper
                 : null;
 
         var durationSec = Math.Clamp((float)(active.EndTime - active.StartTime).TotalSeconds, 0.08f, 2.5f);
-        var globalIdx = (slice.ActiveLineIndex * 1000) + idx;
-        return (previous, active, next, globalIdx, durationSec);
+        return (previous, active, next, (slice.ActiveLineIndex, idx), durationSec);
     }
 
     public static bool IsConnectorWord(string text)
@@ -109,20 +130,52 @@ internal static class StyleLayoutHelper
     }
 
     /// <summary>
-    /// Draws a resolved <see cref="WordVisualMatch"/> centered at (<paramref name="centerX"/>, <paramref name="centerY"/>).
-    /// Automatically checks glyph existence on FluentSystemIcons-Filled.ttf and falls back to Emoji if missing
-    /// so tofu boxes never appear on the desktop overlay.
+    /// Grapheme-cluster-safe prefix slice preventing mid-surrogate splits on emoji or combining sequences.
+    /// </summary>
+    public static string SliceByGraphemes(string text, int maxGraphemes)
+    {
+        if (string.IsNullOrEmpty(text) || maxGraphemes <= 0)
+        {
+            return string.Empty;
+        }
+
+        var info = new StringInfo(text);
+        var total = info.LengthInTextElements;
+        if (maxGraphemes >= total)
+        {
+            return text;
+        }
+
+        return info.SubstringByTextElements(0, maxGraphemes);
+    }
+
+    public static int CountGraphemes(string text) =>
+        string.IsNullOrEmpty(text) ? 0 : new StringInfo(text).LengthInTextElements;
+
+    public static RgbColor BlendSrgb(RgbColor from, RgbColor to, float t)
+    {
+        var clamped = Math.Clamp(float.IsFinite(t) ? t : 1f, 0f, 1f);
+        var r = (byte)Math.Clamp(MathF.Round(from.R + ((to.R - from.R) * clamped)), 0f, 255f);
+        var g = (byte)Math.Clamp(MathF.Round(from.G + ((to.G - from.G) * clamped)), 0f, 255f);
+        var b = (byte)Math.Clamp(MathF.Round(from.B + ((to.B - from.B) * clamped)), 0f, 255f);
+        return new RgbColor(r, g, b);
+    }
+
+    /// <summary>
+    /// Draws a resolved <see cref="WordVisualMatch"/> centered at (<paramref name="centerX"/>, <paramref name="centerY"/>)
+    /// routed through <see cref="LegibilityPipeline"/> so both Fluent Icons (BMP and Supplementary PUA-A &gt; U+FFFF)
+    /// and Emoji fallbacks maintain &gt;= 7:1 effective legibility over pure #FFFFFF web pages.
     /// </summary>
     public static void DrawVisualGlyph(
         SKCanvas canvas,
         FontAssetRegistry fonts,
+        LegibilityPipeline legibility,
         WordVisualMatch visual,
         float centerX,
         float centerY,
         float iconSizeDip,
         RgbColor tintColor,
-        float opacity,
-        SKPaint scratchPaint)
+        float opacity)
     {
         var clampedOpacity = Math.Clamp(opacity, 0f, 1f);
         if (clampedOpacity <= 0.004f || string.IsNullOrEmpty(visual.Value))
@@ -130,48 +183,70 @@ internal static class StyleLayoutHelper
             return;
         }
 
-        var useFluent = visual.Kind == VisualKind.FluentIcon &&
-                        TryGetFirstCodepoint(visual.Value, out var cp) &&
-                        fonts.GetOrCreateFont(LyricFontId.FluentIcons, iconSizeDip).ContainsGlyph(cp);
+        var hasFluentRune = visual.Kind == VisualKind.FluentIcon &&
+                            TryDecodeFirstScalar(visual.Value, out var scalar) &&
+                            fonts.GetOrCreateFont(LyricFontId.FluentIcons, iconSizeDip).ContainsGlyph(scalar);
 
-        if (useFluent)
+        if (hasFluentRune)
         {
             var fluentFont = fonts.GetOrCreateFont(LyricFontId.FluentIcons, iconSizeDip);
             fluentFont.GetFontMetrics(out var metrics);
             var baselineY = centerY - ((metrics.Ascent + metrics.Descent) * 0.5f);
 
-            scratchPaint.Style = SKPaintStyle.Fill;
-            scratchPaint.Color = tintColor.ToSkColorWithAlpha(clampedOpacity);
-            canvas.DrawText(visual.Value, centerX, baselineY, SKTextAlign.Center, fluentFont, scratchPaint);
+            legibility.DrawLegibleText(
+                canvas,
+                visual.Value,
+                centerX,
+                baselineY,
+                SKTextAlign.Center,
+                fluentFont,
+                LyricFontId.FluentIcons,
+                tintColor,
+                opacity: clampedOpacity,
+                activeGlowColor: null,
+                includeStrokeHalo: true,
+                fonts: null);
             return;
         }
 
         var emojiText = !string.IsNullOrEmpty(visual.EmojiFallback) ? visual.EmojiFallback : visual.Value;
-        var emojiSize = Math.Max(14f, iconSizeDip * 0.88f);
+        var emojiSize = Math.Max(14f, iconSizeDip * 0.92f);
         var emojiFont = fonts.GetOrCreateFont(LyricFontId.Emoji, emojiSize);
         emojiFont.GetFontMetrics(out var emojiMetrics);
         var emojiBaseline = centerY - ((emojiMetrics.Ascent + emojiMetrics.Descent) * 0.5f);
 
-        scratchPaint.Style = SKPaintStyle.Fill;
-        scratchPaint.Color = SKColors.White.WithAlpha((byte)Math.Clamp(MathF.Round(clampedOpacity * 255f), 0f, 255f));
-        canvas.DrawText(emojiText, centerX, emojiBaseline, SKTextAlign.Center, emojiFont, scratchPaint);
+        // Contact shadow only (no dark stroke around multicolor emoji glyphs per MOTION_AND_STYLES.md section 3.1)
+        legibility.DrawLegibleText(
+            canvas,
+            emojiText,
+            centerX,
+            emojiBaseline,
+            SKTextAlign.Center,
+            emojiFont,
+            LyricFontId.Emoji,
+            new RgbColor(255, 255, 255),
+            opacity: clampedOpacity,
+            activeGlowColor: null,
+            includeStrokeHalo: false,
+            fonts: null,
+            includeAmbientShadow: false);
     }
 
-    private static bool TryGetFirstCodepoint(string text, out int codepoint)
+    internal static bool TryDecodeFirstScalar(string text, out int scalarValue)
     {
-        codepoint = 0;
+        scalarValue = 0;
         if (string.IsNullOrEmpty(text))
         {
             return false;
         }
 
-        if (char.IsHighSurrogate(text[0]) && text.Length > 1 && char.IsLowSurrogate(text[1]))
+        var status = Rune.DecodeFromUtf16(text.AsSpan(), out var rune, out _);
+        if (status != System.Buffers.OperationStatus.Done)
         {
-            codepoint = char.ConvertToUtf32(text[0], text[1]);
-            return true;
+            return false;
         }
 
-        codepoint = text[0];
+        scalarValue = rune.Value;
         return true;
     }
 }

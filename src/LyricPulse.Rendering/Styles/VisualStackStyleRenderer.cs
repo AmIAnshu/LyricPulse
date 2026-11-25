@@ -1,16 +1,20 @@
 using LyricPulse.Core.Models;
+using LyricPulse.Core.Runtime;
 using LyricPulse.Rendering.Color;
 using LyricPulse.Rendering.Fonts;
 using LyricPulse.Rendering.Host;
+using LyricPulse.Rendering.Legibility;
 using LyricPulse.Rendering.Motion;
+using LyricPulse.Rendering.Shaders;
 using SkiaSharp;
 
 namespace LyricPulse.Rendering.Styles;
 
 /// <summary>
 /// Style #5 — Visual Stack: expressive centered vertical stack pairing semantically matched
-/// lyric words with glowing Fluent Icon / Emoji badges driven by <c>Spring.IconPop</c>
-/// (<c>k=480, c=22, m=0.9</c>) and vertical <c>DirectionalMotionBlur13.sksl</c> (shutter 0.42).
+/// lyric words with high-contrast dark obsidian Fluent Icon / Emoji badges (&gt;= 7:1 over #FFFFFF)
+/// driven by tempo-compressed <c>Spring.IconPop</c> and vertical <c>DirectionalMotionBlur13.sksl</c>
+/// (shutter 0.42). Layer 0 scrim renders on the main canvas (never clipped during blur).
 /// </summary>
 public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
 {
@@ -18,19 +22,24 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
     public const float RowPitchRatio = 1.44f;
     public const float RippleDurationSeconds = 0.28f;
 
-    private readonly SKPaint _badgeBgPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
-    private readonly SKPaint _badgeRingPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.3f };
+    private static readonly SKColor ActiveBadgeObsidian = new(0x0B, 0x0C, 0x16, 0xD9);   // #D90B0C16
+    private static readonly SKColor InactiveBadgeObsidian = new(0x0B, 0x0C, 0x16, 0xB8); // #B80B0C16
+
+    private readonly SKPaint _badgeObsidianPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _badgeTintPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _badgeRingPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.5f };
     private readonly SKPaint _ripplePaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.6f };
-    private readonly SKPaint _glyphPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
-    private readonly List<VisualStackRow> _rowScratch = new(16);
+    private readonly List<VisualStackRow> _advanceRows = new(24);
+    private readonly List<VisualStackRow> _renderRows = new(24);
 
     private SpringState _stackOffsetY = SpringState.AtRest(0f);
     private SpringState _activeRowScale = SpringState.AtRest(1.06f);
     private SpringState _iconPopScale = SpringState.AtRest(1.0f);
     private float _rippleElapsedSec = RippleDurationSeconds;
     private float _fadeIn = 1.0f;
+    private float _lastWordDurationSec = 0.32f;
 
-    private int _lastActiveRowKey = -1;
+    private (int LineIndex, int RowIndex) _lastActiveRowKey = (-1, -1);
     private bool _disposed;
 
     internal bool AllowCpuShadersForTesting { get; set; }
@@ -44,7 +53,8 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
         _iconPopScale = SpringState.AtRest(1.0f);
         _rippleElapsedSec = RippleDurationSeconds;
         _fadeIn = 1.0f;
-        _lastActiveRowKey = -1;
+        _lastWordDurationSec = 0.32f;
+        _lastActiveRowKey = (-1, -1);
     }
 
     public bool Advance(in FrameRenderPacket packet, in LifecycleFrameState lifecycle)
@@ -55,23 +65,28 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
             return false;
         }
 
-        BuildGroupedRows(slice.CurrentLine, _rowScratch);
-        if (_rowScratch.Count == 0)
+        var activeRowIdx = BuildWindowedRows(slice, _advanceRows);
+        if (_advanceRows.Count == 0 || activeRowIdx < 0)
         {
             return false;
         }
 
-        var activeRowIdx = FindActiveRowIndex(_rowScratch, slice.ActiveWordIndex);
-        var activeRow = _rowScratch[activeRowIdx];
-        var rowKey = (slice.ActiveLineIndex * 100) + activeRowIdx;
+        var activeRow = _advanceRows[activeRowIdx];
+        var rowKey = (slice.ActiveLineIndex, activeRow.StartWordIndex);
 
         var dt = Math.Clamp(packet.DeltaSeconds, 0f, SpringState.MaxDeltaSeconds);
         var fontSize = ResolveFontSize(packet);
         var rowPitch = fontSize * RowPitchRatio;
 
+        if (!slice.CurrentLine.Words.IsEmpty && slice.ActiveWordIndex >= 0 && slice.ActiveWordIndex < slice.CurrentLine.Words.Length)
+        {
+            var activeWord = slice.CurrentLine.Words[slice.ActiveWordIndex];
+            _lastWordDurationSec = Math.Clamp((float)(activeWord.EndTime - activeWord.StartTime).TotalSeconds, 0.08f, 2.5f);
+        }
+
         if (rowKey != _lastActiveRowKey)
         {
-            var wasInitialized = _lastActiveRowKey >= 0;
+            var wasInitialized = _lastActiveRowKey.LineIndex >= 0;
             _lastActiveRowKey = rowKey;
 
             if (packet.ReducedMotion)
@@ -109,13 +124,18 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
             _stackOffsetY = SpringState.AtRest(0f);
             _activeRowScale = SpringState.AtRest(1.00f);
             _iconPopScale = SpringState.AtRest(1.00f);
+            _rippleElapsedSec = RippleDurationSeconds;
             _fadeIn = Math.Min(1f, _fadeIn + (dt / 0.14f));
             return _fadeIn < 0.999f;
         }
 
-        _stackOffsetY = _stackOffsetY.Step(SpringTokens.LineShift, dt);
-        _activeRowScale = _activeRowScale.Step(SpringTokens.WordSnap, dt);
-        _iconPopScale = _iconPopScale.Step(SpringTokens.IconPop, dt);
+        var lineSpring = SpringTokens.LineShift.WithTempoCompression(_lastWordDurationSec);
+        var wordSpring = SpringTokens.WordSnap.WithTempoCompression(_lastWordDurationSec);
+        var iconSpring = SpringTokens.IconPop.WithTempoCompression(_lastWordDurationSec);
+
+        _stackOffsetY = _stackOffsetY.Step(lineSpring, dt);
+        _activeRowScale = _activeRowScale.Step(wordSpring, dt);
+        _iconPopScale = _iconPopScale.Step(iconSpring, dt);
         if (_rippleElapsedSec < RippleDurationSeconds)
         {
             _rippleElapsedSec = Math.Min(RippleDurationSeconds, _rippleElapsedSec + dt);
@@ -138,13 +158,12 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
             return;
         }
 
-        BuildGroupedRows(slice.CurrentLine, _rowScratch);
-        if (_rowScratch.Count == 0)
+        var activeRowIdx = BuildWindowedRows(slice, _renderRows);
+        if (_renderRows.Count == 0 || activeRowIdx < 0)
         {
             return;
         }
 
-        var activeRowIdx = FindActiveRowIndex(_rowScratch, slice.ActiveWordIndex);
         var fontId = packet.ActiveFontId;
         var fontSize = ResolveFontSize(packet);
         var font = context.Fonts.GetOrCreateFont(fontId, fontSize);
@@ -153,6 +172,36 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
 
         var dpi = packet.RenderScaling;
         var velocityPxPerSec = new SKPoint(0f, _stackOffsetY.Velocity * dpi);
+        var clampedVel = MotionBlurMath.ComputeClampedVelocity(velocityPxPerSec, VerticalShutterFactor, dpi, out var blurDeadZone);
+        var (_, blurPadYPx) = blurDeadZone ? (0, 0) : MotionBlurMath.ComputeDirectionalPaddingPx(clampedVel);
+        var blurPadYDip = blurPadYPx / Math.Max(dpi, 0.5f);
+
+        var layerWidthDip = Math.Clamp(packet.ViewportWidthDip * 0.80f, 320f, 1100f);
+        var layerHeightDip = Math.Clamp((rowPitch * 5.0f) + (blurPadYDip * 2f), 240f, packet.ViewportHeightDip);
+
+        var destRect = StyleLayoutHelper.ClampLayerRectToViewport(
+            anchorX,
+            anchorY,
+            layerWidthDip,
+            layerHeightDip,
+            packet.ViewportWidthDip,
+            packet.ViewportHeightDip);
+
+        // Layer 0 radial scrim renders directly on main canvas (NEVER clipped or flashing when blur engages!)
+        var scrimRect = new SKRect(
+            destRect.MidX - (font.Size * 4.5f),
+            destRect.MidY - (rowPitch * 2.0f),
+            destRect.MidX + (font.Size * 4.5f),
+            destRect.MidY + (rowPitch * 1.4f));
+
+        context.Legibility.DrawAmbientScrim(
+            context.Canvas,
+            scrimRect,
+            font.Size,
+            packet.Palette.ScrimTint,
+            packet.ScrimIntensity,
+            packet.HighContrastScrim);
+
         var shouldBlur = !context.Shaders.ShouldBypassMotionBlur(
             context.IsGpuBackend,
             packet.ReducedMotion,
@@ -164,14 +213,12 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
 
         if (!shouldBlur)
         {
-            DrawStackContent(context.Canvas, context, font, fontId, anchorX, anchorY, rowPitch, activeRowIdx);
+            DrawStackGlyphs(context.Canvas, context, font, fontId, destRect.MidX, destRect.MidY, rowPitch, activeRowIdx);
             return;
         }
 
-        var layerWidthDip = Math.Clamp(packet.ViewportWidthDip * 0.80f, 320f, 1100f);
-        var layerHeightDip = Math.Clamp(rowPitch * 4.8f, 240f, packet.ViewportHeightDip);
-        var physW = Math.Clamp((int)MathF.Ceiling(layerWidthDip * dpi), 64, OffscreenSurfacePool.MaxSurfaceDimensionPx);
-        var physH = Math.Clamp((int)MathF.Ceiling(layerHeightDip * dpi), 64, OffscreenSurfacePool.MaxSurfaceDimensionPx);
+        var physW = Math.Clamp((int)MathF.Ceiling(destRect.Width * dpi), 64, OffscreenSurfacePool.MaxSurfaceDimensionPx);
+        var physH = Math.Clamp((int)MathF.Ceiling(destRect.Height * dpi), 64, OffscreenSurfacePool.MaxSurfaceDimensionPx);
 
         var scratchSurface = context.SurfacePool.RentSurface(OffscreenSurfaceSlot.Scratch, context.GrContext, physW, physH);
         scratchSurface.Canvas.Clear(SKColors.Transparent);
@@ -180,13 +227,13 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
         try
         {
             scratchSurface.Canvas.Scale(dpi, dpi);
-            DrawStackContent(
+            DrawStackGlyphs(
                 scratchSurface.Canvas,
                 context,
                 font,
                 fontId,
-                layerWidthDip * 0.5f,
-                layerHeightDip * 0.5f,
+                destRect.Width * 0.5f,
+                destRect.Height * 0.5f,
                 rowPitch,
                 activeRowIdx);
         }
@@ -194,12 +241,6 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
         {
             scratchSurface.Canvas.RestoreToCount(save);
         }
-
-        var destRect = new SKRect(
-            anchorX - (layerWidthDip * 0.5f),
-            anchorY - (layerHeightDip * 0.5f),
-            anchorX + (layerWidthDip * 0.5f),
-            anchorY + (layerHeightDip * 0.5f));
 
         context.Shaders.ApplyDirectionalMotionBlur(
             context.Canvas,
@@ -223,10 +264,55 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
         }
 
         _disposed = true;
-        _badgeBgPaint.Dispose();
+        _badgeObsidianPaint.Dispose();
+        _badgeTintPaint.Dispose();
         _badgeRingPaint.Dispose();
         _ripplePaint.Dispose();
-        _glyphPaint.Dispose();
+    }
+
+    /// <summary>
+    /// Stitches trailing rows from <see cref="ActiveLyricSlice.PreviousLine"/> and the leading row from
+    /// <see cref="ActiveLyricSlice.NextLine"/> around the active line so stack context never vanishes at line breaks.
+    /// </summary>
+    internal static int BuildWindowedRows(ActiveLyricSlice slice, List<VisualStackRow> destination)
+    {
+        destination.Clear();
+        if (slice.CurrentLine is null)
+        {
+            return -1;
+        }
+
+        var temp = new List<VisualStackRow>(8);
+        var prefixCount = 0;
+
+        if (slice.PreviousLine is not null)
+        {
+            BuildGroupedRows(slice.PreviousLine, temp);
+            var takeStart = Math.Max(0, temp.Count - 2);
+            for (var i = takeStart; i < temp.Count; i++)
+            {
+                destination.Add(temp[i]);
+                prefixCount++;
+            }
+        }
+
+        BuildGroupedRows(slice.CurrentLine, temp);
+        var localActiveIdx = FindActiveRowIndex(temp, slice.ActiveWordIndex);
+        foreach (var row in temp)
+        {
+            destination.Add(row);
+        }
+
+        if (slice.NextLine is not null)
+        {
+            BuildGroupedRows(slice.NextLine, temp);
+            if (temp.Count > 0)
+            {
+                destination.Add(temp[0]);
+            }
+        }
+
+        return localActiveIdx >= 0 ? prefixCount + localActiveIdx : -1;
     }
 
     /// <summary>
@@ -286,7 +372,7 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
         }
     }
 
-    private void DrawStackContent(
+    private void DrawStackGlyphs(
         SKCanvas canvas,
         in StyleRenderContext context,
         SKFont font,
@@ -299,30 +385,15 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
         var packet = context.Packet;
         var scrollY = packet.ReducedMotion ? 0f : _stackOffsetY.Value;
 
-        var scrimRect = new SKRect(
-            centerX - (font.Size * 4.5f),
-            centerY - (rowPitch * 2.1f),
-            centerX + (font.Size * 4.5f),
-            centerY + (rowPitch * 1.4f));
-
-        context.Legibility.DrawAmbientScrim(
-            canvas,
-            scrimRect,
-            font.Size,
-            packet.Palette.ScrimTint,
-            packet.ScrimIntensity,
-            packet.HighContrastScrim);
-
-        // Render up to 4 rows: -2, -1 (past), 0 (active hero), +1 (upcoming)
         for (var offset = -2; offset <= 1; offset++)
         {
             var idx = activeRowIdx + offset;
-            if (idx < 0 || idx >= _rowScratch.Count)
+            if (idx < 0 || idx >= _renderRows.Count)
             {
                 continue;
             }
 
-            var row = _rowScratch[idx];
+            var row = _renderRows[idx];
             var isActive = offset == 0;
             var rowScale = offset switch
             {
@@ -332,9 +403,10 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
                 _ => 0.78f
             };
 
+            // Under Reduced Motion keep active row opacity >= 0.90f (never dimmer than previous row 0.56f)
             var rowOpacity = offset switch
             {
-                0 => packet.ReducedMotion ? (0.45f + (0.55f * Ease.Highlight(_fadeIn))) : 1.00f,
+                0 => packet.ReducedMotion ? (0.90f + (0.10f * Ease.Highlight(_fadeIn))) : 1.00f,
                 -1 => 0.56f,
                 -2 => 0.28f,
                 _ => 0.42f
@@ -362,7 +434,7 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
             ? row.PrimaryWord
             : $"{row.LeadingConnectors} {row.PrimaryWord}";
 
-        var textWidth = TextShaperService.MeasureWidth(combinedText, font);
+        var textWidth = TextShaperService.MeasureWidth(combinedText, font, context.Fonts);
         var hasVisual = row.Visual is not null;
         var badgeDiameter = font.Size * 1.18f;
         var gap = font.Size * 0.34f;
@@ -415,9 +487,10 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
                     font,
                     fontId,
                     prefixColor,
-                    opacity: opacity * (isActive ? 0.78f : 0.85f));
+                    opacity: opacity * (isActive ? 0.80f : 0.85f),
+                    fonts: context.Fonts);
 
-                textStartX += TextShaperService.MeasureWidth(prefixWithSpace, font);
+                textStartX += TextShaperService.MeasureWidth(prefixWithSpace, font, context.Fonts);
             }
 
             var primaryColor = isActive ? packet.Palette.AccentColor1 : packet.Palette.AccentColor3;
@@ -431,7 +504,8 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
                 fontId,
                 primaryColor,
                 opacity: opacity,
-                activeGlowColor: isActive ? packet.Palette.AccentColor2 : null);
+                activeGlowColor: isActive ? packet.Palette.AccentColor2 : null,
+                fonts: context.Fonts);
         }
         finally
         {
@@ -453,7 +527,6 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
         var packet = context.Packet;
         var radius = diameter * 0.5f;
 
-        // Expanding accent ripple ring on active icon onset (disabled under Reduced Motion)
         if (isActive && !packet.ReducedMotion && _rippleElapsedSec < RippleDurationSeconds)
         {
             var t = Ease.Enter(_rippleElapsedSec / RippleDurationSeconds);
@@ -472,23 +545,30 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
             var rect = new SKRect(-radius, -radius, radius, radius);
             var corner = diameter * 0.34f;
 
-            _badgeBgPaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha((isActive ? 0.22f : 0.14f) * opacity);
-            canvas.DrawRoundRect(rect, corner, corner, _badgeBgPaint);
+            // High-contrast dark obsidian backing guarantees >= 7:1 glyph contrast over pure #FFFFFF webpages
+            _badgeObsidianPaint.Color = LegibilityStyleSpec.ScaleAlpha(
+                isActive ? ActiveBadgeObsidian : InactiveBadgeObsidian,
+                opacity);
+            canvas.DrawRoundRect(rect, corner, corner, _badgeObsidianPaint);
 
-            _badgeRingPaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha((isActive ? 0.56f : 0.34f) * opacity);
+            // Subtle album-synced accent tint layered over obsidian backing
+            _badgeTintPaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha((isActive ? 0.18f : 0.10f) * opacity);
+            canvas.DrawRoundRect(rect, corner, corner, _badgeTintPaint);
+
+            _badgeRingPaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha((isActive ? 0.72f : 0.44f) * opacity);
             canvas.DrawRoundRect(rect, corner, corner, _badgeRingPaint);
 
             var glyphTint = isActive ? packet.Palette.AccentColor1 : packet.Palette.AccentColor2;
             StyleLayoutHelper.DrawVisualGlyph(
                 canvas,
                 context.Fonts,
+                context.Legibility,
                 visual,
                 centerX: 0f,
                 centerY: 0f,
                 iconSizeDip: diameter * 0.62f,
                 tintColor: glyphTint,
-                opacity: opacity,
-                scratchPaint: _glyphPaint);
+                opacity: opacity);
         }
         finally
         {
@@ -498,6 +578,11 @@ public sealed class VisualStackStyleRenderer : IKineticStyleRenderer
 
     private static int FindActiveRowIndex(List<VisualStackRow> rows, int activeWordIndex)
     {
+        if (rows.Count == 0)
+        {
+            return -1;
+        }
+
         if (activeWordIndex <= 0)
         {
             return 0;

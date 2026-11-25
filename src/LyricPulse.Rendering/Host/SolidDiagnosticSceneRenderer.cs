@@ -90,7 +90,8 @@ public sealed class SolidDiagnosticSceneRenderer : ILyricSceneRenderer
                     packet.ActiveFontId,
                     packet.Palette.AccentColor1,
                     opacity: 1.0f,
-                    activeGlowColor: packet.Palette.AccentColor2);
+                    activeGlowColor: packet.Palette.AccentColor2,
+                    fonts: context.Fonts);
             }
             finally
             {

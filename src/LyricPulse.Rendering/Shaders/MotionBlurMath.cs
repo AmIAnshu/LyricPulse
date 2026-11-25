@@ -13,7 +13,8 @@ public static class MotionBlurMath
     public const float MaxBlurPxAt100Dpi = 22.0f;
 
     public const float BaselineBulgeStrength = 0.24f;
-    public const float MaxBulgeStrength = 0.40f;
+    /// <summary>Monotonic convex lens ceiling (f'(1) = 1 - 0.30 * 3.10 = +0.07 &gt; 0, zero fold-back).</summary>
+    public const float MaxBulgeStrength = 0.30f;
     public const float DefaultBulgePower = 2.10f;
     public const float MinBulgePower = 1.85f;
     public const float MaxBulgePower = 2.35f;

@@ -17,20 +17,20 @@ public sealed class PlaybackLifecycleChoreographerTests
     [Fact]
     public void PauseDimAndAutoFade_FollowsExact300msDimAnd8SecondFadeCurve()
     {
-        // Pure curve verification
+        // Pure curve verification (spec STY-04: 300ms dim -> 0.62 opacity, 8s hold, 450ms fade -> 0.00)
         PlaybackLifecycleChoreographer.EvaluatePauseOpacity(0.0f, out var active0).Should().Be(1.0f);
         active0.Should().BeTrue();
 
         var midDim = PlaybackLifecycleChoreographer.EvaluatePauseOpacity(0.15f, out var activeMid);
-        midDim.Should().BeInRange(0.45f, 1.0f);
+        midDim.Should().BeInRange(0.62f, 1.0f);
         activeMid.Should().BeTrue();
 
         var held = PlaybackLifecycleChoreographer.EvaluatePauseOpacity(2.5f, out var activeHold);
-        held.Should().BeApproximately(0.45f, 0.001f);
+        held.Should().BeApproximately(0.62f, 0.001f);
         activeHold.Should().BeTrue();
 
         var fading = PlaybackLifecycleChoreographer.EvaluatePauseOpacity(8.22f, out var activeFade);
-        fading.Should().BeInRange(0.01f, 0.45f);
+        fading.Should().BeInRange(0.01f, 0.62f);
         activeFade.Should().BeTrue();
 
         var gone = PlaybackLifecycleChoreographer.EvaluatePauseOpacity(8.60f, out var activeGone);
@@ -44,7 +44,7 @@ public sealed class PlaybackLifecycleChoreographerTests
 
         var pausedSnap = CreateSnapshot(demoDoc, TimeSpan.FromSeconds(1.5), MediaPlaybackState.Paused, pausedSinceUtc: t0);
         var at1s = choreographer.Advance(OverlayFrameAdapter.FromPlaybackSnapshot(pausedSnap, 800, 300, 1f, 1.0, 1f / 60f, utcNow: t0.AddSeconds(1.0)));
-        at1s.ContentOpacity.Should().BeApproximately(0.45f, 0.02f);
+        at1s.ContentOpacity.Should().BeApproximately(0.62f, 0.02f);
         at1s.IsAnimating.Should().BeTrue();
 
         var at9s = choreographer.Advance(OverlayFrameAdapter.FromPlaybackSnapshot(pausedSnap, 800, 300, 1f, 9.0, 1f / 60f, utcNow: t0.AddSeconds(9.0)));

@@ -9,17 +9,20 @@ namespace LyricPulse.Rendering.Styles;
 /// Authoritative Phase 3+ <see cref="ILyricSceneRenderer"/> coordinating
 /// <see cref="PlaybackLifecycleChoreographer"/> with registered kinetic style renderers
 /// (<c>Fisheye</c>, <c>Codestyle</c>, <c>VisualStack</c>, with graceful fallback to <c>Fisheye</c>
-/// for Phase 4 styles) and automatic state reset on style/track/seek changes.
+/// for Phase 4 styles). Synchronizes cross-thread Advance/Render/Dispose and preserves spring velocity
+/// across timing offset nudges (<c>OffsetGeneration</c>) while hard-resetting on style/track/seek jumps.
 /// </summary>
 public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
 {
     private readonly Dictionary<OverlayStyleId, IKineticStyleRenderer> _styles;
     private readonly IKineticStyleRenderer _fallbackStyle;
     private readonly PlaybackLifecycleChoreographer _lifecycle;
+    private readonly Lock _sync = new();
 
     private OverlayStyleId _lastRoutedStyle = OverlayStyleId.Fisheye;
     private long _lastTrackGeneration = -1;
     private long _lastSeekGeneration = -1;
+    private long _lastOffsetGeneration = -1;
     private LifecycleFrameState _lastLifecycle;
     private bool _disposed;
 
@@ -52,7 +55,16 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
 
     public OverlayStyleId StyleId => _lastRoutedStyle;
 
-    public LifecycleFrameState LastLifecycleState => _lastLifecycle;
+    public LifecycleFrameState LastLifecycleState
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _lastLifecycle;
+            }
+        }
+    }
 
     public IReadOnlyCollection<OverlayStyleId> RegisteredStyles => _styles.Keys;
 
@@ -61,79 +73,96 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
 
     public bool AdvancePhysics(in FrameRenderPacket packet)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var renderer = ResolveRenderer(packet.ActiveStyle);
-        var styleChanged = packet.ActiveStyle != _lastRoutedStyle;
-        var trackGen = packet.PlaybackSnapshot?.TrackGeneration ?? -1;
-        var seekGen = packet.PlaybackSnapshot?.SeekGeneration ?? -1;
-
-        if (styleChanged || trackGen != _lastTrackGeneration || seekGen != _lastSeekGeneration)
+        lock (_sync)
         {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            var renderer = ResolveRenderer(packet.ActiveStyle);
+            var styleChanged = packet.ActiveStyle != _lastRoutedStyle;
+            var trackGen = packet.PlaybackSnapshot?.TrackGeneration ?? -1;
+            var seekGen = packet.PlaybackSnapshot?.SeekGeneration ?? -1;
+            var offsetGen = packet.PlaybackSnapshot?.OffsetGeneration ?? -1;
+
+            var trackChanged = trackGen != _lastTrackGeneration;
+            var offsetNudged = _lastOffsetGeneration >= 0 && offsetGen > _lastOffsetGeneration;
+            var hardSeek = _lastSeekGeneration >= 0 && seekGen != _lastSeekGeneration && !offsetNudged;
+
             _lastRoutedStyle = packet.ActiveStyle;
             _lastTrackGeneration = trackGen;
             _lastSeekGeneration = seekGen;
-            renderer.ResetState();
-        }
+            _lastOffsetGeneration = offsetGen;
 
-        _lastLifecycle = _lifecycle.Advance(in packet);
-        var styleActive = _lastLifecycle.ShouldRenderLyrics && renderer.Advance(in packet, in _lastLifecycle);
-        return _lastLifecycle.IsAnimating || styleActive;
+            // Soft-retarget springs on timing offset nudges (conserving velocity); hard-reset on style/track/seek jumps
+            if (styleChanged || trackChanged || hardSeek)
+            {
+                renderer.ResetState();
+            }
+
+            _lastLifecycle = _lifecycle.Advance(in packet);
+            var styleActive = _lastLifecycle.ShouldRenderLyrics && renderer.Advance(in packet, in _lastLifecycle);
+            return _lastLifecycle.IsAnimating || styleActive;
+        }
     }
 
     public void Render(in StyleRenderContext context)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var canvas = context.Canvas;
-        canvas.Clear(SKColors.Transparent);
-
-        var lifecycle = _lastLifecycle;
-        var packet = context.Packet;
-
-        if (lifecycle.ShouldRenderLyrics)
+        lock (_sync)
         {
-            var effectiveOpacity = Math.Clamp(packet.GlobalOpacity * lifecycle.ContentOpacity, 0f, 1f);
-            if (effectiveOpacity > 0.004f)
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            var canvas = context.Canvas;
+            canvas.Clear(SKColors.Transparent);
+
+            var lifecycle = _lastLifecycle;
+            var packet = context.Packet;
+
+            if (lifecycle.ShouldRenderLyrics)
             {
-                var opacitySave = context.Legibility.BeginGlobalOpacityLayer(canvas, effectiveOpacity);
-                try
+                var effectiveOpacity = Math.Clamp(packet.GlobalOpacity * lifecycle.ContentOpacity, 0f, 1f);
+                if (effectiveOpacity > 0.004f)
                 {
-                    var renderer = ResolveRenderer(packet.ActiveStyle);
-                    renderer.Render(in context, in lifecycle);
-                }
-                finally
-                {
-                    LegibilityPipeline.EndGlobalOpacityLayer(canvas, opacitySave);
+                    var opacitySave = context.Legibility.BeginGlobalOpacityLayer(canvas, effectiveOpacity);
+                    try
+                    {
+                        var renderer = ResolveRenderer(packet.ActiveStyle);
+                        renderer.Render(in context, in lifecycle);
+                    }
+                    finally
+                    {
+                        LegibilityPipeline.EndGlobalOpacityLayer(canvas, opacitySave);
+                    }
                 }
             }
-        }
 
-        if (lifecycle.ShowInstrumentalIndicator)
-        {
-            _lifecycle.DrawInstrumentalIndicator(in context, in lifecycle);
-        }
+            if (lifecycle.ShowInstrumentalIndicator)
+            {
+                _lifecycle.DrawInstrumentalIndicator(in context, in lifecycle);
+            }
 
-        if (lifecycle.ShouldRenderToast)
-        {
-            _lifecycle.DrawOffsetToast(in context, in lifecycle);
+            if (lifecycle.ShouldRenderToast)
+            {
+                _lifecycle.DrawOffsetToast(in context, in lifecycle);
+            }
         }
     }
 
     public void Dispose()
     {
-        if (_disposed)
+        lock (_sync)
         {
-            return;
-        }
+            if (_disposed)
+            {
+                return;
+            }
 
-        _disposed = true;
-        foreach (var renderer in _styles.Values.Distinct())
-        {
-            renderer.Dispose();
-        }
+            _disposed = true;
+            foreach (var renderer in _styles.Values.Distinct())
+            {
+                renderer.Dispose();
+            }
 
-        _styles.Clear();
-        _lifecycle.Dispose();
+            _styles.Clear();
+            _lifecycle.Dispose();
+        }
     }
 }

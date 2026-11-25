@@ -7,7 +7,7 @@ namespace LyricPulse.App.Platform;
 
 /// <summary>
 /// AOT-safe Win32 <c>RegisterHotKey</c> / <c>UnregisterHotKey</c> manager running on a dedicated
-/// hidden <c>HWND_MESSAGE</c> pump thread (zero <c>WH_KEYBOARD_LL</c> hooks, zero crashes on shortcut conflicts).
+/// hidden <c>HWND_MESSAGE</c> pump thread (zero <c>WH_KEYBOARD_LL</c> hooks, zero timeout disposal races).
 /// </summary>
 public sealed class GlobalHotkeyManager : IGlobalHotkeyService
 {
@@ -40,7 +40,8 @@ public sealed class GlobalHotkeyManager : IGlobalHotkeyService
 
     public bool TryRegister(HotkeyAction action, string gesture, out string? errorMessage)
     {
-        if (_disposed || _messageHwnd == 0)
+        var hwnd = Volatile.Read(ref _messageHwnd);
+        if (Volatile.Read(ref _disposed) || hwnd == 0)
         {
             errorMessage = "Global hotkey service is unavailable.";
             return false;
@@ -51,16 +52,17 @@ public sealed class GlobalHotkeyManager : IGlobalHotkeyService
             return false;
         }
 
-        using var done = new ManualResetEventSlim(false);
+        // TaskCompletionSource never requires disposal, preventing ObjectDisposedException on timeout
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var command = new HotkeyCommand(
             CommandKind: HotkeyCommandKind.Register,
             Action: action,
             Parsed: parsed,
-            Completion: done);
+            Completion: tcs);
 
         _commands.Enqueue(command);
-        if (!Win32Native.PostMessage(_messageHwnd, WmAppProcessQueue, 0, 0) ||
-            !done.Wait(TimeSpan.FromSeconds(2)))
+        if (!Win32Native.PostMessage(hwnd, WmAppProcessQueue, 0, 0) ||
+            !tcs.Task.Wait(TimeSpan.FromSeconds(2)))
         {
             errorMessage = $"Timed out registering shortcut '{parsed.NormalizedGesture}'.";
             return false;
@@ -93,36 +95,37 @@ public sealed class GlobalHotkeyManager : IGlobalHotkeyService
 
     public void UnregisterAll()
     {
-        if (_disposed || _messageHwnd == 0)
+        var hwnd = Volatile.Read(ref _messageHwnd);
+        if (Volatile.Read(ref _disposed) || hwnd == 0)
         {
             return;
         }
 
-        using var done = new ManualResetEventSlim(false);
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         var command = new HotkeyCommand(
             CommandKind: HotkeyCommandKind.UnregisterAll,
             Action: default,
             Parsed: default,
-            Completion: done);
+            Completion: tcs);
 
         _commands.Enqueue(command);
-        if (Win32Native.PostMessage(_messageHwnd, WmAppProcessQueue, 0, 0))
+        if (Win32Native.PostMessage(hwnd, WmAppProcessQueue, 0, 0))
         {
-            done.Wait(TimeSpan.FromSeconds(2));
+            tcs.Task.Wait(TimeSpan.FromSeconds(2));
         }
     }
 
     public void Dispose()
     {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _disposed, true))
         {
             return;
         }
 
-        _disposed = true;
-        if (_messageHwnd != 0)
+        var hwnd = Volatile.Read(ref _messageHwnd);
+        if (hwnd != 0)
         {
-            _ = Win32Native.PostMessage(_messageHwnd, WmAppShutdown, 0, 0);
+            _ = Win32Native.PostMessage(hwnd, WmAppShutdown, 0, 0);
         }
 
         _messageThread.Join(TimeSpan.FromSeconds(1));
@@ -131,7 +134,7 @@ public sealed class GlobalHotkeyManager : IGlobalHotkeyService
 
     private void RunMessageLoop()
     {
-        _messageHwnd = Win32Native.CreateWindowEx(
+        var hwnd = Win32Native.CreateWindowEx(
             dwExStyle: 0,
             lpClassName: "STATIC",
             lpWindowName: "LyricPulseHotkeyHost",
@@ -145,15 +148,16 @@ public sealed class GlobalHotkeyManager : IGlobalHotkeyService
             hInstance: 0,
             lpParam: 0);
 
+        Volatile.Write(ref _messageHwnd, hwnd);
         _windowReady.Set();
-        if (_messageHwnd == 0)
+        if (hwnd == 0)
         {
             return;
         }
 
         try
         {
-            while (Win32Native.GetMessage(out var msg, _messageHwnd, 0, 0) > 0)
+            while (Win32Native.GetMessage(out var msg, hwnd, 0, 0) > 0)
             {
                 if (msg.Message == WmAppShutdown)
                 {
@@ -162,7 +166,7 @@ public sealed class GlobalHotkeyManager : IGlobalHotkeyService
 
                 if (msg.Message == WmAppProcessQueue)
                 {
-                    DrainCommandsOnMessageThread();
+                    DrainCommandsOnMessageThread(hwnd);
                     continue;
                 }
 
@@ -183,13 +187,13 @@ public sealed class GlobalHotkeyManager : IGlobalHotkeyService
         }
         finally
         {
-            UnregisterAllOnMessageThread();
-            _ = Win32Native.DestroyWindow(_messageHwnd);
-            _messageHwnd = 0;
+            UnregisterAllOnMessageThread(hwnd);
+            _ = Win32Native.DestroyWindow(hwnd);
+            Volatile.Write(ref _messageHwnd, 0);
         }
     }
 
-    private void DrainCommandsOnMessageThread()
+    private void DrainCommandsOnMessageThread(nint hwnd)
     {
         while (_commands.TryDequeue(out var cmd))
         {
@@ -197,7 +201,7 @@ public sealed class GlobalHotkeyManager : IGlobalHotkeyService
             {
                 if (cmd.CommandKind == HotkeyCommandKind.UnregisterAll)
                 {
-                    UnregisterAllOnMessageThread();
+                    UnregisterAllOnMessageThread(hwnd);
                     cmd.Succeeded = true;
                 }
                 else
@@ -205,11 +209,11 @@ public sealed class GlobalHotkeyManager : IGlobalHotkeyService
                     var id = HotkeyIdOffset + (int)cmd.Action;
                     if (_registeredIds.ContainsKey(id))
                     {
-                        _ = Win32Native.UnregisterHotKey(_messageHwnd, id);
+                        _ = Win32Native.UnregisterHotKey(hwnd, id);
                         _registeredIds.Remove(id);
                     }
 
-                    if (Win32Native.RegisterHotKey(_messageHwnd, id, cmd.Parsed.Modifiers, cmd.Parsed.VirtualKey))
+                    if (Win32Native.RegisterHotKey(hwnd, id, cmd.Parsed.Modifiers, cmd.Parsed.VirtualKey))
                     {
                         _registeredIds[id] = cmd.Action;
                         cmd.Succeeded = true;
@@ -226,16 +230,16 @@ public sealed class GlobalHotkeyManager : IGlobalHotkeyService
             }
             finally
             {
-                cmd.Completion.Set();
+                cmd.Completion.TrySetResult(cmd.Succeeded);
             }
         }
     }
 
-    private void UnregisterAllOnMessageThread()
+    private void UnregisterAllOnMessageThread(nint hwnd)
     {
         foreach (var id in _registeredIds.Keys)
         {
-            _ = Win32Native.UnregisterHotKey(_messageHwnd, id);
+            _ = Win32Native.UnregisterHotKey(hwnd, id);
         }
 
         _registeredIds.Clear();
@@ -269,12 +273,12 @@ public sealed class GlobalHotkeyManager : IGlobalHotkeyService
         HotkeyCommandKind CommandKind,
         HotkeyAction Action,
         ParsedHotkeyGesture Parsed,
-        ManualResetEventSlim Completion)
+        TaskCompletionSource<bool> Completion)
     {
         public HotkeyCommandKind CommandKind { get; } = CommandKind;
         public HotkeyAction Action { get; } = Action;
         public ParsedHotkeyGesture Parsed { get; } = Parsed;
-        public ManualResetEventSlim Completion { get; } = Completion;
+        public TaskCompletionSource<bool> Completion { get; } = Completion;
         public bool Succeeded { get; set; }
         public string? ErrorMessage { get; set; }
     }

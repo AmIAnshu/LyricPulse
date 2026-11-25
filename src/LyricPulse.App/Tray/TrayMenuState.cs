@@ -19,7 +19,8 @@ public sealed record TrayOffsetOption(
 /// <summary>
 /// Pure, immutable presentation model for the Windows System Tray icon, tooltip, and NativeMenu
 /// adhering strictly to <c>design-system/lyricpulse/pages/tray.md</c> (zero emojis in chrome,
-/// Unicode minus U+2212 sign convention, 38-char header truncation, 96-char tooltip cap).
+/// Unicode minus U+2212 sign convention, grapheme-safe 38-char header truncation, 96-char tooltip cap,
+/// accurate Loading/Instrumental/Error/Fullscreen states, hotkey conflict visibility, and OS Reduced Motion sync).
 /// </summary>
 public sealed record TrayMenuState(
     string HeaderPrimaryLine,
@@ -27,19 +28,26 @@ public sealed record TrayMenuState(
     string TooltipText,
     TrayIconVisualState IconState,
     bool IsLyricsVisible,
-    string ShowLyricsGestureHint,
+    string? ShowLyricsGestureHint,
+    string? HotkeyConflictNotice,
     ImmutableArray<TrayStyleOption> PinnedStyles,
     string TimingOffsetHeader,
     ImmutableArray<TrayOffsetOption> OffsetOptions,
     bool CanNudgeOffset,
     string OffsetPersistenceCaption,
+    bool CanRetryLyricsFetch,
+    bool IsUniversalPlayerMode,
     bool IsDemoMode,
-    bool IsReducedMotion)
+    bool IsEffectiveReducedMotion,
+    bool IsOsReducedMotion,
+    string ReducedMotionLabel)
 {
     public const int MaxHeaderChars = 38;
     public const int MaxTooltipChars = 96;
 
-    public static TrayMenuState FromSnapshot(OverlayPlaybackSnapshot snapshot)
+    public static TrayMenuState FromSnapshot(
+        OverlayPlaybackSnapshot snapshot,
+        IReadOnlyDictionary<HotkeyAction, string>? hotkeyConflicts = null)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
@@ -48,14 +56,16 @@ public sealed record TrayMenuState(
         var hasTrack = snapshot.Track is { IsValid: true };
 
         var headerPrimary = BuildHeaderPrimary(snapshot, hasTrack);
-        var headerSecondary = BuildHeaderSecondary(snapshot, hasTrack, hasSyncedLyrics);
+        var headerSecondary = BuildHeaderSecondary(snapshot, hasTrack);
         var iconState = ResolveIconState(snapshot, hasTrack, hasSyncedLyrics);
-        var tooltip = BuildTooltip(snapshot, hasTrack);
+
+        var conflictNotice = BuildHotkeyConflictNotice(hotkeyConflicts);
+        var tooltip = BuildTooltip(snapshot, hasTrack, conflictNotice is not null);
 
         var pinned = BuildPinnedStyleOptions(settings);
         var offsetSec = snapshot.TimingOffset.Offset.TotalSeconds;
         var hasNonZeroOffset = Math.Abs(offsetSec) >= 0.005;
-        var canNudge = hasSyncedLyrics;
+        var canNudge = hasSyncedLyrics && snapshot.IsLyricsVisible;
 
         var offsetHeader = FormatTimingOffsetHeader(snapshot.TimingOffset.Offset);
         var offsetOptions = ImmutableArray.Create(
@@ -71,9 +81,21 @@ public sealed record TrayMenuState(
                 ? "Saved per song"
                 : "Resets automatically on next track";
 
-        var toggleHint = settings.GlobalHotkeys.TryGetValue(HotkeyAction.ToggleLyrics, out var gesture)
-            ? gesture
-            : "Ctrl+Shift+L";
+        // Strip conflicting shortcut hint from menu label so dead hotkeys are never advertised
+        var toggleHasConflict = hotkeyConflicts is not null && hotkeyConflicts.ContainsKey(HotkeyAction.ToggleLyrics);
+        string? toggleHint = toggleHasConflict
+            ? null
+            : settings.GlobalHotkeys.TryGetValue(HotkeyAction.ToggleLyrics, out var gesture)
+                ? gesture
+                : "Ctrl+Shift+L";
+
+        var canRetry = !snapshot.IsDemoMode &&
+                       hasTrack &&
+                       snapshot.LyricsStatus is LyricsStatus.Error or LyricsStatus.NotFound;
+
+        var reducedLabel = snapshot.IsOsReducedMotion
+            ? "Reduced Motion (Windows setting)"
+            : "Reduced Motion";
 
         return new TrayMenuState(
             HeaderPrimaryLine: headerPrimary,
@@ -82,13 +104,18 @@ public sealed record TrayMenuState(
             IconState: iconState,
             IsLyricsVisible: settings.LyricsVisible,
             ShowLyricsGestureHint: toggleHint,
+            HotkeyConflictNotice: conflictNotice,
             PinnedStyles: pinned,
             TimingOffsetHeader: offsetHeader,
             OffsetOptions: offsetOptions,
             CanNudgeOffset: canNudge,
             OffsetPersistenceCaption: persistenceCaption,
+            CanRetryLyricsFetch: canRetry,
+            IsUniversalPlayerMode: settings.UniversalPlayerMode,
             IsDemoMode: snapshot.IsDemoMode,
-            IsReducedMotion: settings.ReducedMotion);
+            IsEffectiveReducedMotion: snapshot.IsEffectiveReducedMotion,
+            IsOsReducedMotion: snapshot.IsOsReducedMotion,
+            ReducedMotionLabel: reducedLabel);
     }
 
     public bool Equals(TrayMenuState? other)
@@ -109,11 +136,16 @@ public sealed record TrayMenuState(
                IconState == other.IconState &&
                IsLyricsVisible == other.IsLyricsVisible &&
                ShowLyricsGestureHint == other.ShowLyricsGestureHint &&
+               HotkeyConflictNotice == other.HotkeyConflictNotice &&
                TimingOffsetHeader == other.TimingOffsetHeader &&
                CanNudgeOffset == other.CanNudgeOffset &&
                OffsetPersistenceCaption == other.OffsetPersistenceCaption &&
+               CanRetryLyricsFetch == other.CanRetryLyricsFetch &&
+               IsUniversalPlayerMode == other.IsUniversalPlayerMode &&
                IsDemoMode == other.IsDemoMode &&
-               IsReducedMotion == other.IsReducedMotion &&
+               IsEffectiveReducedMotion == other.IsEffectiveReducedMotion &&
+               IsOsReducedMotion == other.IsOsReducedMotion &&
+               ReducedMotionLabel == other.ReducedMotionLabel &&
                PinnedStyles.SequenceEqual(other.PinnedStyles) &&
                OffsetOptions.SequenceEqual(other.OffsetOptions);
     }
@@ -126,9 +158,12 @@ public sealed record TrayMenuState(
         hc.Add(TooltipText);
         hc.Add(IconState);
         hc.Add(IsLyricsVisible);
+        hc.Add(HotkeyConflictNotice);
         hc.Add(TimingOffsetHeader);
+        hc.Add(CanRetryLyricsFetch);
+        hc.Add(IsUniversalPlayerMode);
         hc.Add(IsDemoMode);
-        hc.Add(IsReducedMotion);
+        hc.Add(IsEffectiveReducedMotion);
         hc.Add(PinnedStyles.Length);
         return hc.ToHashCode();
     }
@@ -166,21 +201,47 @@ public sealed record TrayMenuState(
         return seconds < 0 ? $"\u2212{absStr}s" : $"+{absStr}s";
     }
 
-    public static string TruncateMiddle(string text, int maxLength)
+    /// <summary>Grapheme-cluster-safe middle truncation preventing broken UTF-16 surrogate pairs.</summary>
+    public static string TruncateMiddle(string text, int maxElements)
     {
-        if (string.IsNullOrEmpty(text) || text.Length <= maxLength)
+        if (string.IsNullOrEmpty(text))
         {
             return text;
         }
 
-        if (maxLength <= 3)
+        var info = new StringInfo(text);
+        var count = info.LengthInTextElements;
+        if (count <= maxElements)
         {
-            return text[..maxLength];
+            return text;
         }
 
-        var headLen = (maxLength - 1) / 2;
-        var tailLen = maxLength - 1 - headLen;
-        return $"{text[..headLen].TrimEnd()}\u2026{text[^tailLen..].TrimStart()}";
+        if (maxElements <= 3)
+        {
+            return info.SubstringByTextElements(0, maxElements);
+        }
+
+        var headLen = (maxElements - 1) / 2;
+        var tailLen = maxElements - 1 - headLen;
+        var head = info.SubstringByTextElements(0, headLen).TrimEnd();
+        var tail = info.SubstringByTextElements(count - tailLen, tailLen).TrimStart();
+        return $"{head}\u2026{tail}";
+    }
+
+    private static string TruncateEnd(string text, int maxElements)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return text;
+        }
+
+        var info = new StringInfo(text);
+        if (info.LengthInTextElements <= maxElements)
+        {
+            return text;
+        }
+
+        return info.SubstringByTextElements(0, Math.Max(1, maxElements - 1)).TrimEnd() + "\u2026";
     }
 
     private static string BuildHeaderPrimary(OverlayPlaybackSnapshot snapshot, bool hasTrack)
@@ -192,7 +253,7 @@ public sealed record TrayMenuState(
 
         if (!hasTrack || snapshot.Track is null)
         {
-            return "Waiting for Spotify / Apple Music...";
+            return "No media playing";
         }
 
         var titleArtist = string.IsNullOrWhiteSpace(snapshot.Track.RawArtist)
@@ -200,14 +261,19 @@ public sealed record TrayMenuState(
             : $"{snapshot.Track.RawTitle} \u2014 {snapshot.Track.RawArtist}";
 
         var raw = snapshot.PlaybackState == MediaPlaybackState.Paused
-            ? $"Paused \u2014 {titleArtist}"
-            : titleArtist;
+            ? $"Paused: {titleArtist}"
+            : $"Playing: {titleArtist}";
 
         return TruncateMiddle(raw, MaxHeaderChars);
     }
 
-    private static string BuildHeaderSecondary(OverlayPlaybackSnapshot snapshot, bool hasTrack, bool hasSyncedLyrics)
+    private static string BuildHeaderSecondary(OverlayPlaybackSnapshot snapshot, bool hasTrack)
     {
+        if (snapshot.IsFullscreenHidden)
+        {
+            return "Paused for fullscreen app";
+        }
+
         if (snapshot.IsDemoMode)
         {
             return "Demo Mode \u00B7 Synced lyrics";
@@ -221,11 +287,12 @@ public sealed record TrayMenuState(
         var player = FormatPlayerName(snapshot.PlayerKind);
         var status = snapshot.LyricsStatus switch
         {
+            LyricsStatus.Loading => "Fetching lyrics\u2026",
             LyricsStatus.Synced => "Synced lyrics",
             LyricsStatus.Instrumental => "Instrumental track",
-            LyricsStatus.PlainOnly => "Unsynced lyrics only",
-            LyricsStatus.Error => "Lyrics lookup error",
-            _ => hasSyncedLyrics ? "Synced lyrics" : "No synced lyrics found"
+            LyricsStatus.PlainOnly => "No synced lyrics",
+            LyricsStatus.Error => "Offline / lyrics unavailable",
+            _ => "No synced lyrics"
         };
 
         return $"{player} \u00B7 {status}";
@@ -236,9 +303,10 @@ public sealed record TrayMenuState(
         bool hasTrack,
         bool hasSyncedLyrics)
     {
+        // Diagonal slash strictly for Overlay Hidden / Fullscreen Auto-Hidden (NEVER for Paused!)
         if (!snapshot.Settings.LyricsVisible || snapshot.IsFullscreenHidden)
         {
-            return TrayIconVisualState.PausedOrHidden;
+            return TrayIconVisualState.OverlayHidden;
         }
 
         if (snapshot.IsDemoMode)
@@ -246,45 +314,83 @@ public sealed record TrayMenuState(
             return TrayIconVisualState.Playing;
         }
 
-        if (!hasTrack || snapshot.PlaybackState is MediaPlaybackState.Closed or MediaPlaybackState.Stopped)
+        if (!hasTrack ||
+            snapshot.PlaybackState is MediaPlaybackState.Closed or MediaPlaybackState.Stopped or MediaPlaybackState.Paused or MediaPlaybackState.Changing)
         {
             return TrayIconVisualState.Idle;
         }
 
-        if (snapshot.PlaybackState == MediaPlaybackState.Paused)
+        // Loading and Instrumental tracks use clean neutral Idle waveform (never false amber error!)
+        if (snapshot.LyricsStatus is LyricsStatus.Loading or LyricsStatus.Instrumental)
         {
-            return TrayIconVisualState.PausedOrHidden;
+            return TrayIconVisualState.Idle;
         }
 
         return hasSyncedLyrics ? TrayIconVisualState.Playing : TrayIconVisualState.Error;
     }
 
-    private static string BuildTooltip(OverlayPlaybackSnapshot snapshot, bool hasTrack)
+    private static string BuildTooltip(OverlayPlaybackSnapshot snapshot, bool hasTrack, bool hasHotkeyConflict)
     {
-        if (!snapshot.Settings.LyricsVisible)
+        string baseText;
+        if (snapshot.IsFullscreenHidden)
         {
-            return "LyricPulse \u2014 Lyrics hidden (Right-click for menu)";
+            baseText = "LyricPulse \u2014 Paused for fullscreen app";
+        }
+        else if (!snapshot.Settings.LyricsVisible)
+        {
+            baseText = "LyricPulse \u2014 Lyrics hidden (Left-click to show)";
+        }
+        else
+        {
+            var styleName = GetStyleDisplayName(snapshot.Settings.ActiveStyle);
+            var offsetSec = snapshot.TimingOffset.Offset.TotalSeconds;
+            var suffix = Math.Abs(offsetSec) >= 0.005 ? FormatSignedSeconds(offsetSec) : styleName;
+
+            if (snapshot.IsDemoMode)
+            {
+                baseText = $"LyricPulse \u2014 Demo: Neon Horizon ({suffix})";
+            }
+            else if (!hasTrack || snapshot.Track is null)
+            {
+                baseText = "LyricPulse \u2014 Ready (Left-click for Demo, right-click for menu)";
+            }
+            else if (snapshot.PlaybackState == MediaPlaybackState.Paused)
+            {
+                baseText = $"LyricPulse \u2014 Paused \u00B7 {snapshot.Track.RawTitle}";
+            }
+            else
+            {
+                baseText = snapshot.LyricsStatus switch
+                {
+                    LyricsStatus.Loading => $"LyricPulse \u2014 Fetching lyrics \u00B7 {snapshot.Track.RawTitle}",
+                    LyricsStatus.Instrumental => $"LyricPulse \u2014 Instrumental \u00B7 {snapshot.Track.RawTitle}",
+                    LyricsStatus.Error => $"LyricPulse \u2014 Offline / lyrics unavailable \u00B7 {snapshot.Track.RawTitle}",
+                    LyricsStatus.NotFound or LyricsStatus.PlainOnly => $"LyricPulse \u2014 No synced lyrics \u00B7 {snapshot.Track.RawTitle}",
+                    _ => $"LyricPulse \u2014 {snapshot.Track.RawTitle} \u00B7 {snapshot.Track.RawArtist} ({suffix})"
+                };
+            }
         }
 
-        var styleName = GetStyleDisplayName(snapshot.Settings.ActiveStyle);
-        var offsetSec = snapshot.TimingOffset.Offset.TotalSeconds;
-        var suffix = Math.Abs(offsetSec) >= 0.005 ? FormatSignedSeconds(offsetSec) : styleName;
-
-        if (snapshot.IsDemoMode)
+        if (hasHotkeyConflict)
         {
-            return TruncateEnd($"LyricPulse \u2014 Demo: Neon Horizon ({suffix})", MaxTooltipChars);
+            const string conflictSuffix = " [Shortcut conflict]";
+            var bodyBudget = Math.Max(16, MaxTooltipChars - conflictSuffix.Length);
+            return TruncateEnd(baseText, bodyBudget) + conflictSuffix;
         }
-
-        if (!hasTrack || snapshot.Track is null)
-        {
-            return "LyricPulse \u2014 Ready (Waiting for Spotify or Apple Music)";
-        }
-
-        var baseText = snapshot.PlaybackState == MediaPlaybackState.Paused
-            ? $"LyricPulse \u2014 Paused \u00B7 {snapshot.Track.RawTitle}"
-            : $"LyricPulse \u2014 {snapshot.Track.RawTitle} \u00B7 {snapshot.Track.RawArtist} ({suffix})";
 
         return TruncateEnd(baseText, MaxTooltipChars);
+    }
+
+    private static string? BuildHotkeyConflictNotice(IReadOnlyDictionary<HotkeyAction, string>? conflicts)
+    {
+        if (conflicts is null || conflicts.Count == 0)
+        {
+            return null;
+        }
+
+        return conflicts.Count == 1
+            ? TruncateEnd($"Shortcut conflict: {conflicts.Values.First()}", MaxHeaderChars + 14)
+            : $"Shortcut conflicts: {conflicts.Count} hotkeys in use by another app";
     }
 
     private static ImmutableArray<TrayStyleOption> BuildPinnedStyleOptions(AppSettings settings)
@@ -326,7 +432,4 @@ public sealed record TrayMenuState(
         MediaPlayerKind.BrowserOrGeneric => "Media Player",
         _ => "Windows Media"
     };
-
-    private static string TruncateEnd(string text, int maxLength) =>
-        text.Length <= maxLength ? text : $"{text[..(maxLength - 1)].TrimEnd()}\u2026";
 }

@@ -22,7 +22,7 @@ public sealed class Win32OverlayInterop : IOverlayWindowPlatform
     {
         var isDirectOrWinUiComposition = (currentExStyle & Win32Native.WS_EX_NOREDIRECTIONBITMAP) != 0;
         shouldCallSetLayeredWindowAttributes = !isDirectOrWinUiComposition;
-        return currentExStyle | RequiredClickThroughExStyles;
+        return (currentExStyle & ~Win32Native.WS_EX_APPWINDOW) | RequiredClickThroughExStyles;
     }
 
     public void ApplyClickThroughOverlayStyles(nint windowHandle)

@@ -22,6 +22,7 @@ internal static partial class Win32Native
 
     public const nint WS_EX_TRANSPARENT = 0x00000020;
     public const nint WS_EX_TOOLWINDOW = 0x00000080;
+    public const nint WS_EX_APPWINDOW = 0x00040000;
     public const nint WS_EX_LAYERED = 0x00080000;
     public const nint WS_EX_NOREDIRECTIONBITMAP = 0x00200000;
     public const nint WS_EX_NOACTIVATE = 0x08000000;
@@ -49,6 +50,7 @@ internal static partial class Win32Native
 
     public const uint SPI_GETCLIENTAREAANIMATION = 0x1042;
 
+    public const uint WM_SETTINGCHANGE = 0x001A;
     public const uint WM_DISPLAYCHANGE = 0x007E;
     public const uint WM_POWERBROADCAST = 0x0218;
     public const uint WM_DPICHANGED = 0x02E0;

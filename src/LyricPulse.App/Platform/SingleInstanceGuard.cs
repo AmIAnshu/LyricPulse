@@ -4,38 +4,48 @@ namespace LyricPulse.App.Platform;
 
 /// <summary>
 /// Single-instance Windows host guard backed by <c>Local\LyricPulse.SingleInstance</c> mutex
-/// (with <see cref="AbandonedMutexException"/> recovery) and <c>Local\LyricPulse.ShowWindow</c>
-/// <see cref="EventWaitHandle"/> activation handoff (&lt;20ms second-launch wakeup).
+/// (with <see cref="AbandonedMutexException"/> recovery), <c>Local\LyricPulse.ShowWindow</c>,
+/// and <c>Local\LyricPulse.StartDemo</c> <see cref="EventWaitHandle"/> handoffs (&lt;20ms wakeup).
 /// </summary>
 public sealed class SingleInstanceGuard : IDisposable
 {
     public const string DefaultMutexName = @"Local\LyricPulse.SingleInstance";
     public const string DefaultShowWindowEventName = @"Local\LyricPulse.ShowWindow";
+    public const string DefaultStartDemoEventName = @"Local\LyricPulse.StartDemo";
 
     private readonly Mutex _mutex;
     private readonly EventWaitHandle _showEvent;
+    private readonly EventWaitHandle _demoEvent;
     private readonly ManualResetEventSlim _shutdownEvent = new(false);
     private Thread? _listenerThread;
     private bool _ownsMutex;
     private bool _disposed;
 
-    private SingleInstanceGuard(Mutex mutex, EventWaitHandle showEvent, bool ownsMutex)
+    private SingleInstanceGuard(Mutex mutex, EventWaitHandle showEvent, EventWaitHandle demoEvent, bool ownsMutex)
     {
         _mutex = mutex;
         _showEvent = showEvent;
+        _demoEvent = demoEvent;
         _ownsMutex = ownsMutex;
     }
 
     /// <summary>
     /// Attempts to become the primary process instance. Returns an owned guard on success,
-    /// or signals the already-running instance and returns <see langword="null"/>.
+    /// or signals the already-running instance (including <paramref name="requestDemoMode"/>)
+    /// and returns <see langword="null"/>.
     /// </summary>
     public static SingleInstanceGuard? TryAcquirePrimaryOrSignalExisting(
         string mutexName = DefaultMutexName,
-        string showWindowEventName = DefaultShowWindowEventName)
+        string showWindowEventName = DefaultShowWindowEventName,
+        bool requestDemoMode = false,
+        string? startDemoEventName = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(mutexName);
         ArgumentException.ThrowIfNullOrWhiteSpace(showWindowEventName);
+
+        var demoEventName = string.IsNullOrWhiteSpace(startDemoEventName)
+            ? $"{showWindowEventName}.Demo"
+            : startDemoEventName;
 
         var mutex = new Mutex(initiallyOwned: true, name: mutexName, out var createdNew);
 
@@ -48,31 +58,36 @@ public sealed class SingleInstanceGuard : IDisposable
             }
             catch (AbandonedMutexException)
             {
-                // Previous owner crashed abnormally; ownership now legally belongs to this process.
                 acquiredAbandoned = true;
             }
 
             if (!acquiredAbandoned)
             {
                 mutex.Dispose();
-                SignalExistingInstance(showWindowEventName);
+                if (requestDemoMode)
+                {
+                    SignalExistingInstance(demoEventName);
+                }
+                else
+                {
+                    SignalExistingInstance(showWindowEventName);
+                }
+
                 return null;
             }
         }
 
-        var showEvent = new EventWaitHandle(
-            initialState: false,
-            mode: EventResetMode.AutoReset,
-            name: showWindowEventName);
+        var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, showWindowEventName);
+        var demoEvent = new EventWaitHandle(false, EventResetMode.AutoReset, demoEventName);
 
-        return new SingleInstanceGuard(mutex, showEvent, ownsMutex: true);
+        return new SingleInstanceGuard(mutex, showEvent, demoEvent, ownsMutex: true);
     }
 
-    public static bool SignalExistingInstance(string showWindowEventName = DefaultShowWindowEventName)
+    public static bool SignalExistingInstance(string eventName = DefaultShowWindowEventName)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(showWindowEventName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(eventName);
 
-        if (!EventWaitHandle.TryOpenExisting(showWindowEventName, out var existingEvent))
+        if (!EventWaitHandle.TryOpenExisting(eventName, out var existingEvent))
         {
             return false;
         }
@@ -85,7 +100,8 @@ public sealed class SingleInstanceGuard : IDisposable
 
     public void StartActivationListener(
         Action onShowRequested,
-        Action<Action>? dispatchCallback = null)
+        Action<Action>? dispatchCallback = null,
+        Action? onDemoRequested = null)
     {
         ArgumentNullException.ThrowIfNull(onShowRequested);
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -96,18 +112,20 @@ public sealed class SingleInstanceGuard : IDisposable
         }
 
         var dispatch = dispatchCallback ?? DefaultAvaloniaDispatch;
+        var demoHandler = onDemoRequested ?? onShowRequested;
+
         _listenerThread = new Thread(() =>
         {
-            WaitHandle[] handles = [_showEvent, _shutdownEvent.WaitHandle];
+            WaitHandle[] handles = [_showEvent, _demoEvent, _shutdownEvent.WaitHandle];
             while (true)
             {
                 var signaled = WaitHandle.WaitAny(handles);
-                if (signaled == 1)
+                if (signaled == 2)
                 {
                     break;
                 }
 
-                dispatch(onShowRequested);
+                dispatch(signaled == 1 ? demoHandler : onShowRequested);
             }
         })
         {
@@ -129,6 +147,7 @@ public sealed class SingleInstanceGuard : IDisposable
         _shutdownEvent.Set();
         _listenerThread?.Join(TimeSpan.FromMilliseconds(500));
         _showEvent.Dispose();
+        _demoEvent.Dispose();
         _shutdownEvent.Dispose();
 
         if (_ownsMutex)

@@ -80,9 +80,18 @@ public sealed class SkiaAlbumColorExtractorTests
         extractor.Extract(new AlbumArtPayload("oversized", oversized))
             .Should().Be(AlbumAccentPalette.Default with { SourceAlbumHash = "oversized" });
 
-        // Decompression bomb PNG header claiming 10,000 x 10,000 (100 MP > 64 MP cap)
-        var bombHeaderPng = BuildSyntheticPngHeader(width: 10_000, height: 10_000);
-        extractor.Extract(new AlbumArtPayload("bomb", bombHeaderPng))
+        // Decompression bomb BMP header claiming 9,000 x 9,000 (81 MP > 64 MP cap)
+        // Verify SKCodec ACTUALLY parses it so this test cannot be false-green!
+        var bombHeaderBmp = BuildSyntheticBmpHeader(width: 9_000, height: 9_000);
+        using (var probeData = SKData.CreateCopy(bombHeaderBmp))
+        using (var probeCodec = SKCodec.Create(probeData))
+        {
+            probeCodec.Should().NotBeNull("bomb fixture must be accepted by SKCodec.Create so the >64MP guard executes");
+            probeCodec!.Info.Width.Should().Be(9_000);
+            probeCodec.Info.Height.Should().Be(9_000);
+        }
+
+        extractor.Extract(new AlbumArtPayload("bomb", bombHeaderBmp))
             .Should().Be(AlbumAccentPalette.Default with { SourceAlbumHash = "bomb" });
     }
 
@@ -122,57 +131,19 @@ public sealed class SkiaAlbumColorExtractorTests
         return data.ToArray();
     }
 
-    private static byte[] BuildSyntheticPngHeader(int width, int height)
+    private static byte[] BuildSyntheticBmpHeader(int width, int height)
     {
-        using var ms = new MemoryStream();
-        // PNG signature
-        ms.Write([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
-
-        // IHDR chunk (13 bytes payload)
-        Span<byte> ihdrData = stackalloc byte[13];
-        BinaryPrimitives.WriteInt32BigEndian(ihdrData[0..4], width);
-        BinaryPrimitives.WriteInt32BigEndian(ihdrData[4..8], height);
-        ihdrData[8] = 8; // bit depth
-        ihdrData[9] = 6; // RGBA
-        ihdrData[10] = 0;
-        ihdrData[11] = 0;
-        ihdrData[12] = 0;
-        WritePngChunk(ms, "IHDR"u8, ihdrData);
-
-        // Minimal IEND chunk
-        WritePngChunk(ms, "IEND"u8, ReadOnlySpan<byte>.Empty);
-        return ms.ToArray();
-    }
-
-    private static void WritePngChunk(Stream stream, ReadOnlySpan<byte> type, ReadOnlySpan<byte> data)
-    {
-        Span<byte> lenBytes = stackalloc byte[4];
-        BinaryPrimitives.WriteInt32BigEndian(lenBytes, data.Length);
-        stream.Write(lenBytes);
-        stream.Write(type);
-        stream.Write(data);
-
-        var crcBuf = new byte[type.Length + data.Length];
-        type.CopyTo(crcBuf);
-        data.CopyTo(crcBuf.AsSpan(type.Length));
-
-        Span<byte> crcBytes = stackalloc byte[4];
-        BinaryPrimitives.WriteUInt32BigEndian(crcBytes, ComputeCrc32(crcBuf));
-        stream.Write(crcBytes);
-    }
-
-    private static uint ComputeCrc32(ReadOnlySpan<byte> bytes)
-    {
-        var crc = 0xFFFF_FFFFu;
-        foreach (var b in bytes)
-        {
-            crc ^= b;
-            for (var bit = 0; bit < 8; bit++)
-            {
-                crc = (crc & 1) != 0 ? (crc >> 1) ^ 0xEDB8_8320u : crc >> 1;
-            }
-        }
-
-        return ~crc;
+        var bytes = new byte[54 + 4];
+        bytes[0] = (byte)'B';
+        bytes[1] = (byte)'M';
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(2, 4), bytes.Length);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(10, 4), 54); // pixel data offset
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(14, 4), 40); // BITMAPINFOHEADER size
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(18, 4), width);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(22, 4), height);
+        BinaryPrimitives.WriteInt16LittleEndian(bytes.AsSpan(26, 2), 1);  // planes
+        BinaryPrimitives.WriteInt16LittleEndian(bytes.AsSpan(28, 2), 24); // 24bpp
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(30, 4), 0);  // BI_RGB
+        return bytes;
     }
 }

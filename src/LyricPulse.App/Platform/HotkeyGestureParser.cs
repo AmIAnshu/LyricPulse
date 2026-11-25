@@ -80,7 +80,7 @@ public static class HotkeyGestureParser
             }
 
             // Allow trailing '+' to represent the Plus key (e.g., "Ctrl+Shift++")
-            if (i == input.Length - 1 && i > currentStart && input[i - 1] == '+')
+            if (i == input.Length - 1 && i > 0 && input[i - 1] == '+')
             {
                 continue;
             }

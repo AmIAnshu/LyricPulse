@@ -7,19 +7,25 @@ namespace LyricPulse.Rendering.Legibility;
 
 /// <summary>
 /// 4-Layer Desktop Overlay Legibility Pipeline:
-/// Layer 0 (Adaptive Radial Ambient Scrim or High-Contrast Scrim),
+/// Layer 0 (Adaptive Radial Ambient Scrim or High-Contrast Scrim with 1px inner hairline),
 /// Layer 1 (Cached Dual-Pass Contact + Ambient Drop Shadow),
 /// Layer 2 (Optical Round-Join Stroke Halo drawn strictly under fill with dark-fill inversion),
-/// Layer 3 (Antialiased Premultiplied Fill + optional active glow).
+/// Layer 3 (Antialiased Premultiplied Fill + cached active blur glow + HarfBuzz multi-script fallback).
 /// </summary>
 public sealed class LegibilityPipeline : IDisposable
 {
     public const int MaxCachedShadowBuckets = 64;
+    public const int MaxCachedShapedBlobs = 256;
 
     private static readonly float[] RadialStopPositions = [0.00f, 0.52f, 0.82f, 1.00f];
+    private static readonly SKColor HighContrastBorderColor = new(0xFF, 0xFF, 0xFF, 0x26); // #26FFFFFF
 
     private readonly Dictionary<ShadowBucketKey, ShadowFilterPair> _shadowCache = new(MaxCachedShadowBuckets);
+    private readonly Dictionary<int, SKImageFilter> _blurCache = new(8);
+    private readonly Dictionary<ShapedBlobKey, CachedShapedBlob> _blobCache = new(MaxCachedShapedBlobs);
+
     private readonly SKPaint _scrimPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _scrimBorderPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeWidth = 1.0f };
     private readonly SKPaint _shadowPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _haloPaint = new()
     {
@@ -37,6 +43,10 @@ public sealed class LegibilityPipeline : IDisposable
     private bool _disposed;
 
     public int CachedShadowBucketCount => _shadowCache.Count;
+
+    public int CachedBlurFilterCount => _blurCache.Count;
+
+    public int CachedShapedBlobCount => _blobCache.Count;
 
     /// <summary>
     /// Applies the user's global overlay opacity once via an outer SaveLayer so semi-transparent
@@ -65,7 +75,9 @@ public sealed class LegibilityPipeline : IDisposable
     }
 
     /// <summary>
-    /// Layer 0: Draws the feathered elliptical radial ambient scrim (or High-Contrast #CC08090D pill backdrop).
+    /// Layer 0: Draws the feathered elliptical radial ambient scrim (or High-Contrast #CC08090D pill
+    /// with 1px #26FFFFFF inner hairline). Always invoke on the main canvas (never inside clipped
+    /// offscreen shader surfaces).
     /// </summary>
     public void DrawAmbientScrim(
         SKCanvas canvas,
@@ -95,6 +107,9 @@ public sealed class LegibilityPipeline : IDisposable
             _scrimPaint.Shader = null;
             _scrimPaint.Color = LegibilityStyleSpec.ScaleAlpha(LegibilityStyleSpec.HighContrastScrimColor, opacity);
             canvas.DrawRoundRect(pillRect, cornerRadius, cornerRadius, _scrimPaint);
+
+            _scrimBorderPaint.Color = LegibilityStyleSpec.ScaleAlpha(HighContrastBorderColor, opacity);
+            canvas.DrawRoundRect(pillRect, cornerRadius, cornerRadius, _scrimBorderPaint);
             return;
         }
 
@@ -138,8 +153,9 @@ public sealed class LegibilityPipeline : IDisposable
     }
 
     /// <summary>
-    /// Layers 1 -> 2 -> 3: Renders crisp legible text with dual-pass cached shadows,
-    /// round-join optical stroke halo under fill (with dark-fill auto-inversion), and antialiased fill.
+    /// Layers 1 -> 2 -> 3: Renders crisp legible text with dual-pass cached shadows, cached active glow,
+    /// round-join optical stroke halo under fill (with dark-fill auto-inversion), and HarfBuzz multi-script
+    /// fallback shaping whenever <paramref name="fonts"/> is provided and non-Latin glyphs are present.
     /// </summary>
     public void DrawLegibleText(
         SKCanvas canvas,
@@ -152,7 +168,9 @@ public sealed class LegibilityPipeline : IDisposable
         RgbColor fillColor,
         float opacity = 1f,
         RgbColor? activeGlowColor = null,
-        bool includeStrokeHalo = true)
+        bool includeStrokeHalo = true,
+        FontAssetRegistry? fonts = null,
+        bool includeAmbientShadow = true)
     {
         ArgumentNullException.ThrowIfNull(canvas);
         ArgumentNullException.ThrowIfNull(font);
@@ -164,20 +182,45 @@ public sealed class LegibilityPipeline : IDisposable
             return;
         }
 
+        // Resolve cached HarfBuzz shaped blob + OS fallback typeface when needed (eliminates CJK/RTL/Emoji tofu!)
+        CachedShapedBlob? shapedBlob = null;
+        if (fonts is not null &&
+            FontAssetRegistry.InspectScriptRequirements(font, text, out var missingCp, out var needsShaping) &&
+            (missingCp != 0 || needsShaping))
+        {
+            var effectiveFont = missingCp != 0
+                ? fonts.GetOrCreateFallbackFont(fonts.MatchFallbackForCodepoint(missingCp), font.Size)
+                : font;
+            shapedBlob = GetOrCreateShapedBlob(text, effectiveFont, fonts);
+        }
+
+        var blobX = shapedBlob is { } sb
+            ? align switch
+            {
+                SKTextAlign.Center => x - (sb.AdvanceWidth * 0.5f),
+                SKTextAlign.Right => x - sb.AdvanceWidth,
+                _ => x
+            }
+            : x;
+
         // Layer 1: Dual-pass cached Contact + Ambient Drop Shadow.
         var shadows = GetOrCreateShadowFilters(font.Size, clampedOpacity);
-        DrawShadowPass(canvas, text, x, y, align, font, shadows.AmbientShadow);
-        DrawShadowPass(canvas, text, x, y, align, font, shadows.ContactShadow);
+        if (includeAmbientShadow)
+        {
+            DrawShadowPass(canvas, text, x, y, align, font, shadows.AmbientShadow, shapedBlob, blobX);
+        }
 
-        // Optional subtle active bloom glow (Layer 2.5 behind halo/fill).
+        DrawShadowPass(canvas, text, x, y, align, font, shadows.ContactShadow, shapedBlob, blobX);
+
+        // Optional subtle active bloom glow using cached blur filter (zero per-frame SKImageFilter allocation!).
         if (activeGlowColor is { } glowColor)
         {
-            using var blurFilter = SKImageFilter.CreateBlur(8.0f, 8.0f);
+            var blurFilter = GetOrCreateBlurFilter(8.0f);
             _glowPaint.Color = glowColor.ToSkColorWithAlpha(0.28f * clampedOpacity);
             _glowPaint.ImageFilter = blurFilter;
             try
             {
-                canvas.DrawText(text, x, y, align, font, _glowPaint);
+                DrawTextOrBlob(canvas, text, x, y, align, font, _glowPaint, shapedBlob, blobX);
             }
             finally
             {
@@ -193,13 +236,31 @@ public sealed class LegibilityPipeline : IDisposable
             {
                 _haloPaint.StrokeWidth = strokeWidth;
                 _haloPaint.Color = LegibilityStyleSpec.ResolveOpticalHaloColor(fillColor, clampedOpacity);
-                canvas.DrawText(text, x, y, align, font, _haloPaint);
+                DrawTextOrBlob(canvas, text, x, y, align, font, _haloPaint, shapedBlob, blobX);
             }
         }
 
         // Layer 3: Contrast-Guarded Premultiplied Antialias Fill.
         _fillPaint.Color = fillColor.ToSkColorWithAlpha(clampedOpacity);
-        canvas.DrawText(text, x, y, align, font, _fillPaint);
+        DrawTextOrBlob(canvas, text, x, y, align, font, _fillPaint, shapedBlob, blobX);
+    }
+
+    public SKImageFilter GetOrCreateBlurFilter(float sigmaDip)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var clamped = Math.Clamp(float.IsFinite(sigmaDip) ? sigmaDip : 8.0f, 0.5f, 32.0f);
+        var key = (int)MathF.Round(clamped * 10f);
+
+        if (_blurCache.TryGetValue(key, out var existing))
+        {
+            return existing;
+        }
+
+        var sigma = key * 0.1f;
+        var created = SKImageFilter.CreateBlur(sigma, sigma);
+        _blurCache[key] = created;
+        return created;
     }
 
     public void Dispose()
@@ -211,12 +272,35 @@ public sealed class LegibilityPipeline : IDisposable
 
         _disposed = true;
         ClearShadowCache();
+        ClearBlurCache();
+        ClearBlobCache();
         _scrimPaint.Dispose();
+        _scrimBorderPaint.Dispose();
         _shadowPaint.Dispose();
         _haloPaint.Dispose();
         _fillPaint.Dispose();
         _glowPaint.Dispose();
         _layerOpacityPaint.Dispose();
+    }
+
+    private static void DrawTextOrBlob(
+        SKCanvas canvas,
+        string text,
+        float x,
+        float y,
+        SKTextAlign align,
+        SKFont font,
+        SKPaint paint,
+        CachedShapedBlob? shapedBlob,
+        float blobX)
+    {
+        if (shapedBlob is { Blob: not null } sb)
+        {
+            canvas.DrawText(sb.Blob, blobX, y, paint);
+            return;
+        }
+
+        canvas.DrawText(text, x, y, align, font, paint);
     }
 
     private void DrawShadowPass(
@@ -226,18 +310,47 @@ public sealed class LegibilityPipeline : IDisposable
         float y,
         SKTextAlign align,
         SKFont font,
-        SKImageFilter filter)
+        SKImageFilter filter,
+        CachedShapedBlob? shapedBlob,
+        float blobX)
     {
         _shadowPaint.Color = SKColors.Black;
         _shadowPaint.ImageFilter = filter;
         try
         {
-            canvas.DrawText(text, x, y, align, font, _shadowPaint);
+            DrawTextOrBlob(canvas, text, x, y, align, font, _shadowPaint, shapedBlob, blobX);
         }
         finally
         {
             _shadowPaint.ImageFilter = null;
         }
+    }
+
+    private CachedShapedBlob? GetOrCreateShapedBlob(string text, SKFont effectiveFont, FontAssetRegistry fonts)
+    {
+        var quantizedHalfDip = (int)MathF.Round(effectiveFont.Size * 2f);
+        var key = new ShapedBlobKey(text, effectiveFont.Typeface.Handle, quantizedHalfDip);
+
+        if (_blobCache.TryGetValue(key, out var existing))
+        {
+            return existing;
+        }
+
+        if (_blobCache.Count >= MaxCachedShapedBlobs)
+        {
+            ClearBlobCache();
+        }
+
+        var shaper = fonts.GetOrCreateShaper(effectiveFont.Typeface);
+        var blob = TextShaperService.ShapeToBlob(text, effectiveFont, out var advanceWidth, shaper);
+        if (blob is null)
+        {
+            return null;
+        }
+
+        var entry = new CachedShapedBlob(blob, advanceWidth);
+        _blobCache[key] = entry;
+        return entry;
     }
 
     private ShadowFilterPair GetOrCreateShadowFilters(float fontSizeDip, float opacity)
@@ -291,7 +404,31 @@ public sealed class LegibilityPipeline : IDisposable
         _shadowCache.Clear();
     }
 
+    private void ClearBlurCache()
+    {
+        foreach (var filter in _blurCache.Values)
+        {
+            filter.Dispose();
+        }
+
+        _blurCache.Clear();
+    }
+
+    private void ClearBlobCache()
+    {
+        foreach (var entry in _blobCache.Values)
+        {
+            entry.Blob.Dispose();
+        }
+
+        _blobCache.Clear();
+    }
+
     private readonly record struct ShadowBucketKey(int FontSizeBucket, int OpacityBucket);
+
+    private readonly record struct ShapedBlobKey(string Text, nint TypefaceHandle, int QuantizedHalfDip);
+
+    private readonly record struct CachedShapedBlob(SKTextBlob Blob, float AdvanceWidth);
 
     private sealed record ShadowFilterPair(SKImageFilter ContactShadow, SKImageFilter AmbientShadow) : IDisposable
     {

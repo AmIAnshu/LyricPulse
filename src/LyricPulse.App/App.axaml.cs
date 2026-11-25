@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -11,14 +12,18 @@ using LyricPulse.Core.Runtime;
 using LyricPulse.Rendering.Fonts;
 using LyricPulse.Rendering.Host;
 using LyricPulse.Rendering.Shaders;
-using LyricPulse.Rendering.Styles;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace LyricPulse.App;
 
 public sealed class App : Application, IDisposable
 {
+    private const int ShutdownTimeoutMs = 1500;
+
     private ServiceProvider? _services;
+    private ILogger<App> _logger = NullLogger<App>.Instance;
     private OverlayRuntimeController? _runtime;
     private MultiMonitorOverlayCoordinator? _overlayCoordinator;
     private IGlobalHotkeyService? _hotkeys;
@@ -26,7 +31,7 @@ public sealed class App : Application, IDisposable
     private TrayController? _trayController;
     private Window? _hiddenAnchorWindow;
     private AppSettings? _lastAppliedOverlaySettings;
-    private bool _systemReducedMotion;
+    private ImmutableDictionary<HotkeyAction, string>? _lastRegisteredHotkeys;
     private bool _disposed;
 
     public static SingleInstanceGuard? ActiveSingleInstanceGuard { get; set; }
@@ -53,30 +58,80 @@ public sealed class App : Application, IDisposable
 
     public void Dispose() => CleanupDesktopHost();
 
+    internal static bool ShouldReconcileOverlayLayout(AppSettings previous, AppSettings current)
+    {
+        if (previous.LyricsVisible != current.LyricsVisible ||
+            previous.HideDuringFullscreen != current.HideDuringFullscreen ||
+            previous.AnchorZone != current.AnchorZone ||
+            previous.SafeMarginPx != current.SafeMarginPx ||
+            !previous.DisabledDisplays.SequenceEqual(current.DisabledDisplays))
+        {
+            return true;
+        }
+
+        return !ArePerDisplayBoundsEqual(previous.PerDisplayBounds, current.PerDisplayBounds);
+    }
+
+    internal static bool ArePerDisplayBoundsEqual(
+        ImmutableDictionary<string, OverlayBoundsConfig> a,
+        ImmutableDictionary<string, OverlayBoundsConfig> b)
+    {
+        if (ReferenceEquals(a, b))
+        {
+            return true;
+        }
+
+        if (a.Count != b.Count)
+        {
+            return false;
+        }
+
+        foreach (var (key, value) in a)
+        {
+            if (!b.TryGetValue(key, out var otherValue) || value != otherValue)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private void InitializeDesktopHost(IClassicDesktopStyleApplicationLifetime desktop)
     {
         _services = Program.BuildServiceProvider(forHeadlessSmokeTest: false);
-        _systemReducedMotion = !Win32OverlayInterop.IsSystemClientAreaAnimationEnabled();
+        _logger = _services.GetService<ILogger<App>>() ?? NullLogger<App>.Instance;
 
         _runtime = _services.GetRequiredService<OverlayRuntimeController>();
+        _runtime.SetOsReducedMotion(!Win32OverlayInterop.IsSystemClientAreaAnimationEnabled());
+
         var overlayPlatform = _services.GetRequiredService<IOverlayWindowPlatform>();
         var trayIconFactory = _services.GetRequiredService<TrayIconFactory>();
+        var trayLogger = _services.GetService<ILogger<TrayController>>();
 
         _overlayCoordinator = new MultiMonitorOverlayCoordinator(
             overlayPlatform,
             CreateOverlayCanvas);
+        _overlayCoordinator.SystemSettingsChanged += OnWindowsSystemSettingsChanged;
 
         _hiddenAnchorWindow = CreateHiddenAnchorWindow();
         _hiddenAnchorWindow.Show();
+        if (_hiddenAnchorWindow.TryGetPlatformHandle() is { HandleDescriptor: "HWND", Handle: not 0 } anchorHandle)
+        {
+            overlayPlatform.ApplyClickThroughOverlayStyles(anchorHandle.Handle);
+        }
+
         _hiddenAnchorWindow.Hide();
         _overlayCoordinator.AttachAnchorWindow(_hiddenAnchorWindow);
 
-        _trayController = new TrayController(_runtime, trayIconFactory, () => desktop.Shutdown(0));
+        // Synchronously constructs TrayIcon + initial NativeMenu BEFORE awaiting GSMTC startup
+        _trayController = new TrayController(_runtime, trayIconFactory, () => desktop.Shutdown(0), trayLogger);
 
         _hotkeys = _services.GetService<IGlobalHotkeyService>();
         if (_hotkeys is not null)
         {
             _hotkeys.HotkeyPressed += OnGlobalHotkeyPressed;
+            RegisterGlobalHotkeys(_runtime.Settings);
         }
 
         _fullscreenMonitor = _services.GetService<IFullscreenDetector>() as FullscreenAutoHideMonitor;
@@ -88,10 +143,9 @@ public sealed class App : Application, IDisposable
 
         _runtime.StateChanged += OnRuntimeStateChanged;
 
-        ActiveSingleInstanceGuard?.StartActivationListener(() =>
-        {
-            _ = HandleSecondInstanceActivationAsync();
-        });
+        ActiveSingleInstanceGuard?.StartActivationListener(
+            onShowRequested: () => _ = HandleSecondInstanceActivationAsync(forceDemo: false),
+            onDemoRequested: () => _ = HandleSecondInstanceActivationAsync(forceDemo: true));
 
         _ = StartRuntimeAsync();
     }
@@ -119,7 +173,6 @@ public sealed class App : Application, IDisposable
                     return;
                 }
 
-                RegisterGlobalHotkeys(initialSnapshot.Settings);
                 ApplySnapshotToHost(initialSnapshot);
             });
         }
@@ -127,21 +180,28 @@ public sealed class App : Application, IDisposable
         {
             // Normal on early exit.
         }
+        catch (Exception ex)
+        {
+            _logger.LogHostStartupError(ex);
+        }
     }
 
-    private LyricCanvasControl CreateOverlayCanvas(OverlayWindowPlacement placement)
+    private LyricCanvasControl CreateOverlayCanvas(OverlayWindow overlayWindow)
     {
         var fonts = _services!.GetRequiredService<FontAssetRegistry>();
         var shaders = _services!.GetRequiredService<ShaderLibrary>();
         var telemetry = _services!.GetRequiredService<FrameBudgetTelemetry>();
-        var router = _services!.GetRequiredService<ILyricSceneRenderer>();
+        var rendererFactory = _services!.GetRequiredService<ILyricSceneRendererFactory>();
         var runtime = _runtime!;
+
+        // Each LyricCanvasControl owns and disposes its own ILyricSceneRenderer (zero root DI leaks!)
+        var renderer = rendererFactory.CreateRenderer();
 
         return new LyricCanvasControl(
             fonts,
             shaders,
             telemetry,
-            router,
+            renderer,
             packetFactory: (w, h, scale, timeSec, dt) =>
             {
                 var snapshot = runtime.SampleFrame();
@@ -152,19 +212,18 @@ public sealed class App : Application, IDisposable
                     renderScaling: scale,
                     renderTimeSeconds: timeSec,
                     deltaSeconds: dt,
-                    boundsOverride: placement.BoundsConfig,
-                    systemReducedMotion: _systemReducedMotion);
-            });
+                    boundsOverride: overlayWindow.CurrentBoundsConfig);
+            },
+            ownsRenderer: true);
     }
 
     private void OnRuntimeStateChanged(object? sender, OverlayPlaybackSnapshot snapshot)
     {
-        if (_disposed)
+        if (Volatile.Read(ref _disposed))
         {
             return;
         }
 
-        _trayController?.ApplySnapshot(snapshot);
         Dispatcher.UIThread.Post(() => ApplySnapshotToHost(snapshot), DispatcherPriority.Normal);
     }
 
@@ -178,6 +237,11 @@ public sealed class App : Application, IDisposable
         _trayController?.ApplySnapshot(snapshot);
 
         var settings = snapshot.Settings;
+        if (_lastRegisteredHotkeys is null || !AreHotkeysEqual(_lastRegisteredHotkeys, settings.GlobalHotkeys))
+        {
+            RegisterGlobalHotkeys(settings);
+        }
+
         if (_lastAppliedOverlaySettings is null || ShouldReconcileOverlayLayout(_lastAppliedOverlaySettings, settings))
         {
             _lastAppliedOverlaySettings = settings;
@@ -191,6 +255,17 @@ public sealed class App : Application, IDisposable
         }
     }
 
+    private void OnWindowsSystemSettingsChanged(object? sender, EventArgs e)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _runtime?.SetOsReducedMotion(!Win32OverlayInterop.IsSystemClientAreaAnimationEnabled());
+        _trayController?.RefreshThemeIcon();
+    }
+
     private void OnFullscreenStateChanged(object? sender, bool isFullscreen)
     {
         _runtime?.RefreshFullscreenState();
@@ -199,7 +274,7 @@ public sealed class App : Application, IDisposable
 
     private void OnGlobalHotkeyPressed(object? sender, HotkeyAction action)
     {
-        if (_disposed || _runtime is null)
+        if (Volatile.Read(ref _disposed) || _runtime is null)
         {
             return;
         }
@@ -231,7 +306,7 @@ public sealed class App : Application, IDisposable
                     await _runtime.NudgeTimingOffsetAsync(TimeSpan.FromSeconds(0.5)).ConfigureAwait(false);
                     break;
                 case HotkeyAction.OpenGallery:
-                    await HandleSecondInstanceActivationAsync().ConfigureAwait(false);
+                    await HandleSecondInstanceActivationAsync(forceDemo: false).ConfigureAwait(false);
                     break;
             }
         }
@@ -239,11 +314,15 @@ public sealed class App : Application, IDisposable
         {
             // Shutdown race.
         }
+        catch (Exception ex)
+        {
+            _logger.LogHostActionError(ex, $"Hotkey:{action}");
+        }
     }
 
-    private async Task HandleSecondInstanceActivationAsync()
+    private async Task HandleSecondInstanceActivationAsync(bool forceDemo)
     {
-        if (_runtime is null || _disposed)
+        if (_runtime is null || Volatile.Read(ref _disposed))
         {
             return;
         }
@@ -251,13 +330,17 @@ public sealed class App : Application, IDisposable
         try
         {
             var snap = _runtime.SampleFrame();
-            if (!snap.Settings.LyricsVisible)
+            if (forceDemo)
+            {
+                await _runtime.SetDemoModeAsync(true).ConfigureAwait(false);
+            }
+            else if (!snap.Settings.LyricsVisible)
             {
                 await _runtime.ToggleLyricsVisibilityAsync().ConfigureAwait(false);
             }
-            else if (!snap.IsDemoMode && snap.Track is null)
+            else if (!snap.IsDemoMode && (!snap.IsPlaying || snap.LyricsStatus != LyricsStatus.Synced))
             {
-                // Until Phase 5 Gallery window arrives, surface Demo Mode so a second launch gives immediate feedback.
+                // Until Phase 5 Gallery window arrives, surface Demo Mode so double-clicking always shows clear feedback.
                 await _runtime.SetDemoModeAsync(true).ConfigureAwait(false);
             }
 
@@ -267,67 +350,105 @@ public sealed class App : Application, IDisposable
         {
             // Shutdown race.
         }
+        catch (Exception ex)
+        {
+            _logger.LogHostActionError(ex, "SecondInstanceActivation");
+        }
     }
 
     private void RegisterGlobalHotkeys(AppSettings settings)
     {
+        if (_hotkeys is null)
+        {
+            return;
+        }
+
+        IReadOnlyDictionary<HotkeyAction, string> conflicts;
         if (_hotkeys is GlobalHotkeyManager manager)
         {
-            _ = manager.RegisterAll(settings.GlobalHotkeys);
+            conflicts = manager.RegisterAll(settings.GlobalHotkeys);
         }
-        else if (_hotkeys is not null)
+        else
         {
             _hotkeys.UnregisterAll();
+            var dict = new Dictionary<HotkeyAction, string>();
             foreach (var (action, gesture) in settings.GlobalHotkeys)
             {
-                _ = _hotkeys.TryRegister(action, gesture, out _);
+                if (!_hotkeys.TryRegister(action, gesture, out var err) && err is not null)
+                {
+                    dict[action] = err;
+                }
             }
+
+            conflicts = dict;
         }
+
+        _lastRegisteredHotkeys = settings.GlobalHotkeys;
+        foreach (var (action, reason) in conflicts)
+        {
+            _logger.LogHotkeyConflict(action.ToString(), reason);
+        }
+
+        _trayController?.SetHotkeyConflicts(conflicts);
     }
 
-    private static bool ShouldReconcileOverlayLayout(AppSettings previous, AppSettings current) =>
-        previous.LyricsVisible != current.LyricsVisible ||
-        previous.HideDuringFullscreen != current.HideDuringFullscreen ||
-        previous.AnchorZone != current.AnchorZone ||
-        previous.SafeMarginPx != current.SafeMarginPx ||
-        !previous.DisabledDisplays.SequenceEqual(current.DisabledDisplays) ||
-        previous.PerDisplayBounds.Count != current.PerDisplayBounds.Count;
+    private static bool AreHotkeysEqual(
+        ImmutableDictionary<HotkeyAction, string> a,
+        ImmutableDictionary<HotkeyAction, string> b)
+    {
+        if (ReferenceEquals(a, b))
+        {
+            return true;
+        }
+
+        if (a.Count != b.Count)
+        {
+            return false;
+        }
+
+        foreach (var (k, v) in a)
+        {
+            if (!b.TryGetValue(k, out var ov) || !string.Equals(v, ov, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     private static Window CreateHiddenAnchorWindow() =>
         new()
         {
             Title = "LyricPulse Host Anchor",
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            Position = new PixelPoint(-32000, -32000),
             Width = 1,
             Height = 1,
             ShowInTaskbar = false,
             ShowActivated = false,
+            Focusable = false,
+            IsHitTestVisible = false,
             SystemDecorations = SystemDecorations.None,
             Opacity = 0
         };
 
     private void CleanupDesktopHost()
     {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _disposed, true))
         {
             return;
         }
 
-        _disposed = true;
+        // 1. FIRST on UI thread: remove tray icon & close all overlays immediately (stops RAF & SampleFrame()!)
+        _trayController?.Dispose();
+        _trayController = null;
 
-        if (_runtime is not null)
+        if (_overlayCoordinator is not null)
         {
-            _runtime.StateChanged -= OnRuntimeStateChanged;
-            try
-            {
-                _runtime.StopAsync().GetAwaiter().GetResult();
-                _runtime.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            }
-            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or InvalidOperationException)
-            {
-                // Best-effort cleanup during exit.
-            }
-
-            _runtime = null;
+            _overlayCoordinator.SystemSettingsChanged -= OnWindowsSystemSettingsChanged;
+            _overlayCoordinator.Dispose();
+            _overlayCoordinator = null;
         }
 
         if (_fullscreenMonitor is not null)
@@ -345,27 +466,55 @@ public sealed class App : Application, IDisposable
             _hotkeys = null;
         }
 
-        _trayController?.Dispose();
-        _trayController = null;
-
-        _overlayCoordinator?.Dispose();
-        _overlayCoordinator = null;
-
         _hiddenAnchorWindow?.Close();
         _hiddenAnchorWindow = null;
 
-        if (_services is not null)
-        {
-            try
-            {
-                _services.DisposeAsync().AsTask().GetAwaiter().GetResult();
-            }
-            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or InvalidOperationException)
-            {
-                // Best-effort cleanup during exit.
-            }
+        // 2. SECOND off UI thread with strict 1.5s timeout: stop & dispose runtime + DI container cleanly
+        var runtime = _runtime;
+        var services = _services;
+        _runtime = null;
+        _services = null;
 
-            _services = null;
+        if (runtime is not null)
+        {
+            runtime.StateChanged -= OnRuntimeStateChanged;
+        }
+
+        if (runtime is not null || services is not null)
+        {
+            var shutdownTask = Task.Run(async () =>
+            {
+                using var cts = new CancellationTokenSource(ShutdownTimeoutMs);
+                try
+                {
+                    if (runtime is not null)
+                    {
+                        await runtime.StopAsync(cts.Token).ConfigureAwait(false);
+                        await runtime.DisposeAsync().ConfigureAwait(false);
+                    }
+                }
+                catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or InvalidOperationException)
+                {
+                    // Best-effort cleanup during exit.
+                }
+
+                try
+                {
+                    if (services is not null)
+                    {
+                        await services.DisposeAsync().ConfigureAwait(false);
+                    }
+                }
+                catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or InvalidOperationException)
+                {
+                    // Best-effort cleanup during exit.
+                }
+            });
+
+            if (!shutdownTask.Wait(TimeSpan.FromMilliseconds(ShutdownTimeoutMs)))
+            {
+                _logger.LogShutdownTimeout(ShutdownTimeoutMs);
+            }
         }
     }
 }

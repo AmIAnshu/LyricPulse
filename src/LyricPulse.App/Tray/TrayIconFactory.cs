@@ -8,13 +8,14 @@ public enum TrayIconVisualState
 {
     Playing = 0,
     Idle = 1,
-    PausedOrHidden = 2,
+    OverlayHidden = 2,
     Error = 3
 }
 
 /// <summary>
 /// Programmatically generates crisp vector-rendered multi-state Avalonia <see cref="WindowIcon"/>
-/// bitmaps adapted to the Windows 10/11 taskbar polarity (Dark vs Light taskbar). Zero emoji chrome.
+/// bitmaps adapted to Windows 10/11 taskbar polarity with WCAG 3.0:1+ verified Light and Dark status dots.
+/// Zero emoji chrome.
 /// </summary>
 public sealed class TrayIconFactory
 {
@@ -25,8 +26,14 @@ public sealed class TrayIconFactory
     private static readonly SKColor DarkTaskbarIdle = new(0xE2, 0xE8, 0xF0, 0xFF);
     private static readonly SKColor LightTaskbarActive = new(0x11, 0x14, 0x20, 0xFF);
     private static readonly SKColor LightTaskbarIdle = new(0x1E, 0x29, 0x3B, 0xFF);
-    private static readonly SKColor LiveGreenDot = new(0x22, 0xC5, 0x5E, 0xFF);
-    private static readonly SKColor WarningAmberDot = new(0xF5, 0x9E, 0x0B, 0xFF);
+
+    // Dark taskbar status dots (8.55:1 / 9.07:1 over dark halo)
+    private static readonly SKColor DarkLiveGreenDot = new(0x22, 0xC5, 0x5E, 0xFF);
+    private static readonly SKColor DarkWarningAmberDot = new(0xF5, 0x9E, 0x0B, 0xFF);
+
+    // Light taskbar WCAG-verified status dots (#15803D = 4.79:1, #B45309 = 4.80:1 over #F8FAFC halo)
+    private static readonly SKColor LightLiveGreenDot = new(0x15, 0x80, 0x3D, 0xFF);
+    private static readonly SKColor LightWarningAmberDot = new(0xB4, 0x53, 0x09, 0xFF);
 
     private readonly Dictionary<(TrayIconVisualState State, bool IsLightTaskbar), WindowIcon> _cache = new();
 
@@ -58,6 +65,16 @@ public sealed class TrayIconFactory
         _cache[key] = icon;
         return icon;
     }
+
+    public static SKColor ResolveStatusDotColor(TrayIconVisualState state, bool isLightTaskbar) =>
+        (state, isLightTaskbar) switch
+        {
+            (TrayIconVisualState.Playing, true) => LightLiveGreenDot,
+            (TrayIconVisualState.Playing, false) => DarkLiveGreenDot,
+            (TrayIconVisualState.Error, true) => LightWarningAmberDot,
+            (TrayIconVisualState.Error, false) => DarkWarningAmberDot,
+            _ => SKColors.Transparent
+        };
 
     public static byte[] RenderIconPngBytes(TrayIconVisualState state, bool isLightTaskbar, int sizePx = 32)
     {
@@ -94,9 +111,9 @@ public sealed class TrayIconFactory
             canvas.DrawRoundRect(rect, corner, corner, barPaint);
         }
 
-        if (state == TrayIconVisualState.PausedOrHidden)
+        if (state == TrayIconVisualState.OverlayHidden)
         {
-            // Crisp diagonal slash indicating lyrics are hidden/paused
+            // Diagonal slash reserved strictly for Overlay Hidden / Fullscreen Auto-Hidden (NOT Paused!)
             using var slashPaint = new SKPaint
             {
                 IsAntialias = true,
@@ -113,20 +130,19 @@ public sealed class TrayIconFactory
             var dotX = dim - dotRadius - (dim * 0.06f);
             var dotY = dim - dotRadius - (dim * 0.06f);
 
-            // Subtle halo separator ring behind status dot for crispness on any taskbar color
             using var ringPaint = new SKPaint
             {
                 IsAntialias = true,
                 Style = SKPaintStyle.Fill,
-                Color = isLightTaskbar ? new SKColor(0xF8, 0xFA, 0xFC, 0xE0) : new SKColor(0x0B, 0x0C, 0x16, 0xE0)
+                Color = isLightTaskbar ? new SKColor(0xF8, 0xFA, 0xFC, 0xF0) : new SKColor(0x0B, 0x0C, 0x16, 0xE8)
             };
-            canvas.DrawCircle(dotX, dotY, dotRadius + Math.Max(1.0f, dim * 0.04f), ringPaint);
+            canvas.DrawCircle(dotX, dotY, dotRadius + Math.Max(1.0f, dim * 0.045f), ringPaint);
 
             using var dotPaint = new SKPaint
             {
                 IsAntialias = true,
                 Style = SKPaintStyle.Fill,
-                Color = state == TrayIconVisualState.Playing ? LiveGreenDot : WarningAmberDot
+                Color = ResolveStatusDotColor(state, isLightTaskbar)
             };
             canvas.DrawCircle(dotX, dotY, dotRadius, dotPaint);
         }
@@ -143,8 +159,8 @@ public sealed class TrayIconFactory
             (TrayIconVisualState.Playing, true) => LightTaskbarActive,
             (TrayIconVisualState.Error, false) => DarkTaskbarActive,
             (TrayIconVisualState.Error, true) => LightTaskbarActive,
-            (TrayIconVisualState.PausedOrHidden, false) => DarkTaskbarIdle.WithAlpha(166),
-            (TrayIconVisualState.PausedOrHidden, true) => LightTaskbarIdle.WithAlpha(166),
+            (TrayIconVisualState.OverlayHidden, false) => DarkTaskbarIdle.WithAlpha(166),
+            (TrayIconVisualState.OverlayHidden, true) => LightTaskbarIdle.WithAlpha(166),
             (_, false) => DarkTaskbarIdle,
             (_, true) => LightTaskbarIdle
         };
