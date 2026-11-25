@@ -17,6 +17,7 @@ public sealed class GlobalHotkeyManager : IGlobalHotkeyService
 
     private readonly ConcurrentQueue<HotkeyCommand> _commands = new();
     private readonly Dictionary<int, HotkeyAction> _registeredIds = new();
+    private readonly Dictionary<int, ParsedHotkeyGesture> _registeredSpecs = new();
     private readonly ManualResetEventSlim _windowReady = new(false);
     private readonly Thread _messageThread;
     private readonly Action<Action>? _callbackDispatcher;
@@ -207,20 +208,32 @@ public sealed class GlobalHotkeyManager : IGlobalHotkeyService
                 else
                 {
                     var id = HotkeyIdOffset + (int)cmd.Action;
-                    if (_registeredIds.ContainsKey(id))
+                    ParsedHotkeyGesture prevSpec = default;
+                    var hadPrevious = _registeredIds.TryGetValue(id, out var prevAction) &&
+                                      _registeredSpecs.TryGetValue(id, out prevSpec);
+                    if (hadPrevious)
                     {
                         _ = Win32Native.UnregisterHotKey(hwnd, id);
                         _registeredIds.Remove(id);
+                        _registeredSpecs.Remove(id);
                     }
 
                     if (Win32Native.RegisterHotKey(hwnd, id, cmd.Parsed.Modifiers, cmd.Parsed.VirtualKey))
                     {
                         _registeredIds[id] = cmd.Action;
+                        _registeredSpecs[id] = cmd.Parsed;
                         cmd.Succeeded = true;
                     }
                     else
                     {
                         var win32Err = Marshal.GetLastPInvokeError();
+                        // Rollback: restore previous working shortcut if the new candidate failed (e.g. 1409 conflict)
+                        if (hadPrevious && Win32Native.RegisterHotKey(hwnd, id, prevSpec.Modifiers, prevSpec.VirtualKey))
+                        {
+                            _registeredIds[id] = prevAction;
+                            _registeredSpecs[id] = prevSpec;
+                        }
+
                         cmd.Succeeded = false;
                         cmd.ErrorMessage = win32Err == 1409 // ERROR_HOTKEY_ALREADY_REGISTERED
                             ? $"Shortcut '{cmd.Parsed.NormalizedGesture}' is already in use by another application."
@@ -243,6 +256,7 @@ public sealed class GlobalHotkeyManager : IGlobalHotkeyService
         }
 
         _registeredIds.Clear();
+        _registeredSpecs.Clear();
     }
 
     private void RaiseHotkeyPressed(HotkeyAction action)

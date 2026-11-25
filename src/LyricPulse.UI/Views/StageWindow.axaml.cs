@@ -1,11 +1,8 @@
-using System.Collections.Specialized;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
-using Avalonia.Controls.Shapes;
 using Avalonia.Input;
-using Avalonia.Layout;
-using Avalonia.Media;
+using Avalonia.Interactivity;
 using Avalonia.Threading;
 using LyricPulse.Core.Models;
 using LyricPulse.Rendering.Fonts;
@@ -71,17 +68,19 @@ public partial class StageWindow : Window, IDisposable
         };
 
         viewModel.PropertyChanged += OnViewModelPropertyChanged;
-        viewModel.FilteredStyleCards.CollectionChanged += OnFilteredCardsChanged;
         StyleStripScroller.ScrollChanged += (_, _) => UpdateVisibleStripCards();
-        SizeChanged += (_, _) => UpdateVisibleStripCards();
+        SizeChanged += (_, _) =>
+        {
+            if (DataContext is StageViewModel vm)
+            {
+                vm.IsCompactDrawerMode = Bounds.Width < 880.0;
+            }
 
-        RebuildStyleStrip();
+            UpdateVisibleStripCards();
+        };
     }
 
-    public void PrepareForShutdown()
-    {
-        _allowShutdownClose = true;
-    }
+    public void PrepareForShutdown() => _allowShutdownClose = true;
 
     public void SurfaceAndFocus(bool openSettingsDrawer = false)
     {
@@ -97,6 +96,7 @@ public partial class StageWindow : Window, IDisposable
 
         if (DataContext is StageViewModel vm)
         {
+            vm.IsCompactDrawerMode = Bounds.Width < 880.0;
             if (openSettingsDrawer)
             {
                 vm.IsSettingsDrawerOpen = true;
@@ -106,19 +106,12 @@ public partial class StageWindow : Window, IDisposable
         }
 
         Activate();
-        _heroHost?.RequestWake();
-        UpdateVisibleStripCards();
-    }
-
-    protected override void OnOpened(EventArgs e)
-    {
-        base.OnOpened(e);
-        if (DataContext is StageViewModel vm)
+        if (_heroHost is not null)
         {
-            vm.Runtime.SetStageWindowOpen(true);
+            _heroHost.IsCardPaused = false;
+            _heroHost.RequestWake();
         }
 
-        _heroHost?.RequestWake();
         UpdateVisibleStripCards();
     }
 
@@ -130,6 +123,11 @@ public partial class StageWindow : Window, IDisposable
         }
 
         _disposed = true;
+        if (DataContext is StageViewModel vm)
+        {
+            vm.PropertyChanged -= OnViewModelPropertyChanged;
+        }
+
         _fullscreenIdleTimer.Stop();
         _heroHost?.Dispose();
         foreach (var host in _cardHosts.Values)
@@ -141,17 +139,40 @@ public partial class StageWindow : Window, IDisposable
         GC.SuppressFinalize(this);
     }
 
+    protected override void OnOpened(EventArgs e)
+    {
+        base.OnOpened(e);
+        if (DataContext is StageViewModel vm)
+        {
+            vm.IsCompactDrawerMode = Bounds.Width < 880.0;
+            vm.Runtime.SetStageWindowOpen(true);
+        }
+
+        if (_heroHost is not null)
+        {
+            _heroHost.IsCardPaused = false;
+            _heroHost.RequestWake();
+        }
+
+        UpdateVisibleStripCards();
+    }
+
     protected override void OnClosing(WindowClosingEventArgs e)
     {
         if (!_allowShutdownClose)
         {
-            // Close button minimizes/hides cleanly to the Windows System Tray
+            // Close button minimizes/hides cleanly to tray and pauses BOTH hero & strip canvases (0% idle GPU!)
             e.Cancel = true;
             Hide();
             if (DataContext is StageViewModel vm)
             {
                 vm.IsFullscreen = false;
                 vm.Runtime.SetStageWindowOpen(false);
+            }
+
+            if (_heroHost is not null)
+            {
+                _heroHost.IsCardPaused = true;
             }
 
             PauseAllPreviewCards(true);
@@ -180,6 +201,13 @@ public partial class StageWindow : Window, IDisposable
             if (e.Key == Key.Escape)
             {
                 vm.CancelHotkeyCapture();
+                e.Handled = true;
+                return;
+            }
+
+            if (e.Key is Key.Back or Key.Delete)
+            {
+                vm.ClearCurrentRecordingHotkey();
                 e.Handled = true;
                 return;
             }
@@ -217,22 +245,121 @@ public partial class StageWindow : Window, IDisposable
                 return;
             }
 
-            if (e.Key == Key.Left && e.KeyModifiers == KeyModifiers.None && TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not Slider)
+            if (e.Key is Key.Left or Key.Right &&
+                e.KeyModifiers == KeyModifiers.None &&
+                TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not (Slider or TextBox or Button or ToggleButton))
             {
-                viewModel.PreviousStyleCommand.Execute(null);
-                e.Handled = true;
-                return;
-            }
+                if (e.Key == Key.Left)
+                {
+                    viewModel.PreviousStyleCommand.Execute(null);
+                }
+                else
+                {
+                    viewModel.NextStyleCommand.Execute(null);
+                }
 
-            if (e.Key == Key.Right && e.KeyModifiers == KeyModifiers.None && TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not Slider)
-            {
-                viewModel.NextStyleCommand.Execute(null);
                 e.Handled = true;
                 return;
             }
         }
 
         base.OnKeyDown(e);
+    }
+
+    private void OnThumbHostLoaded(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not ContentControl slot || slot.Tag is not OverlayStyleId styleId)
+        {
+            return;
+        }
+
+        var host = GetOrCreateCardHost(styleId);
+        if (host is null)
+        {
+            return;
+        }
+
+        if (host.Parent is ContentControl prevParent && !ReferenceEquals(prevParent, slot))
+        {
+            prevParent.Content = null;
+        }
+
+        slot.Content = host;
+        Dispatcher.UIThread.Post(UpdateVisibleStripCards, DispatcherPriority.Background);
+    }
+
+    private void OnThumbHostUnloaded(object? sender, RoutedEventArgs e)
+    {
+        if (sender is ContentControl slot && slot.Content is StageCardCanvasHost host)
+        {
+            host.IsCardPaused = true;
+            slot.Content = null;
+        }
+    }
+
+    private void OnCardPinClicked(object? sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is Control ctrl && ctrl.Tag is OverlayStyleId styleId && DataContext is StageViewModel vm)
+        {
+            vm.TogglePinStyleCommand.Execute(styleId);
+        }
+    }
+
+    private void OnCardPointerEntered(object? sender, PointerEventArgs e)
+    {
+        if (sender is Control { DataContext: StyleCardViewModel card })
+        {
+            card.IsHovered = true;
+            if (_cardHosts.TryGetValue(card.StyleId, out var host))
+            {
+                host.TargetMaxFps = 60;
+            }
+        }
+    }
+
+    private void OnCardPointerExited(object? sender, PointerEventArgs e)
+    {
+        if (sender is Control { DataContext: StyleCardViewModel card })
+        {
+            card.IsHovered = false;
+            if (_cardHosts.TryGetValue(card.StyleId, out var host))
+            {
+                host.TargetMaxFps = card.IsActive ? 60 : 30;
+            }
+        }
+    }
+
+    private void OnDrawerScrimPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is StageViewModel vm)
+        {
+            vm.IsSettingsDrawerOpen = false;
+            SettingsToggleBtn.Focus();
+        }
+    }
+
+    private StageCardCanvasHost? GetOrCreateCardHost(OverlayStyleId styleId)
+    {
+        if (DataContext is not StageViewModel vm || _fonts is null || _shaders is null || _telemetry is null || _rendererFactory is null)
+        {
+            return null;
+        }
+
+        if (!_cardHosts.TryGetValue(styleId, out var host))
+        {
+            var meta = StyleCatalog.GetMetadata(styleId);
+            host = new StageCardCanvasHost(vm.Runtime, _fonts, _shaders, _telemetry, _rendererFactory)
+            {
+                SurfaceMode = StageRenderSurfaceMode.GalleryCard,
+                StyleOverride = styleId,
+                PreviewPhaseSeconds = meta.PreviewPhaseSeconds,
+                TargetMaxFps = 30
+            };
+            _cardHosts[styleId] = host;
+        }
+
+        return host;
     }
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -245,10 +372,15 @@ public partial class StageWindow : Window, IDisposable
         if (e.PropertyName == nameof(StageViewModel.IsFullscreen))
         {
             ApplyFullscreenWindowState(vm.IsFullscreen);
+            UpdateVisibleStripCards();
         }
-        else if (e.PropertyName is nameof(StageViewModel.EffectivePreviewsPaused) or nameof(StageViewModel.IsFullscreen))
+        else if (e.PropertyName == nameof(StageViewModel.EffectivePreviewsPaused))
         {
             UpdateVisibleStripCards();
+        }
+        else if (e.PropertyName == nameof(StageViewModel.IsSettingsDrawerOpen) && !vm.IsSettingsDrawerOpen)
+        {
+            SettingsToggleBtn.Focus();
         }
     }
 
@@ -270,194 +402,6 @@ public partial class StageWindow : Window, IDisposable
         }
     }
 
-    private void OnFilteredCardsChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
-        RebuildStyleStrip();
-
-    private void RebuildStyleStrip()
-    {
-        if (DataContext is not StageViewModel vm || _fonts is null || _shaders is null || _telemetry is null || _rendererFactory is null)
-        {
-            return;
-        }
-
-        StyleStripPanel.Children.Clear();
-
-        foreach (var cardVm in vm.FilteredStyleCards)
-        {
-            if (!_cardHosts.TryGetValue(cardVm.StyleId, out var host))
-            {
-                host = new StageCardCanvasHost(vm.Runtime, _fonts, _shaders, _telemetry, _rendererFactory)
-                {
-                    SurfaceMode = StageRenderSurfaceMode.GalleryCard,
-                    StyleOverride = cardVm.StyleId,
-                    PreviewPhaseSeconds = cardVm.PhaseOffsetSeconds,
-                    TargetMaxFps = 30
-                };
-                _cardHosts[cardVm.StyleId] = host;
-            }
-
-            var stageContainer = new Border
-            {
-                Height = 104,
-                CornerRadius = new CornerRadius(8),
-                ClipToBounds = true,
-                Child = host
-            };
-
-            // Active pill & Pin button overlay inside thumbnail stage
-            var badgeRow = new Grid
-            {
-                Margin = new Thickness(6),
-                VerticalAlignment = VerticalAlignment.Top,
-                ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto")
-            };
-
-            var selectedPill = new Border
-            {
-                Padding = new Thickness(7, 3),
-                CornerRadius = new CornerRadius(999),
-                Background = TryFindBrush("LpAccentPrimaryBrush", Brushes.Indigo),
-                IsVisible = cardVm.IsActive,
-                Child = new TextBlock
-                {
-                    Text = "Selected",
-                    FontSize = 10,
-                    FontWeight = FontWeight.SemiBold,
-                    Foreground = Brushes.White
-                }
-            };
-            Grid.SetColumn(selectedPill, 0);
-
-            var pinBtn = new ToggleButton
-            {
-                Width = 28,
-                Height = 28,
-                Padding = new Thickness(0),
-                CornerRadius = new CornerRadius(7),
-                Cursor = new Cursor(StandardCursorType.Hand),
-                Background = new SolidColorBrush(Color.FromArgb(0xB8, 0x14, 0x16, 0x1F)),
-                IsChecked = cardVm.IsPinned,
-                Content = new TextBlock
-                {
-                    Text = cardVm.IsPinned ? "Pinned" : "Pin",
-                    FontSize = 9,
-                    Foreground = Brushes.White
-                }
-            };
-            pinBtn.SetValue(ToolTip.TipProperty, cardVm.PinToolTip);
-            pinBtn.Click += (_, args) =>
-            {
-                args.Handled = true;
-                cardVm.TogglePinCommand.Execute(cardVm.StyleId);
-            };
-            Grid.SetColumn(pinBtn, 2);
-
-            badgeRow.Children.Add(selectedPill);
-            badgeRow.Children.Add(pinBtn);
-
-            var stageStack = new Grid();
-            stageStack.Children.Add(stageContainer);
-            stageStack.Children.Add(badgeRow);
-
-            var footer = new StackPanel
-            {
-                Margin = new Thickness(8, 6, 8, 6),
-                Spacing = 2,
-                Children =
-                {
-                    new Grid
-                    {
-                        ColumnDefinitions = new ColumnDefinitions("*,Auto"),
-                        Children =
-                        {
-                            new TextBlock
-                            {
-                                Text = cardVm.DisplayName,
-                                FontSize = 12,
-                                FontWeight = FontWeight.SemiBold,
-                                Foreground = TryFindBrush("LpTextPrimaryBrush", Brushes.White)
-                            },
-                            new Border
-                            {
-                                [Grid.ColumnProperty] = 1,
-                                Padding = new Thickness(5, 1),
-                                CornerRadius = new CornerRadius(5),
-                                Background = TryFindBrush("LpSurfaceElevatedBrush", Brushes.DarkSlateGray),
-                                Child = new TextBlock
-                                {
-                                    Text = cardVm.CapabilityChip,
-                                    FontSize = 10,
-                                    Foreground = TryFindBrush("LpTextSecondaryBrush", Brushes.LightGray)
-                                }
-                            }
-                        }
-                    }
-                }
-            };
-
-            var cardGrid = new Grid { RowDefinitions = new RowDefinitions("104,Auto") };
-            Grid.SetRow(stageStack, 0);
-            Grid.SetRow(footer, 1);
-            cardGrid.Children.Add(stageStack);
-            cardGrid.Children.Add(footer);
-
-            var outerCard = new Border
-            {
-                Width = 216,
-                Padding = new Thickness(cardVm.IsActive ? 3 : 4),
-                CornerRadius = new CornerRadius(12),
-                Cursor = new Cursor(StandardCursorType.Hand),
-                Background = TryFindBrush("LpSurfaceBrush", Brushes.Black),
-                BorderThickness = new Thickness(cardVm.IsActive ? 2 : 1),
-                BorderBrush = cardVm.IsActive
-                    ? TryFindBrush("LpAccentBorderBrush", Brushes.MediumSlateBlue)
-                    : TryFindBrush("LpBorderDefaultBrush", Brushes.Gray),
-                Child = cardGrid
-            };
-
-            outerCard.PointerPressed += (_, args) =>
-            {
-                if (!args.Handled)
-                {
-                    cardVm.SelectCommand.Execute(cardVm.StyleId);
-                }
-            };
-            outerCard.PointerEntered += (_, _) =>
-            {
-                cardVm.IsHovered = true;
-                host.TargetMaxFps = 60;
-            };
-            outerCard.PointerExited += (_, _) =>
-            {
-                cardVm.IsHovered = false;
-                host.TargetMaxFps = cardVm.IsActive ? 60 : 30;
-            };
-
-            cardVm.PropertyChanged += (_, ev) =>
-            {
-                if (ev.PropertyName is nameof(StyleCardViewModel.IsActive) or nameof(StyleCardViewModel.IsPinned))
-                {
-                    selectedPill.IsVisible = cardVm.IsActive;
-                    pinBtn.IsChecked = cardVm.IsPinned;
-                    if (pinBtn.Content is TextBlock tb)
-                    {
-                        tb.Text = cardVm.IsPinned ? "Pinned" : "Pin";
-                    }
-                    outerCard.Padding = new Thickness(cardVm.IsActive ? 3 : 4);
-                    outerCard.BorderThickness = new Thickness(cardVm.IsActive ? 2 : 1);
-                    outerCard.BorderBrush = cardVm.IsActive
-                        ? TryFindBrush("LpAccentBorderBrush", Brushes.MediumSlateBlue)
-                        : TryFindBrush("LpBorderDefaultBrush", Brushes.Gray);
-                    host.TargetMaxFps = (cardVm.IsActive || cardVm.IsHovered) ? 60 : 30;
-                }
-            };
-
-            StyleStripPanel.Children.Add(outerCard);
-        }
-
-        Dispatcher.UIThread.Post(UpdateVisibleStripCards, DispatcherPriority.Background);
-    }
-
     private void UpdateVisibleStripCards()
     {
         if (DataContext is not StageViewModel vm)
@@ -473,8 +417,8 @@ public partial class StageWindow : Window, IDisposable
         }
 
         var offsetX = StyleStripScroller.Offset.X;
-        var viewportW = Math.Max(StyleStripScroller.Viewport.Width, 1000.0);
-        const double cardStride = 228.0; // 216 + 12 spacing
+        var viewportW = Math.Max(StyleStripScroller.Viewport.Width, 320.0);
+        const double cardStride = 232.0; // 220 + 12 spacing
 
         for (var i = 0; i < vm.FilteredStyleCards.Count; i++)
         {
@@ -485,7 +429,7 @@ public partial class StageWindow : Window, IDisposable
             }
 
             var cardLeft = i * cardStride;
-            var cardRight = cardLeft + 216.0;
+            var cardRight = cardLeft + 220.0;
             var inViewport = cardRight >= offsetX - 40 && cardLeft <= offsetX + viewportW + 40;
             host.IsCardPaused = !inViewport;
             host.TargetMaxFps = (card.IsActive || card.IsHovered) ? 60 : 30;
@@ -500,9 +444,6 @@ public partial class StageWindow : Window, IDisposable
         }
     }
 
-    private IBrush TryFindBrush(string key, IBrush fallback) =>
-        this.TryFindResource(key, ActualThemeVariant, out var res) && res is IBrush b ? b : fallback;
-
     private static string FormatKeyGesture(Key key, KeyModifiers mods)
     {
         var parts = new List<string>(4);
@@ -512,6 +453,7 @@ public partial class StageWindow : Window, IDisposable
 
         var keyName = key switch
         {
+            >= Key.D0 and <= Key.D9 => ((char)('0' + (key - Key.D0))).ToString(),
             Key.OemOpenBrackets => "[",
             Key.OemCloseBrackets => "]",
             Key.OemComma => ",",

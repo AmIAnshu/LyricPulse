@@ -6,6 +6,8 @@ using Avalonia.Media;
 using LyricPulse.Core.Abstractions;
 using LyricPulse.Core.Models;
 using LyricPulse.Core.Runtime;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace LyricPulse.UI.ViewModels;
 
@@ -47,10 +49,12 @@ public sealed class StageViewModel : ViewModelBase
     private readonly Func<HotkeyAction, string, (bool Ok, string? Error)>? _hotkeyValidator;
     private readonly Action<bool>? _onObsWindowRequested;
     private readonly Action? _onDisplaysRefreshRequested;
+    private readonly ILogger<StageViewModel> _logger;
     private readonly ImmutableArray<ColorPresetOption> _studioPresets = StyleCatalog.StudioPresets;
 
     private StageFlyoutKind _activeFlyout = StageFlyoutKind.None;
     private bool _isSettingsDrawerOpen;
+    private bool _isCompactDrawerMode;
     private bool _isFullscreen;
     private bool _isChromeVisible = true;
     private bool _previewsPaused;
@@ -66,12 +70,14 @@ public sealed class StageViewModel : ViewModelBase
         OverlayRuntimeController runtime,
         Func<HotkeyAction, string, (bool Ok, string? Error)>? hotkeyValidator = null,
         Action<bool>? onObsWindowRequested = null,
-        Action? onDisplaysRefreshRequested = null)
+        Action? onDisplaysRefreshRequested = null,
+        ILogger<StageViewModel>? logger = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _hotkeyValidator = hotkeyValidator;
         _onObsWindowRequested = onObsWindowRequested;
         _onDisplaysRefreshRequested = onDisplaysRefreshRequested;
+        _logger = logger ?? NullLogger<StageViewModel>.Instance;
 
         _snapshot = _runtime.SampleFrame();
 
@@ -378,9 +384,27 @@ public sealed class StageViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(TopBarOpacity));
                 OnPropertyChanged(nameof(IsTopBarInteractive));
+                OnPropertyChanged(nameof(IsDockedDrawerVisible));
+                OnPropertyChanged(nameof(IsOverlayDrawerVisible));
             }
         }
     }
+
+    public bool IsCompactDrawerMode
+    {
+        get => _isCompactDrawerMode;
+        set
+        {
+            if (SetProperty(ref _isCompactDrawerMode, value))
+            {
+                OnPropertyChanged(nameof(IsDockedDrawerVisible));
+                OnPropertyChanged(nameof(IsOverlayDrawerVisible));
+            }
+        }
+    }
+
+    public bool IsDockedDrawerVisible => IsSettingsDrawerOpen && !IsCompactDrawerMode;
+    public bool IsOverlayDrawerVisible => IsSettingsDrawerOpen && IsCompactDrawerMode;
 
     public bool IsFullscreen
     {
@@ -483,10 +507,18 @@ public sealed class StageViewModel : ViewModelBase
             {
                 RebuildFilteredStyleCards();
                 OnPropertyChanged(nameof(IsFilterEmpty));
+                OnPropertyChanged(nameof(IsFilterAll));
+                OnPropertyChanged(nameof(IsFilterPinned));
+                OnPropertyChanged(nameof(IsFilterVisuals));
+                OnPropertyChanged(nameof(IsFilterMotion));
             }
         }
     }
 
+    public bool IsFilterAll => StyleFilter == "All";
+    public bool IsFilterPinned => StyleFilter == "Pinned";
+    public bool IsFilterVisuals => StyleFilter == "With Visuals";
+    public bool IsFilterMotion => StyleFilter == "Motion";
     public bool IsFilterEmpty => FilteredStyleCards.Count == 0;
 
     // Settings properties bound directly in UI
@@ -701,6 +733,29 @@ public sealed class StageViewModel : ViewModelBase
     public bool IsAnchorBottomLeft => AnchorZone == AnchorZone.BottomLeft;
     public bool IsAnchorBottomRight => AnchorZone == AnchorZone.BottomRight;
 
+    public bool IsThemeSystem => ThemeVariantMode == ThemeVariantMode.System;
+    public bool IsThemeDark => ThemeVariantMode == ThemeVariantMode.Dark;
+    public bool IsThemeLight => ThemeVariantMode == ThemeVariantMode.Light;
+
+    public bool IsScrimOff => ScrimIntensity == ScrimIntensity.Off;
+    public bool IsScrimSubtle => ScrimIntensity == ScrimIntensity.Subtle;
+    public bool IsScrimBalanced => ScrimIntensity == ScrimIntensity.Balanced;
+    public bool IsScrimStrong => ScrimIntensity == ScrimIntensity.Strong;
+
+    public bool IsSecondaryOff => SecondaryLineMode == SecondaryLineMode.Off;
+    public bool IsSecondaryTranslation => SecondaryLineMode == SecondaryLineMode.Translation;
+    public bool IsSecondaryRomanization => SecondaryLineMode == SecondaryLineMode.Romanization;
+
+    public bool IsReducedMotionToggleEnabled => !_snapshot.IsOsReducedMotion;
+    public IBrush MediaHealthDotBrush => MediaHealth switch
+    {
+        MediaHealthKind.PlayingSynced => new SolidColorBrush(Color.Parse("#22C55E")),
+        MediaHealthKind.Warning => new SolidColorBrush(Color.Parse("#F59E0B")),
+        MediaHealthKind.Error => new SolidColorBrush(Color.Parse("#DC2626")),
+        MediaHealthKind.Loading => new SolidColorBrush(Color.Parse("#818CF8")),
+        _ => new SolidColorBrush(Color.Parse("#8490A7"))
+    };
+
     public bool IsDemoMode => _snapshot.IsDemoMode;
     public bool IsLoadingLyrics => !_snapshot.IsDemoMode && _snapshot.LyricsStatus == LyricsStatus.Loading;
 
@@ -913,13 +968,25 @@ public sealed class StageViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsAnchorBottomLeft));
         OnPropertyChanged(nameof(IsAnchorBottomRight));
         OnPropertyChanged(nameof(ScrimIntensity));
+        OnPropertyChanged(nameof(IsScrimOff));
+        OnPropertyChanged(nameof(IsScrimSubtle));
+        OnPropertyChanged(nameof(IsScrimBalanced));
+        OnPropertyChanged(nameof(IsScrimStrong));
         OnPropertyChanged(nameof(ThemeVariantMode));
+        OnPropertyChanged(nameof(IsThemeSystem));
+        OnPropertyChanged(nameof(IsThemeDark));
+        OnPropertyChanged(nameof(IsThemeLight));
         OnPropertyChanged(nameof(SecondaryLineMode));
+        OnPropertyChanged(nameof(IsSecondaryOff));
+        OnPropertyChanged(nameof(IsSecondaryTranslation));
+        OnPropertyChanged(nameof(IsSecondaryRomanization));
+        OnPropertyChanged(nameof(IsReducedMotionToggleEnabled));
         OnPropertyChanged(nameof(IsDemoMode));
         OnPropertyChanged(nameof(IsLoadingLyrics));
         OnPropertyChanged(nameof(MediaTrackTitle));
         OnPropertyChanged(nameof(MediaStatusLabel));
         OnPropertyChanged(nameof(MediaHealth));
+        OnPropertyChanged(nameof(MediaHealthDotBrush));
         OnPropertyChanged(nameof(ShowTroubleshootingPill));
         OnPropertyChanged(nameof(CanAdjustOffset));
         OnPropertyChanged(nameof(HasNonZeroOffset));
@@ -987,6 +1054,27 @@ public sealed class StageViewModel : ViewModelBase
         {
             row.IsRecording = false;
         }
+    }
+
+    public bool ClearCurrentRecordingHotkey()
+    {
+        if (_recordingHotkey is not { } action)
+        {
+            return false;
+        }
+
+        _recordingHotkey = null;
+        foreach (var row in HotkeyRows)
+        {
+            row.IsRecording = false;
+            if (row.Action == action)
+            {
+                row.ErrorMessage = null;
+            }
+        }
+
+        ClearHotkeyCommand.Execute(action);
+        return true;
     }
 
     public bool CommitCapturedHotkey(string gesture, bool hasModifier)
@@ -1090,7 +1178,7 @@ public sealed class StageViewModel : ViewModelBase
 
     private void RebuildFilteredStyleCards()
     {
-        FilteredStyleCards.Clear();
+        var desired = new List<StyleCardViewModel>(StyleCards.Count);
         foreach (var card in StyleCards)
         {
             var matches = StyleFilter switch
@@ -1103,8 +1191,19 @@ public sealed class StageViewModel : ViewModelBase
 
             if (matches)
             {
-                FilteredStyleCards.Add(card);
+                desired.Add(card);
             }
+        }
+
+        if (FilteredStyleCards.SequenceEqual(desired))
+        {
+            return;
+        }
+
+        FilteredStyleCards.Clear();
+        foreach (var card in desired)
+        {
+            FilteredStyleCards.Add(card);
         }
     }
 
@@ -1127,10 +1226,16 @@ public sealed class StageViewModel : ViewModelBase
         }
     }
 
+    private static readonly Action<ILogger, Exception?> LogStageOperationError =
+        LoggerMessage.Define(
+            LogLevel.Error,
+            new EventId(1, nameof(SafeRunAsync)),
+            "Unhandled async error in StageViewModel operation.");
+
     private static Color ToAvaloniaColor(RgbColor c) => Color.FromArgb(c.A, c.R, c.G, c.B);
     private static RgbColor FromAvaloniaColor(Color c) => new(c.R, c.G, c.B, c.A);
 
-    private static async Task SafeRunAsync(Func<Task> op)
+    private async Task SafeRunAsync(Func<Task> op)
     {
         try
         {
@@ -1143,6 +1248,10 @@ public sealed class StageViewModel : ViewModelBase
         catch (ObjectDisposedException)
         {
             // Normal during shutdown.
+        }
+        catch (Exception ex)
+        {
+            LogStageOperationError(_logger, ex);
         }
     }
 }

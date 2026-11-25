@@ -163,6 +163,13 @@ public static class HotkeyGestureParser
             }
         }
 
+        if (token.Length == 2 && (token[0] is 'D' or 'd') && token[1] is >= '0' and <= '9')
+        {
+            vk = token[1];
+            displayKey = token[1].ToString();
+            return true;
+        }
+
         if (token.Length >= 2 && (token[0] is 'F' or 'f') &&
             int.TryParse(token.AsSpan(1), out var fNum) && fNum is >= 1 and <= 24)
         {

@@ -186,4 +186,71 @@ public sealed class Phase5StageAndSettingsTests
         ico[6 + 48].Should().Be(32);
         ico[6 + 64].Should().Be(48);
     }
+
+    [Theory]
+    [InlineData("Ctrl+Shift+D0")]
+    [InlineData("Ctrl+Alt+D9")]
+    public void HotkeyGestureParser_AcceptsDigitKeys_D0ThroughD9(string gesture)
+    {
+        var ok = LyricPulse.App.Platform.HotkeyGestureParser.TryParse(gesture, out var parsed, out var error);
+        ok.Should().BeTrue(error);
+        error.Should().BeNull();
+        parsed.NormalizedGesture.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task StageViewModel_Phase6DrawerModes_HotkeyClear_HealthDot_AndActiveBooleans()
+    {
+        await using var runtime = await CreateStartedControllerAsync();
+        runtime.SetStageWindowOpen(true);
+
+        var vm = new StageViewModel(runtime);
+        vm.ApplySnapshot(runtime.SampleFrame());
+
+        // Drawer responsive docking vs <880px overlay
+        vm.IsSettingsDrawerOpen = true;
+        vm.IsCompactDrawerMode = false;
+        vm.IsDockedDrawerVisible.Should().BeTrue();
+        vm.IsOverlayDrawerVisible.Should().BeFalse();
+
+        vm.IsCompactDrawerMode = true;
+        vm.IsDockedDrawerVisible.Should().BeFalse();
+        vm.IsOverlayDrawerVisible.Should().BeTrue();
+
+        // Recording hotkey clear
+        vm.ClearCurrentRecordingHotkey().Should().BeFalse();
+        vm.BeginRecordHotkeyCommand.Execute(HotkeyAction.ToggleLyrics);
+        vm.ClearCurrentRecordingHotkey().Should().BeTrue();
+        await Task.Delay(60);
+        vm.ApplySnapshot(runtime.SampleFrame());
+        vm.HotkeyRows.Single(r => r.Action == HotkeyAction.ToggleLyrics).GestureText.Should().BeEmpty();
+
+        // Media health dot brush is populated cleanly across states
+        vm.MediaHealthDotBrush.Should().NotBeNull();
+
+        // Filter active selection booleans
+        vm.IsFilterAll.Should().BeTrue();
+        vm.SetStyleFilterCommand.Execute("Pinned");
+        vm.IsFilterPinned.Should().BeTrue();
+        vm.IsFilterAll.Should().BeFalse();
+
+        // Theme, Scrim, and Secondary active selection booleans
+        vm.SelectThemeVariantCommand.Execute(ThemeVariantMode.Light);
+        await Task.Delay(60);
+        vm.ApplySnapshot(runtime.SampleFrame());
+        vm.IsThemeLight.Should().BeTrue();
+        vm.IsThemeDark.Should().BeFalse();
+
+        vm.SelectScrimIntensityCommand.Execute(ScrimIntensity.Strong);
+        await Task.Delay(60);
+        vm.ApplySnapshot(runtime.SampleFrame());
+        vm.IsScrimStrong.Should().BeTrue();
+
+        vm.SelectSecondaryLineCommand.Execute(SecondaryLineMode.Romanization);
+        await Task.Delay(60);
+        vm.ApplySnapshot(runtime.SampleFrame());
+        vm.IsSecondaryRomanization.Should().BeTrue();
+
+        vm.IsReducedMotionToggleEnabled.Should().BeTrue();
+    }
 }

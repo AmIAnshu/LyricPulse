@@ -39,6 +39,7 @@ public sealed class App : Application, IDisposable
     private Window? _hiddenAnchorWindow;
     private AppSettings? _lastAppliedOverlaySettings;
     private ImmutableDictionary<HotkeyAction, string>? _lastRegisteredHotkeys;
+    private IReadOnlyDictionary<HotkeyAction, string> _lastHotkeyConflicts = ImmutableDictionary<HotkeyAction, string>.Empty;
     private bool _disposed;
 
     public static SingleInstanceGuard? ActiveSingleInstanceGuard { get; set; }
@@ -186,6 +187,7 @@ public sealed class App : Application, IDisposable
             onDisplaysRefreshRequested: RefreshStageDisplayList);
 
         _stageViewModel.UpdateDisplays(MapMonitorDisplays(_overlayCoordinator?.EnumerateCurrentMonitors() ?? []));
+        _stageViewModel.SetHotkeyConflicts(_lastHotkeyConflicts);
 
         _stageWindow = new StageWindow(_stageViewModel, fonts, shaders, telemetry, rendererFactory);
         desktop.MainWindow = _stageWindow;
@@ -488,7 +490,7 @@ public sealed class App : Application, IDisposable
             {
                 await _runtime.SetDemoModeAsync(true).ConfigureAwait(false);
             }
-            else if (!snap.IsDemoMode && (!snap.IsPlaying || snap.LyricsStatus != LyricsStatus.Synced))
+            else if (!snap.IsDemoMode && snap.Track is null)
             {
                 await _runtime.SetDemoModeAsync(true).ConfigureAwait(false);
             }
@@ -542,6 +544,7 @@ public sealed class App : Application, IDisposable
             _logger.LogHotkeyConflict(action.ToString(), reason);
         }
 
+        _lastHotkeyConflicts = conflicts;
         _trayController?.SetHotkeyConflicts(conflicts);
         _stageViewModel?.SetHotkeyConflicts(conflicts);
     }

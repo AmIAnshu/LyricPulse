@@ -7,6 +7,21 @@
              Background="{DynamicResource LpSurfaceBrush}"
              BorderBrush="{DynamicResource LpBorderDefaultBrush}"
              BorderThickness="1,0,0,0">
+  <UserControl.Styles>
+    <Style Selector="Button.seg">
+      <Setter Property="Background" Value="{DynamicResource LpSurfaceElevatedBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource LpTextSecondaryBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource LpBorderDefaultBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="8"/>
+    </Style>
+    <Style Selector="Button.seg.active">
+      <Setter Property="Background" Value="{DynamicResource LpAccentSoftBgBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource LpAccentTextBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource LpAccentBorderBrush}"/>
+      <Setter Property="BorderThickness" Value="1.5"/>
+    </Style>
+  </UserControl.Styles>
   <Grid RowDefinitions="52,*,56">
     <!-- Sticky Header -->
     <Border Grid.Row="0"
@@ -195,11 +210,11 @@
           <!-- Bilingual Sub-line -->
           <TextBlock Text="Bilingual Sub-line" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
           <Grid ColumnDefinitions="*,*,*" ColumnSpacing="6">
-            <Button Grid.Column="0" Content="Off" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+            <Button Classes="seg" Classes.active="{Binding IsSecondaryOff}" Grid.Column="0" Content="Off" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Command="{Binding SelectSecondaryLineCommand}" CommandParameter="{x:Static m:SecondaryLineMode.Off}"/>
-            <Button Grid.Column="1" Content="Translate" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+            <Button Classes="seg" Classes.active="{Binding IsSecondaryTranslation}" Grid.Column="1" Content="Translate" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Command="{Binding SelectSecondaryLineCommand}" CommandParameter="{x:Static m:SecondaryLineMode.Translation}"/>
-            <Button Grid.Column="2" Content="Romanize" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+            <Button Classes="seg" Classes.active="{Binding IsSecondaryRomanization}" Grid.Column="2" Content="Romanize" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Command="{Binding SelectSecondaryLineCommand}" CommandParameter="{x:Static m:SecondaryLineMode.Romanization}"/>
           </Grid>
         </StackPanel>
@@ -239,17 +254,17 @@
           <Border Background="{DynamicResource LpStageBackgroundBrush}" BorderBrush="{DynamicResource LpBorderStrongBrush}"
                   BorderThickness="1" CornerRadius="8" Padding="8" Height="96">
             <Grid RowDefinitions="Auto,*,Auto,Auto" ColumnDefinitions="*,*,*">
-              <Button Grid.Row="0" Grid.Column="1" Content="Top" FontSize="11" HorizontalAlignment="Center" Padding="10,3"
+              <Button Classes="seg" Classes.active="{Binding IsAnchorTopCenter}" Grid.Row="0" Grid.Column="1" Content="Top" FontSize="11" HorizontalAlignment="Center" Padding="10,3"
                       Command="{Binding SelectAnchorZoneCommand}" CommandParameter="{x:Static m:AnchorZone.TopCenter}"/>
-              <Button Grid.Row="1" Grid.Column="1" Content="Center" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="10,3"
+              <Button Classes="seg" Classes.active="{Binding IsAnchorMiddleCenter}" Grid.Row="1" Grid.Column="1" Content="Center" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="10,3"
                       Command="{Binding SelectAnchorZoneCommand}" CommandParameter="{x:Static m:AnchorZone.MiddleCenter}"/>
-              <Button Grid.Row="2" Grid.Column="0" Content="B-Left" FontSize="11" HorizontalAlignment="Left" Padding="8,3"
+              <Button Classes="seg" Classes.active="{Binding IsAnchorBottomLeft}" Grid.Row="2" Grid.Column="0" Content="B-Left" FontSize="11" HorizontalAlignment="Left" Padding="8,3"
                       Command="{Binding SelectAnchorZoneCommand}" CommandParameter="{x:Static m:AnchorZone.BottomLeft}"/>
-              <Button Grid.Row="2" Grid.Column="1" Content="B-Third" FontSize="11" HorizontalAlignment="Center" Padding="8,3"
+              <Button Classes="seg" Classes.active="{Binding IsAnchorBottomThird}" Grid.Row="2" Grid.Column="1" Content="B-Third" FontSize="11" HorizontalAlignment="Center" Padding="8,3"
                       Command="{Binding SelectAnchorZoneCommand}" CommandParameter="{x:Static m:AnchorZone.BottomThird}"/>
-              <Button Grid.Row="2" Grid.Column="2" Content="B-Right" FontSize="11" HorizontalAlignment="Right" Padding="8,3"
+              <Button Classes="seg" Classes.active="{Binding IsAnchorBottomRight}" Grid.Row="2" Grid.Column="2" Content="B-Right" FontSize="11" HorizontalAlignment="Right" Padding="8,3"
                       Command="{Binding SelectAnchorZoneCommand}" CommandParameter="{x:Static m:AnchorZone.BottomRight}"/>
-              <Border Grid.Row="3" Grid.ColumnSpan="3" Height="3" Margin="0,4,0,0" CornerRadius="2" Background="#475569"/>
+              <Border Grid.Row="3" Grid.ColumnSpan="3" Height="3" Margin="0,4,0,0" CornerRadius="2" Background="{DynamicResource LpBorderDefaultBrush}"/>
             </Grid>
           </Border>
 
@@ -308,11 +323,11 @@
           <TextBlock Text="Theme &amp; Accessibility" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
 
           <Grid ColumnDefinitions="*,*,*" ColumnSpacing="6">
-            <Button Grid.Column="0" Content="System" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+            <Button Classes="seg" Classes.active="{Binding IsThemeSystem}" Grid.Column="0" Content="System" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Command="{Binding SelectThemeVariantCommand}" CommandParameter="{x:Static m:ThemeVariantMode.System}"/>
-            <Button Grid.Column="1" Content="Dark" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+            <Button Classes="seg" Classes.active="{Binding IsThemeDark}" Grid.Column="1" Content="Dark" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Command="{Binding SelectThemeVariantCommand}" CommandParameter="{x:Static m:ThemeVariantMode.Dark}"/>
-            <Button Grid.Column="2" Content="Light" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+            <Button Classes="seg" Classes.active="{Binding IsThemeLight}" Grid.Column="2" Content="Light" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Command="{Binding SelectThemeVariantCommand}" CommandParameter="{x:Static m:ThemeVariantMode.Light}"/>
           </Grid>
 
@@ -330,7 +345,7 @@
               <TextBlock IsVisible="{Binding IsOsReducedMotion}" Text="Synced with Windows setting"
                          FontSize="11" Foreground="{DynamicResource LpAccentTextBrush}"/>
             </StackPanel>
-            <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReducedMotion}" OnContent="" OffContent=""/>
+            <ToggleSwitch Grid.Column="1" IsChecked="{Binding ReducedMotion}" IsEnabled="{Binding IsReducedMotionToggleEnabled}" OnContent="" OffContent=""/>
           </Grid>
           <Grid ColumnDefinitions="*,Auto">
             <TextBlock Text="High-Contrast Text Scrim" VerticalAlignment="Center" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
@@ -339,13 +354,13 @@
 
           <TextBlock Text="Ambient Scrim Intensity" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
           <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="4">
-            <Button Grid.Column="0" Content="Off" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+            <Button Classes="seg" Classes.active="{Binding IsScrimOff}" Grid.Column="0" Content="Off" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Command="{Binding SelectScrimIntensityCommand}" CommandParameter="{x:Static m:ScrimIntensity.Off}"/>
-            <Button Grid.Column="1" Content="Subtle" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+            <Button Classes="seg" Classes.active="{Binding IsScrimSubtle}" Grid.Column="1" Content="Subtle" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Command="{Binding SelectScrimIntensityCommand}" CommandParameter="{x:Static m:ScrimIntensity.Subtle}"/>
-            <Button Grid.Column="2" Content="Balanced" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+            <Button Classes="seg" Classes.active="{Binding IsScrimBalanced}" Grid.Column="2" Content="Balanced" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Command="{Binding SelectScrimIntensityCommand}" CommandParameter="{x:Static m:ScrimIntensity.Balanced}"/>
-            <Button Grid.Column="3" Content="Strong" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+            <Button Classes="seg" Classes.active="{Binding IsScrimStrong}" Grid.Column="3" Content="Strong" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Command="{Binding SelectScrimIntensityCommand}" CommandParameter="{x:Static m:ScrimIntensity.Strong}"/>
           </Grid>
         </StackPanel>
