@@ -103,6 +103,8 @@ public interface IWordVisualMatcher : IDisposable
 
     Task InitializeAsync(CancellationToken cancellationToken = default);
     WordVisualMatch? MatchWord(ReadOnlySpan<char> word, VisualPreference preference = VisualPreference.Balanced);
+    ImmutableArray<WordVisualMatch?> MatchLine(IReadOnlyList<LyricWord> words, VisualPreference preference = VisualPreference.Balanced);
+    WordVisualMatch? InferTrackMoodVisual(TrackIdentity? track, LyricsDocument? document, VisualPreference preference = VisualPreference.Balanced);
     LyricsDocument AnnotateDocument(LyricsDocument document, VisualPreference preference = VisualPreference.Balanced);
 }
 

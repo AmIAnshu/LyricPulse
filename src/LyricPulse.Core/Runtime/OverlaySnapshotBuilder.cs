@@ -28,11 +28,19 @@ internal static class OverlaySnapshotBuilder
             : BuildLiveSnapshot(state, livePositionResolver, activePalette, targetPalette);
     }
 
-    public static bool CanAdjustTimingOffset(RuntimeStateBox state) =>
-        state.IsDemoMode ||
-        (state.LiveTrack is not null &&
-         state.LiveLyricsStatus == LyricsStatus.Synced &&
-         state.LiveDocument is not null);
+    public static bool CanAdjustTimingOffset(RuntimeStateBox state)
+    {
+        var hasSyncedTrack = state.IsDemoMode ||
+                             (state.LiveTrack is not null &&
+                              state.LiveLyricsStatus == LyricsStatus.Synced &&
+                              state.LiveDocument is not null);
+        if (!hasSyncedTrack)
+        {
+            return false;
+        }
+
+        return state.IsStageWindowOpen || (state.Settings.LyricsVisible && !state.IsFullscreenHidden);
+    }
 
     public static AlbumAccentPalette ResolveTargetPalette(RuntimeStateBox state)
     {
@@ -100,7 +108,9 @@ internal static class OverlaySnapshotBuilder
             TrackGeneration: state.TrackGeneration,
             SeekGeneration: state.SeekGeneration,
             IsOsReducedMotion: state.IsOsReducedMotion,
-            OffsetGeneration: state.OffsetGeneration);
+            OffsetGeneration: state.OffsetGeneration,
+            IsStageWindowOpen: state.IsStageWindowOpen,
+            TrackMoodVisual: state.DemoMoodVisual);
     }
 
     private static OverlayPlaybackSnapshot BuildLiveSnapshot(
@@ -137,6 +147,8 @@ internal static class OverlaySnapshotBuilder
             TrackGeneration: state.TrackGeneration,
             SeekGeneration: state.SeekGeneration,
             IsOsReducedMotion: state.IsOsReducedMotion,
-            OffsetGeneration: state.OffsetGeneration);
+            OffsetGeneration: state.OffsetGeneration,
+            IsStageWindowOpen: state.IsStageWindowOpen,
+            TrackMoodVisual: state.LiveMoodVisual);
     }
 }

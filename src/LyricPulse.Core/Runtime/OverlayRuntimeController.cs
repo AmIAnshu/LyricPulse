@@ -71,6 +71,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
     public AppSettings Settings => Volatile.Read(ref _state).Settings;
     public bool IsDemoMode => Volatile.Read(ref _state).IsDemoMode;
     public bool IsEffectiveReducedMotion => Volatile.Read(ref _state).IsEffectiveReducedMotion;
+    public bool IsStageWindowOpen => Volatile.Read(ref _state).IsStageWindowOpen;
 
     public event EventHandler<AppSettings>? SettingsChanged;
     public event EventHandler<OverlayPlaybackSnapshot>? StateChanged;
@@ -151,6 +152,35 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
 
     public Task ToggleUniversalPlayerModeAsync(CancellationToken cancellationToken = default) =>
         UpdateSettingsAsync(s => s with { UniversalPlayerMode = !s.UniversalPlayerMode }, cancellationToken);
+
+    public Task SetStageBackdropModeAsync(StageBackdropMode mode, CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { StageBackdropMode = mode }, cancellationToken);
+
+    public Task ToggleFollowingDotAsync(CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { ShowFollowingDot = !s.ShowFollowingDot }, cancellationToken);
+
+    public Task ToggleColorSweepLayerAsync(CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { ShowColorSweepLayer = !s.ShowColorSweepLayer }, cancellationToken);
+
+    public Task ToggleDesktopOverlayAsync(CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { DesktopOverlayEnabled = !s.DesktopOverlayEnabled }, cancellationToken);
+
+    public Task SetPartyEnergyLevelAsync(float level, CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { PartyEnergyLevel = level }, cancellationToken);
+
+    public Task SetFullscreenStageScaleAsync(float scale, CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { FullscreenStageScale = scale }, cancellationToken);
+
+    public void SetStageWindowOpen(bool isOpen)
+    {
+        if (_disposed || Volatile.Read(ref _state).IsStageWindowOpen == isOpen)
+        {
+            return;
+        }
+
+        var updated = UpdateState(s => s with { IsStageWindowOpen = isOpen });
+        NotifyStateChanged(updated);
+    }
 
     public async Task<OverlayStyleId> CyclePinnedStyleAsync(CancellationToken cancellationToken = default)
     {
@@ -286,6 +316,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
     {
         var pref = Volatile.Read(ref _state).Settings.VisualPreference;
         var demoDoc = GetOrCreateAnnotatedDemoDocument(pref);
+        var demoMood = _visualMatcher.InferTrackMoodVisual(demoDoc.Track, demoDoc, pref);
         var resetOffset = await _timingOffsetService
             .OnTrackChangedAsync(null, enablePerTrackSavedOffsets: false, cancellationToken)
             .ConfigureAwait(false);
@@ -295,6 +326,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
             IsDemoMode = true,
             DemoStartTimestamp = nowTicks,
             DemoDocument = demoDoc,
+            DemoMoodVisual = demoMood,
             TimingOffset = resetOffset,
             HasUserNudgedInCurrentTrack = false,
             LastOffsetNudgeUtc = null,
@@ -404,9 +436,15 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
             var reannotatedDemo = visualPrefChanged && s.IsDemoMode
                 ? GetOrCreateAnnotatedDemoDocument(normalized.VisualPreference)
                 : s.DemoDocument;
+            var demoMood = visualPrefChanged && reannotatedDemo is not null
+                ? _visualMatcher.InferTrackMoodVisual(reannotatedDemo.Track, reannotatedDemo, normalized.VisualPreference)
+                : s.DemoMoodVisual;
             var reannotatedLive = visualPrefChanged && s.LiveDocument is not null
                 ? _visualMatcher.AnnotateDocument(s.LiveDocument, normalized.VisualPreference)
                 : s.LiveDocument;
+            var liveMood = visualPrefChanged && s.LiveTrack is not null
+                ? _visualMatcher.InferTrackMoodVisual(s.LiveTrack, reannotatedLive, normalized.VisualPreference)
+                : s.LiveMoodVisual;
 
             var effectiveReduced = normalized.ReducedMotion || s.IsOsReducedMotion;
             var morph = effectiveReduced
@@ -418,7 +456,9 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
                 Settings = normalized,
                 IsFullscreenHidden = isFullscreen,
                 DemoDocument = reannotatedDemo,
+                DemoMoodVisual = demoMood,
                 LiveDocument = reannotatedLive,
+                LiveMoodVisual = liveMood,
                 PaletteMorph = morph
             };
         });
@@ -503,6 +543,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
             {
                 LiveTrack = track,
                 LiveDocument = null,
+                LiveMoodVisual = null,
                 LiveLyricsStatus = track is null ? LyricsStatus.NotFound : LyricsStatus.Loading,
                 LiveTargetPalette = nextTargetPalette,
                 PaletteMorph = morph,
@@ -566,7 +607,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
                 return;
             }
 
-            var (status, document) = await lyricsTask.ConfigureAwait(false);
+            var (status, document, moodVisual) = await lyricsTask.ConfigureAwait(false);
             var extractedPalette = await paletteTask.ConfigureAwait(false);
             var nowTicks = _timestampProvider();
 
@@ -587,6 +628,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
                 {
                     LiveLyricsStatus = status,
                     LiveDocument = document,
+                    LiveMoodVisual = moodVisual,
                     LiveTargetPalette = targetPalette,
                     PaletteMorph = morph
                 };
@@ -644,7 +686,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         }
     }
 
-    private async Task<(LyricsStatus Status, LyricsDocument? Document)> FetchAndAnnotateLyricsAsync(
+    private async Task<(LyricsStatus Status, LyricsDocument? Document, WordVisualMatch? MoodVisual)> FetchAndAnnotateLyricsAsync(
         TrackIdentity track,
         VisualPreference preference,
         bool forceRefresh,
@@ -653,13 +695,19 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         var result = forceRefresh
             ? await _lyricsOrchestrator.GetLyricsAsync(track, forceRefresh: true, ct).ConfigureAwait(false)
             : await _lyricsOrchestrator.GetLyricsAsync(track, ct).ConfigureAwait(false);
-        if (result.Document is null || ct.IsCancellationRequested)
+        if (ct.IsCancellationRequested)
         {
-            return (result.Status, null);
+            return (result.Status, null, null);
+        }
+
+        if (result.Document is null)
+        {
+            return (result.Status, null, _visualMatcher.InferTrackMoodVisual(track, null, preference));
         }
 
         var annotated = _visualMatcher.AnnotateDocument(result.Document, preference);
-        return (result.Status, annotated);
+        var mood = _visualMatcher.InferTrackMoodVisual(track, annotated, preference);
+        return (result.Status, annotated, mood);
     }
 
     private async Task<AlbumAccentPalette?> ExtractAlbumPaletteAsync(CancellationToken ct)

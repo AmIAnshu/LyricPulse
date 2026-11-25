@@ -34,6 +34,13 @@ public enum SecondaryLineMode
     Romanization = 2
 }
 
+public enum StageBackdropMode
+{
+    AmbientPartyMesh = 0,
+    PureBlack = 1,
+    TransparentOverlay = 2
+}
+
 public enum HotkeyAction
 {
     ToggleLyrics = 0,
@@ -76,15 +83,21 @@ public sealed record AppSettings
     public const double MaxOverlayOpacity = 1.00;
     public const int MinSafeMarginPx = 16;
     public const int MaxSafeMarginPx = 120;
+    public const float MinPartyEnergyLevel = 0.5f;
+    public const float MaxPartyEnergyLevel = 1.5f;
+    public const float DefaultPartyEnergyLevel = 1.0f;
+    public const float MinFullscreenStageScale = 1.2f;
+    public const float MaxFullscreenStageScale = 2.6f;
+    public const float DefaultFullscreenStageScale = 1.85f;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     public OverlayStyleId ActiveStyle { get; init; } = OverlayStyleId.Fisheye;
 
     /// <summary>
-    /// Milestone 1A defaults to pinning the 3 MVP styles; expanded to 4 pins in Phase 4-6.
+    /// Canonical v1.0 4-style pinned set per ROADMAP.md; user-saved pins are preserved cleanly on upgrade.
     /// </summary>
     public ImmutableArray<OverlayStyleId> PinnedStyles { get; init; } =
-        [OverlayStyleId.Fisheye, OverlayStyleId.Codestyle, OverlayStyleId.VisualStack];
+        [OverlayStyleId.FisheyeVisual, OverlayStyleId.Codestyle, OverlayStyleId.Constellation, OverlayStyleId.KineticWall];
 
     public string FontFamily { get; init; } = "Jost";
     public double FontScale { get; init; } = 1.00;
@@ -123,6 +136,12 @@ public sealed record AppSettings
     public SecondaryLineMode SecondaryLineMode { get; init; } = SecondaryLineMode.Off;
     public bool LyricsVisible { get; init; } = true;
     public VisualPreference VisualPreference { get; init; } = VisualPreference.Balanced;
+    public StageBackdropMode StageBackdropMode { get; init; } = StageBackdropMode.AmbientPartyMesh;
+    public bool ShowFollowingDot { get; init; } = true;
+    public bool ShowColorSweepLayer { get; init; } = true;
+    public float PartyEnergyLevel { get; init; } = DefaultPartyEnergyLevel;
+    public float FullscreenStageScale { get; init; } = DefaultFullscreenStageScale;
+    public bool DesktopOverlayEnabled { get; init; }
 
     [JsonIgnore]
     public MediaSourcePolicy SourcePolicy =>
@@ -156,6 +175,15 @@ public sealed record AppSettings
             : 0.95;
 
         var normalizedMargin = Math.Clamp(SafeMarginPx, MinSafeMarginPx, MaxSafeMarginPx);
+        var normalizedEnergy = float.IsFinite(PartyEnergyLevel)
+            ? Math.Clamp(PartyEnergyLevel, MinPartyEnergyLevel, MaxPartyEnergyLevel)
+            : DefaultPartyEnergyLevel;
+        var normalizedStageScale = float.IsFinite(FullscreenStageScale)
+            ? Math.Clamp(FullscreenStageScale, MinFullscreenStageScale, MaxFullscreenStageScale)
+            : DefaultFullscreenStageScale;
+        var normalizedBackdrop = Enum.IsDefined(StageBackdropMode)
+            ? StageBackdropMode
+            : StageBackdropMode.AmbientPartyMesh;
         var normalizedFont = string.IsNullOrWhiteSpace(FontFamily) ? "Jost" : FontFamily.Trim();
         var pinned = PinnedStyles.IsDefaultOrEmpty
             ? Default.PinnedStyles
@@ -177,6 +205,9 @@ public sealed record AppSettings
             FontScale = normalizedScale,
             OverlayOpacity = normalizedOpacity,
             SafeMarginPx = normalizedMargin,
+            StageBackdropMode = normalizedBackdrop,
+            PartyEnergyLevel = normalizedEnergy,
+            FullscreenStageScale = normalizedStageScale,
             PerDisplayBounds = bounds,
             DisabledDisplays = disabled,
             BlockedAppIds = blocked,

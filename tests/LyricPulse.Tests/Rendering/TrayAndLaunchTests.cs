@@ -66,8 +66,8 @@ public sealed class TrayAndLaunchTests
         liveMenu.OffsetPersistenceCaption.Should().Be("Saved per song");
         liveMenu.CanRetryLyricsFetch.Should().BeFalse();
 
-        // Pinned radio sync + structural equality
-        liveMenu.PinnedStyles.Should().HaveCount(3);
+        // Pinned radio sync + structural equality (4 canonical v1.0 pins)
+        liveMenu.PinnedStyles.Should().HaveCount(4);
         liveMenu.PinnedStyles.Single(p => p.IsActive).StyleId.Should().Be(OverlayStyleId.Codestyle);
         liveMenu.Equals(TrayMenuState.FromSnapshot(liveSnap)).Should().BeTrue();
 
@@ -107,10 +107,10 @@ public sealed class TrayAndLaunchTests
         // 6. Hidden overlay & Fullscreen auto-hide use OverlayHidden diagonal slash + unpinned active style fallback
         var hiddenUnpinnedMenu = TrayMenuState.FromSnapshot(liveSnap with
         {
-            Settings = AppSettings.Default with { LyricsVisible = false, ActiveStyle = OverlayStyleId.Constellation }
+            Settings = AppSettings.Default with { LyricsVisible = false, ActiveStyle = OverlayStyleId.SpidersWeb }
         });
         hiddenUnpinnedMenu.IconState.Should().Be(TrayIconVisualState.OverlayHidden);
-        hiddenUnpinnedMenu.PinnedStyles[0].Label.Should().Be("Constellation (Current)");
+        hiddenUnpinnedMenu.PinnedStyles[0].Label.Should().Be("Spider's Web (Current)");
         hiddenUnpinnedMenu.PinnedStyles[0].IsActive.Should().BeTrue();
 
         var fullscreenMenu = TrayMenuState.FromSnapshot(liveSnap with { IsFullscreenHidden = true });

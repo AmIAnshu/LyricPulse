@@ -27,7 +27,7 @@ public sealed class CoreInfrastructureTests
         provider.GetRequiredService<ITrackOffsetStore>().Should().NotBeNull();
         provider.GetRequiredService<TimingOffsetService>().Should().NotBeNull();
         provider.GetRequiredService<DemoSongProvider>().Should().NotBeNull();
-        provider.GetRequiredService<IWordVisualMatcher>().Should().BeOfType<StarterLexiconVisualMatcher>();
+        provider.GetRequiredService<IWordVisualMatcher>().Should().BeOfType<GloveSemanticVisualMatcher>();
         provider.GetRequiredService<ILyricsCache>().Should().BeOfType<DiskLyricsCache>();
         provider.GetRequiredService<ILyricsOrchestrator>().Should().BeOfType<LyricsOrchestrator>();
         provider.GetRequiredService<IMediaSessionProvider>().Should().NotBeNull();

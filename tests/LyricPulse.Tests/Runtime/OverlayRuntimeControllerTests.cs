@@ -304,16 +304,18 @@ public sealed class OverlayRuntimeControllerTests : IDisposable
 
         await controller.StartAsync();
 
-        // Cycle pinned styles: default [Fisheye, Codestyle, VisualStack]
+        // Cycle pinned styles: v1.0 canonical defaults [FisheyeVisual, Codestyle, Constellation, KineticWall]
         controller.Settings.ActiveStyle.Should().Be(OverlayStyleId.Fisheye);
+        (await controller.CyclePinnedStyleAsync()).Should().Be(OverlayStyleId.FisheyeVisual);
         (await controller.CyclePinnedStyleAsync()).Should().Be(OverlayStyleId.Codestyle);
-        (await controller.CyclePinnedStyleAsync()).Should().Be(OverlayStyleId.VisualStack);
-        (await controller.CyclePinnedStyleAsync()).Should().Be(OverlayStyleId.Fisheye);
+        (await controller.CyclePinnedStyleAsync()).Should().Be(OverlayStyleId.Constellation);
+        (await controller.CyclePinnedStyleAsync()).Should().Be(OverlayStyleId.KineticWall);
+        (await controller.CyclePinnedStyleAsync()).Should().Be(OverlayStyleId.FisheyeVisual);
 
         // SetActiveStyle to an unpinned style, then CyclePinnedStyle jumps cleanly to PinnedStyles[0]
-        await controller.SetActiveStyleAsync(OverlayStyleId.KineticWall);
-        controller.Settings.ActiveStyle.Should().Be(OverlayStyleId.KineticWall);
-        (await controller.CyclePinnedStyleAsync()).Should().Be(OverlayStyleId.Fisheye);
+        await controller.SetActiveStyleAsync(OverlayStyleId.Messages);
+        controller.Settings.ActiveStyle.Should().Be(OverlayStyleId.Messages);
+        (await controller.CyclePinnedStyleAsync()).Should().Be(OverlayStyleId.FisheyeVisual);
 
         // Toggle visibility & reduced motion
         await controller.ToggleLyricsVisibilityAsync();
@@ -472,6 +474,12 @@ public sealed class OverlayRuntimeControllerTests : IDisposable
             DirectMatchWordCalls++;
             return inner.MatchWord(word, preference);
         }
+
+        public ImmutableArray<WordVisualMatch?> MatchLine(IReadOnlyList<LyricWord> words, VisualPreference preference = VisualPreference.Balanced) =>
+            inner.MatchLine(words, preference);
+
+        public WordVisualMatch? InferTrackMoodVisual(TrackIdentity? track, LyricsDocument? document, VisualPreference preference = VisualPreference.Balanced) =>
+            inner.InferTrackMoodVisual(track, document, preference);
 
         public LyricsDocument AnnotateDocument(LyricsDocument document, VisualPreference preference = VisualPreference.Balanced)
         {

@@ -25,7 +25,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ITrackOffsetStore>(_ => new TrackOffsetStore());
         services.AddSingleton<TimingOffsetService>();
         services.AddSingleton<DemoSongProvider>();
-        services.AddSingleton<IWordVisualMatcher, StarterLexiconVisualMatcher>();
+        services.AddSingleton<IWordVisualMatcher>(sp =>
+            new GloveSemanticVisualMatcher(logger: sp.GetService<ILogger<GloveSemanticVisualMatcher>>()));
         services.AddSingleton<ILyricsCache>(sp =>
             new DiskLyricsCache(cacheDirectory: null, sp.GetRequiredService<ILyricsParser>()));
         services.AddSingleton(sp =>

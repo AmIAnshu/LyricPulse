@@ -48,4 +48,7 @@ internal static partial class CoreLogMessages
 
     [LoggerMessage(EventId = 3002, Level = LogLevel.Warning, Message = "Runtime album art palette extraction failed unexpectedly")]
     public static partial void LogRuntimeAlbumArtFailed(this ILogger logger, Exception ex);
+
+    [LoggerMessage(EventId = 4001, Level = LogLevel.Warning, Message = "Failed to load quantized GloVe visual embeddings from '{BinaryPath}'; falling back to StarterLexicon mode")]
+    public static partial void LogGloveEmbeddingLoadFailed(this ILogger logger, Exception ex, string binaryPath);
 }
