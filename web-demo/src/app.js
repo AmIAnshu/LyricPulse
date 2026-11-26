@@ -198,13 +198,22 @@ function resizeCanvasDpi(canvas) {
   return { ctx, w: rect.width, h: rect.height };
 }
 
-function syncPlayUI() {
-  el.playIcon.hidden = state.isPlaying;
-  el.pauseIcon.hidden = !state.isPlaying;
-  if (el.glassPlayIcon && el.glassPauseIcon) {
-    el.glassPlayIcon.hidden = state.isPlaying;
-    el.glassPauseIcon.hidden = !state.isPlaying;
+function setElHidden(node, hide) {
+  if (!node) return;
+  if (hide) {
+    node.setAttribute('hidden', '');
+    node.style.display = 'none';
+  } else {
+    node.removeAttribute('hidden');
+    node.style.display = '';
   }
+}
+
+function syncPlayUI() {
+  setElHidden(el.playIcon, state.isPlaying);
+  setElHidden(el.pauseIcon, !state.isPlaying);
+  setElHidden(el.glassPlayIcon, state.isPlaying);
+  setElHidden(el.glassPauseIcon, !state.isPlaying);
   if (engine.audioEl) {
     if (state.isPlaying && engine.audioEl.paused) engine.audioEl.play().catch(() => {});
     if (!state.isPlaying && !engine.audioEl.paused) engine.audioEl.pause();
