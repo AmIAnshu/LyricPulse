@@ -209,6 +209,30 @@ public sealed class ReactiveVisualIconRenderer : IDisposable
             case "flower" or "rose" or "bloom" or "petal":
                 DrawFlower(canvas, cx, cy, r, t, c2, opacity, reducedMotion);
                 return true;
+            case "paper" or "newspaper" or "letter" or "page" or "book" or "note" or "write":
+                DrawPaperSheet(canvas, cx, cy, r, t, c1, c2, opacity, reducedMotion);
+                return true;
+            case "butterfly" or "wings" or "angel" or "bird" or "feather":
+                DrawButterfly(canvas, cx, cy, r, t, beatPulse, c1, c2, opacity, reducedMotion);
+                return true;
+            case "planet" or "world" or "earth" or "universe" or "space" or "galaxy" or "orbit":
+                DrawPlanet(canvas, cx, cy, r, t, c1, c2, opacity, reducedMotion);
+                return true;
+            case "car" or "drive" or "road" or "ride" or "speed" or "wheel" or "street":
+                DrawCar(canvas, cx, cy, r, t, beatPulse, c1, c2, opacity, reducedMotion);
+                return true;
+            case "ghost" or "shadow" or "phantom" or "spirit" or "haunt":
+                DrawGhost(canvas, cx, cy, r, t, c1, c2, opacity, reducedMotion);
+                return true;
+            case "wine" or "glass" or "drink" or "cup" or "champagne" or "bottle":
+                DrawGlass(canvas, cx, cy, r, t, c1, c2, opacity, reducedMotion);
+                return true;
+            case "key" or "lock" or "unlock" or "door" or "secret":
+                DrawKey(canvas, cx, cy, r, t, c1, c2, opacity, reducedMotion);
+                return true;
+            case "sword" or "knife" or "blade" or "cut" or "fight":
+                DrawSword(canvas, cx, cy, r, t, c1, c2, opacity, reducedMotion);
+                return true;
             default:
                 return false;
         }
@@ -534,6 +558,200 @@ public sealed class ReactiveVisualIconRenderer : IDisposable
 
         _fillPaint.Color = new SKColor(0xFD, 0xE0, 0x47, (byte)(245 * opacity));
         canvas.DrawCircle(cx, cy, r * 0.28f, _fillPaint);
+    }
+
+    private void DrawPaperSheet(SKCanvas canvas, float cx, float cy, float r, float t, RgbColor c1, RgbColor c2, float opacity, bool reducedMotion)
+    {
+        var tilt = reducedMotion ? -5f : (-5f + (MathF.Sin(t * 3.1f) * 3.5f));
+        var save = canvas.Save();
+        try
+        {
+            canvas.Translate(cx, cy);
+            canvas.RotateDegrees(tilt);
+
+            var rect = new SKRect(-r * 0.68f, -r * 0.84f, r * 0.68f, r * 0.84f);
+            _fillPaint.Shader = null;
+            _fillPaint.Color = new SKColor(0xF8, 0xFA, 0xFC, (byte)(242 * opacity));
+            canvas.DrawRoundRect(rect, r * 0.14f, r * 0.14f, _fillPaint);
+
+            _strokePaint.StrokeWidth = Math.Max(1.2f, r * 0.10f);
+            _strokePaint.Color = StyleLayoutHelper.BlendSrgb(c1, c2, 0.5f).ToSkColorWithAlpha(opacity * 0.85f);
+            canvas.DrawLine(-r * 0.42f, -r * 0.36f, r * 0.42f, -r * 0.36f, _strokePaint);
+            canvas.DrawLine(-r * 0.42f, 0f, r * 0.38f, 0f, _strokePaint);
+            canvas.DrawLine(-r * 0.42f, r * 0.36f, r * 0.22f, r * 0.36f, _strokePaint);
+        }
+        finally
+        {
+            canvas.RestoreToCount(save);
+        }
+    }
+
+    private void DrawButterfly(SKCanvas canvas, float cx, float cy, float r, float t, float beatPulse, RgbColor c1, RgbColor c2, float opacity, bool reducedMotion)
+    {
+        var flap = reducedMotion ? 1.0f : (0.68f + (0.32f * MathF.Abs(MathF.Cos(t * 6.5f))));
+        var span = r * flap * (1f + (beatPulse * 0.12f));
+
+        _fillPaint.Shader = null;
+        _fillPaint.Color = StyleLayoutHelper.BlendSrgb(c1, c2, 0.3f).ToSkColorWithAlpha(opacity * 0.92f);
+        canvas.DrawOval(cx - (span * 0.50f), cy - (r * 0.22f), span * 0.48f, r * 0.36f, _fillPaint);
+        canvas.DrawOval(cx + (span * 0.50f), cy - (r * 0.22f), span * 0.48f, r * 0.36f, _fillPaint);
+
+        _fillPaint.Color = StyleLayoutHelper.BlendSrgb(c2, new RgbColor(0xFF, 0xFF, 0xFF), 0.25f).ToSkColorWithAlpha(opacity * 0.84f);
+        canvas.DrawOval(cx - (span * 0.38f), cy + (r * 0.28f), span * 0.34f, r * 0.28f, _fillPaint);
+        canvas.DrawOval(cx + (span * 0.38f), cy + (r * 0.28f), span * 0.34f, r * 0.28f, _fillPaint);
+
+        _strokePaint.StrokeWidth = Math.Max(1.4f, r * 0.14f);
+        _strokePaint.Color = SKColors.White.WithAlpha((byte)(240 * opacity));
+        canvas.DrawLine(cx, cy - (r * 0.50f), cx, cy + (r * 0.56f), _strokePaint);
+    }
+
+    private void DrawPlanet(SKCanvas canvas, float cx, float cy, float r, float t, RgbColor c1, RgbColor c2, float opacity, bool reducedMotion)
+    {
+        _gradColors[0] = c1.ToSkColorWithAlpha(opacity);
+        _gradColors[1] = c2.ToSkColorWithAlpha(opacity);
+        using var grad = SKShader.CreateLinearGradient(new SKPoint(cx - r, cy - r), new SKPoint(cx + r, cy + r), _gradColors, _gradStops, SKShaderTileMode.Clamp);
+        _fillPaint.Shader = grad;
+        _fillPaint.Color = SKColors.White;
+        try
+        {
+            canvas.DrawCircle(cx, cy, r * 0.54f, _fillPaint);
+        }
+        finally
+        {
+            _fillPaint.Shader = null;
+        }
+
+        var save = canvas.Save();
+        try
+        {
+            canvas.Translate(cx, cy);
+            canvas.RotateDegrees(reducedMotion ? -22f : (-22f + (MathF.Sin(t * 1.4f) * 6f)));
+            _strokePaint.StrokeWidth = Math.Max(1.4f, r * 0.12f);
+            _strokePaint.Color = SKColors.White.WithAlpha((byte)(220 * opacity));
+            canvas.DrawOval(0f, 0f, r * 0.96f, r * 0.28f, _strokePaint);
+        }
+        finally
+        {
+            canvas.RestoreToCount(save);
+        }
+    }
+
+    private void DrawCar(SKCanvas canvas, float cx, float cy, float r, float t, float beatPulse, RgbColor c1, RgbColor c2, float opacity, bool reducedMotion)
+    {
+        var bob = reducedMotion ? 0f : (MathF.Sin(t * 10f) * r * 0.04f) - (beatPulse * r * 0.06f);
+        _path.Rewind();
+        _path.MoveTo(cx - r * 0.86f, cy + r * 0.12f + bob);
+        _path.LineTo(cx - r * 0.62f, cy - r * 0.26f + bob);
+        _path.LineTo(cx + r * 0.28f, cy - r * 0.26f + bob);
+        _path.LineTo(cx + r * 0.72f, cy + r * 0.08f + bob);
+        _path.LineTo(cx + r * 0.88f, cy + r * 0.16f + bob);
+        _path.LineTo(cx + r * 0.88f, cy + r * 0.36f + bob);
+        _path.LineTo(cx - r * 0.86f, cy + r * 0.36f + bob);
+        _path.Close();
+
+        _fillPaint.Shader = null;
+        _fillPaint.Color = StyleLayoutHelper.BlendSrgb(c1, c2, 0.35f).ToSkColorWithAlpha(opacity * 0.94f);
+        canvas.DrawPath(_path, _fillPaint);
+
+        _fillPaint.Color = new SKColor(0x0B, 0x0C, 0x16, (byte)(245 * opacity));
+        canvas.DrawCircle(cx - r * 0.46f, cy + r * 0.40f + bob, r * 0.22f, _fillPaint);
+        canvas.DrawCircle(cx + r * 0.46f, cy + r * 0.40f + bob, r * 0.22f, _fillPaint);
+    }
+
+    private void DrawGhost(SKCanvas canvas, float cx, float cy, float r, float t, RgbColor c1, RgbColor c2, float opacity, bool reducedMotion)
+    {
+        var bob = reducedMotion ? 0f : MathF.Sin(t * 3.8f) * r * 0.09f;
+        _path.Rewind();
+        _path.MoveTo(cx - r * 0.64f, cy + r * 0.72f + bob);
+        _path.LineTo(cx - r * 0.64f, cy - r * 0.12f + bob);
+        _path.CubicTo(cx - r * 0.64f, cy - r * 0.92f + bob, cx + r * 0.64f, cy - r * 0.92f + bob, cx + r * 0.64f, cy - r * 0.12f + bob);
+        _path.LineTo(cx + r * 0.64f, cy + r * 0.72f + bob);
+        _path.LineTo(cx + r * 0.28f, cy + r * 0.48f + bob);
+        _path.LineTo(cx, cy + r * 0.72f + bob);
+        _path.LineTo(cx - r * 0.28f, cy + r * 0.48f + bob);
+        _path.Close();
+
+        _fillPaint.Shader = null;
+        _fillPaint.Color = StyleLayoutHelper.BlendSrgb(SKColors.White.ToRgb(), c2, 0.20f).ToSkColorWithAlpha(opacity * 0.92f);
+        canvas.DrawPath(_path, _fillPaint);
+
+        _fillPaint.Color = new SKColor(0x0B, 0x0C, 0x16, (byte)(235 * opacity));
+        canvas.DrawCircle(cx - r * 0.22f, cy - r * 0.16f + bob, r * 0.12f, _fillPaint);
+        canvas.DrawCircle(cx + r * 0.22f, cy - r * 0.16f + bob, r * 0.12f, _fillPaint);
+    }
+
+    private void DrawGlass(SKCanvas canvas, float cx, float cy, float r, float t, RgbColor c1, RgbColor c2, float opacity, bool reducedMotion)
+    {
+        var sway = reducedMotion ? 0f : MathF.Sin(t * 4.2f) * r * 0.08f;
+        _strokePaint.StrokeWidth = Math.Max(1.4f, r * 0.13f);
+        _strokePaint.Color = SKColors.White.WithAlpha((byte)(230 * opacity));
+        canvas.DrawLine(cx - r * 0.56f, cy - r * 0.72f, cx + r * 0.56f, cy - r * 0.72f, _strokePaint);
+
+        _path.Rewind();
+        _path.MoveTo(cx - r * 0.52f, cy - r * 0.70f);
+        _path.CubicTo(cx - r * 0.54f, cy + r * 0.06f, cx + r * 0.54f, cy + r * 0.06f, cx + r * 0.52f, cy - r * 0.70f);
+        _path.Close();
+
+        _fillPaint.Shader = null;
+        _fillPaint.Color = StyleLayoutHelper.BlendSrgb(c1, c2, 0.45f).ToSkColorWithAlpha(opacity * 0.86f);
+        canvas.DrawPath(_path, _fillPaint);
+
+        canvas.DrawLine(cx, cy + r * 0.05f, cx, cy + r * 0.76f, _strokePaint);
+        canvas.DrawLine(cx - r * 0.36f + (sway * 0.2f), cy + r * 0.76f, cx + r * 0.36f + (sway * 0.2f), cy + r * 0.76f, _strokePaint);
+    }
+
+    private void DrawKey(SKCanvas canvas, float cx, float cy, float r, float t, RgbColor c1, RgbColor c2, float opacity, bool reducedMotion)
+    {
+        var rot = reducedMotion ? -20f : (-20f + (MathF.Sin(t * 2.8f) * 8f));
+        var save = canvas.Save();
+        try
+        {
+            canvas.Translate(cx, cy);
+            canvas.RotateDegrees(rot);
+
+            _strokePaint.StrokeWidth = Math.Max(1.6f, r * 0.16f);
+            _strokePaint.Color = StyleLayoutHelper.BlendSrgb(new RgbColor(0xFB, 0xBF, 0x24), c1, 0.30f).ToSkColorWithAlpha(opacity);
+            canvas.DrawCircle(-r * 0.42f, 0f, r * 0.32f, _strokePaint);
+            canvas.DrawLine(-r * 0.10f, 0f, r * 0.76f, 0f, _strokePaint);
+            canvas.DrawLine(r * 0.42f, 0f, r * 0.42f, r * 0.30f, _strokePaint);
+            canvas.DrawLine(r * 0.68f, 0f, r * 0.68f, r * 0.24f, _strokePaint);
+        }
+        finally
+        {
+            canvas.RestoreToCount(save);
+        }
+    }
+
+    private void DrawSword(SKCanvas canvas, float cx, float cy, float r, float t, RgbColor c1, RgbColor c2, float opacity, bool reducedMotion)
+    {
+        var tilt = reducedMotion ? 35f : (35f + (MathF.Sin(t * 3.6f) * 6f));
+        var save = canvas.Save();
+        try
+        {
+            canvas.Translate(cx, cy);
+            canvas.RotateDegrees(tilt);
+
+            _path.Rewind();
+            _path.MoveTo(0f, -r * 0.90f);
+            _path.LineTo(r * 0.18f, -r * 0.56f);
+            _path.LineTo(r * 0.14f, r * 0.32f);
+            _path.LineTo(-r * 0.14f, r * 0.32f);
+            _path.LineTo(-r * 0.18f, -r * 0.56f);
+            _path.Close();
+
+            _fillPaint.Shader = null;
+            _fillPaint.Color = SKColors.White.WithAlpha((byte)(238 * opacity));
+            canvas.DrawPath(_path, _fillPaint);
+
+            _strokePaint.StrokeWidth = Math.Max(1.6f, r * 0.15f);
+            _strokePaint.Color = StyleLayoutHelper.BlendSrgb(c1, c2, 0.5f).ToSkColorWithAlpha(opacity);
+            canvas.DrawLine(-r * 0.42f, r * 0.32f, r * 0.42f, r * 0.32f, _strokePaint);
+            canvas.DrawLine(0f, r * 0.32f, 0f, r * 0.80f, _strokePaint);
+        }
+        finally
+        {
+            canvas.RestoreToCount(save);
+        }
     }
 }
 

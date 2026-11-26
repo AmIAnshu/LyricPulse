@@ -624,9 +624,9 @@
     "semantic_hash": ""
   },
   "src/LyricPulse.Rendering/Styles/FisheyeVisualStyleRenderer.cs": {
-    "mtime": 1795640350.8903062,
-    "seen": 1795640899.298149,
-    "ast_hash": "ec9c7d7c370dec5416fcfacd9808556f",
+    "mtime": 1795676178.066182,
+    "seen": 1795676420.381721,
+    "ast_hash": "762a8f2961fc83b4c507bac36f658d1f",
     "semantic_hash": ""
   },
   "src/LyricPulse.Rendering/Styles/IKineticStyleRenderer.cs": {
@@ -972,9 +972,9 @@
     "semantic_hash": ""
   },
   ".planning/STATE.md": {
-    "mtime": 1795640915.8302305,
-    "seen": 1795674765.9928846,
-    "ast_hash": "47fc30b30d3e0796d6a85b9111481c2a",
+    "mtime": 1795674945.7341135,
+    "seen": 1795676420.381721,
+    "ast_hash": "a95c1c9ac722485c5d234130306e711e",
     "semantic_hash": ""
   },
   ".planning/UI_AUDIT.md": {
@@ -1038,9 +1038,9 @@
     "semantic_hash": ""
   },
   "src/LyricPulse.Rendering/Styles/ReactiveVisualIconRenderer.cs": {
-    "mtime": 1795640346.131748,
-    "seen": 1795640899.298149,
-    "ast_hash": "e6ee150f735907b7f7410a70163b1f43",
+    "mtime": 1795676175.5315003,
+    "seen": 1795676420.381721,
+    "ast_hash": "a45bd3a9f91f55ad3bfa3cc30204f33a",
     "semantic_hash": ""
   },
   "tests/LyricPulse.Tests/Audio/AudioSpectrumAnalyzerTests.cs": {
@@ -1059,6 +1059,12 @@
     "mtime": 1795642583.5152068,
     "seen": 1795674765.9928312,
     "ast_hash": "03a026566109a10ce6ff953b7c5108ae",
+    "semantic_hash": ""
+  },
+  "tests/LyricPulse.Tests/Rendering/FisheyeVisualOverhaulTests.cs": {
+    "mtime": 1795676255.229929,
+    "seen": 1795676420.381721,
+    "ast_hash": "a20643977bc5254a1d8d9bbb91abe92f",
     "semantic_hash": ""
   }
 }
