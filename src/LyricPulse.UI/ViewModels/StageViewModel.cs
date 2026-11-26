@@ -797,6 +797,7 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
     public bool IsEdgeGlowSoftAmbient => EdgeGlowMode == EdgeGlowMode.SoftAmbient;
     public bool IsEdgeGlowBeatPulse => EdgeGlowMode == EdgeGlowMode.BeatPulse;
     public bool IsEdgeGlowNeonRim => EdgeGlowMode == EdgeGlowMode.NeonRim;
+    public bool IsEdgeGlowNeonRush => EdgeGlowMode == EdgeGlowMode.NeonRush;
 
     public int EdgeGlowIntensityPercent
     {
@@ -1081,6 +1082,7 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsEdgeGlowSoftAmbient));
         OnPropertyChanged(nameof(IsEdgeGlowBeatPulse));
         OnPropertyChanged(nameof(IsEdgeGlowNeonRim));
+        OnPropertyChanged(nameof(IsEdgeGlowNeonRush));
         OnPropertyChanged(nameof(EdgeGlowIntensityPercent));
         OnPropertyChanged(nameof(AudioVisualizerMode));
         OnPropertyChanged(nameof(IsVisNone));

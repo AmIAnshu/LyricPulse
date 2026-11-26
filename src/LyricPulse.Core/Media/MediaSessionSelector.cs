@@ -193,10 +193,10 @@ public sealed class MediaSessionSelector
     private static SessionCandidate? SelectBestPaused(List<SessionCandidate> eligible) =>
         eligible
             .Where(c => c.PlaybackState == MediaPlaybackState.Paused &&
-                        !string.IsNullOrWhiteSpace(c.Title) &&
-                        !string.IsNullOrWhiteSpace(c.Artist))
+                        !string.IsNullOrWhiteSpace(c.Title))
             .OrderByDescending(c => PlayerClassifier.GetPriorityWeight(c.PlayerKind))
             .ThenByDescending(c => c.IsSystemCurrentSession ? 1 : 0)
+            .ThenByDescending(c => !string.IsNullOrWhiteSpace(c.Artist) ? 1 : 0)
             .ThenByDescending(c => c.LastUpdatedUtc)
             .FirstOrDefault();
 

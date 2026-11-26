@@ -226,15 +226,35 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
     {
         try
         {
-            while (await _refreshChannel.Reader.WaitToReadAsync(ct).ConfigureAwait(false))
+            // Immediate initial snapshot scan on startup before event-driven + watchdog loop
+            await RefreshSnapshotAsync(ct).ConfigureAwait(false);
+
+            while (!ct.IsCancellationRequested)
             {
-                while (_refreshChannel.Reader.TryRead(out _))
+                var pollDelayMs = _coordinator.CurrentSession?.PlaybackState == MediaPlaybackState.Playing ? 3200 : 1600;
+                using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                waitCts.CancelAfter(pollDelayMs);
+
+                var triggeredByEvent = false;
+                try
                 {
+                    triggeredByEvent = await _refreshChannel.Reader.WaitToReadAsync(waitCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    // Periodic GSMTC watchdog wakeup: recovers missed COM events, delayed metadata, or newly opened players
                 }
 
-                await Task.Delay(CoalescingWindow, ct).ConfigureAwait(false);
-                while (_refreshChannel.Reader.TryRead(out _))
+                if (triggeredByEvent)
                 {
+                    while (_refreshChannel.Reader.TryRead(out _))
+                    {
+                    }
+
+                    await Task.Delay(CoalescingWindow, ct).ConfigureAwait(false);
+                    while (_refreshChannel.Reader.TryRead(out _))
+                    {
+                    }
                 }
 
                 await RefreshSnapshotAsync(ct).ConfigureAwait(false);
@@ -346,15 +366,17 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
             return null;
         }
 
-        var title = mediaProps?.Title ?? string.Empty;
-        var artist = mediaProps?.Artist ?? string.Empty;
+        var rawTitle = mediaProps?.Title ?? string.Empty;
+        var rawArtist = mediaProps?.Artist ?? string.Empty;
         var album = mediaProps?.AlbumTitle ?? string.Empty;
         var endTime = timeline?.EndTime ?? TimeSpan.Zero;
+        var itemKind = PlayerClassifier.ClassifyItem(rawTitle, rawArtist, album, endTime, playbackInfo.PlaybackType == MediaPlaybackType.Video);
+        PlayerClassifier.CleanDetectedMetadata(rawTitle, rawArtist, out var title, out var artist);
 
         return new SessionCandidate(
             SourceAppUserModelId: aumid,
             PlayerKind: PlayerClassifier.ClassifyPlayer(aumid, _coordinator.BlockedAppIds),
-            ItemKind: PlayerClassifier.ClassifyItem(title, artist, album, endTime, playbackInfo.PlaybackType == MediaPlaybackType.Video),
+            ItemKind: itemKind,
             PlaybackState: MapPlaybackStatus(playbackInfo.PlaybackStatus),
             Title: title,
             Artist: artist,

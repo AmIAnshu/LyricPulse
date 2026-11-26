@@ -334,9 +334,14 @@ public partial class StageWindow : Window, IDisposable
         if (sender is Control { DataContext: StyleCardViewModel card })
         {
             card.IsHovered = true;
-            if (_cardHosts.TryGetValue(card.StyleId, out var host))
+            if (_cardHosts.TryGetValue(card.StyleId, out var host) &&
+                DataContext is StageViewModel vm &&
+                !vm.EffectivePreviewsPaused &&
+                !vm.IsFullscreen &&
+                IsVisible)
             {
-                host.TargetMaxFps = 60;
+                host.IsCardPaused = false;
+                host.TargetMaxFps = 45;
             }
         }
     }
@@ -348,7 +353,17 @@ public partial class StageWindow : Window, IDisposable
             card.IsHovered = false;
             if (_cardHosts.TryGetValue(card.StyleId, out var host))
             {
-                host.TargetMaxFps = card.IsActive ? 30 : 24;
+                var keepLive = card.IsActive &&
+                               DataContext is StageViewModel vm &&
+                               !vm.EffectivePreviewsPaused &&
+                               !vm.IsFullscreen &&
+                               IsVisible;
+                host.TargetMaxFps = keepLive ? 24 : 0;
+                host.IsCardPaused = !keepLive;
+                if (!keepLive)
+                {
+                    host.RenderOnceWhenPaused();
+                }
             }
         }
     }
@@ -372,14 +387,20 @@ public partial class StageWindow : Window, IDisposable
         if (!_cardHosts.TryGetValue(styleId, out var host))
         {
             var meta = StyleCatalog.GetMetadata(styleId);
+            var isFocused = vm.ActiveStyle == styleId;
             host = new StageCardCanvasHost(vm.Runtime, _fonts, _shaders, _telemetry, _rendererFactory)
             {
                 SurfaceMode = StageRenderSurfaceMode.GalleryCard,
                 StyleOverride = styleId,
                 PreviewPhaseSeconds = meta.PreviewPhaseSeconds,
-                TargetMaxFps = 30
+                IsCardPaused = !isFocused,
+                TargetMaxFps = isFocused ? 24 : 0
             };
             _cardHosts[styleId] = host;
+            if (!isFocused)
+            {
+                host.RenderOnceWhenPaused();
+            }
         }
 
         return host;
@@ -396,9 +417,17 @@ public partial class StageWindow : Window, IDisposable
         {
             ApplyFullscreenWindowState(vm.IsFullscreen);
         }
-        else if (e.PropertyName == nameof(StageViewModel.EffectivePreviewsPaused))
+        else if (e.PropertyName is nameof(StageViewModel.EffectivePreviewsPaused) or nameof(StageViewModel.ActiveStyle))
         {
             UpdateVisibleStripCards();
+        }
+        else if (e.PropertyName is nameof(StageViewModel.AudioVisualizerMode)
+                 or nameof(StageViewModel.EdgeGlowMode)
+                 or nameof(StageViewModel.IsDemoMode)
+                 or nameof(StageViewModel.AlbumArtBitmap)
+                 or nameof(StageViewModel.MediaTrackTitle))
+        {
+            RefreshPausedCardThumbnails();
         }
         else if (e.PropertyName == nameof(StageViewModel.IsSettingsDrawerOpen) && !vm.IsSettingsDrawerOpen)
         {
@@ -499,8 +528,33 @@ public partial class StageWindow : Window, IDisposable
                 inViewport = bottom >= -120.0 && topLeft.Y <= viewportH + 120.0;
             }
 
-            host.IsCardPaused = !inViewport;
-            host.TargetMaxFps = card.IsHovered ? 60 : (card.IsActive ? 30 : 24);
+            // CEO A3: Animate only the active or hovered visible card live;
+            // keep unfocused grid cards paused after rendering one crisp frame.
+            var animateLive = inViewport && (card.IsHovered || card.IsActive);
+            var wasLive = !host.IsCardPaused;
+            host.IsCardPaused = !animateLive;
+            host.TargetMaxFps = animateLive ? (card.IsHovered ? 45 : 24) : 0;
+
+            if (inViewport && !animateLive && wasLive)
+            {
+                host.RenderOnceWhenPaused();
+            }
+        }
+    }
+
+    private void RefreshPausedCardThumbnails()
+    {
+        if (DataContext is not StageViewModel vm || vm.IsFullscreen || !IsVisible)
+        {
+            return;
+        }
+
+        foreach (var host in _cardHosts.Values)
+        {
+            if (host.IsCardPaused)
+            {
+                host.RenderOnceWhenPaused();
+            }
         }
     }
 

@@ -34,6 +34,10 @@ public sealed class AudioSpectrumAnalyzer
     private float _prevBassFluxRef;
     private long _lastNonSilentTicks;
     private long _lastComputeTicks;
+    private long _lastCacheTicks;
+    private float _lastCachedEnergy = -1f;
+    private bool _hasCachedMetrics;
+    private AudioFrameMetrics? _cachedMetrics;
 
     public AudioSpectrumAnalyzer(int sampleRateHz = 48_000)
     {
@@ -104,6 +108,8 @@ public sealed class AudioSpectrumAnalyzer
             {
                 _lastNonSilentTicks = Stopwatch.GetTimestamp();
             }
+
+            _hasCachedMetrics = false;
         }
     }
 
@@ -149,6 +155,8 @@ public sealed class AudioSpectrumAnalyzer
             {
                 _lastNonSilentTicks = Stopwatch.GetTimestamp();
             }
+
+            _hasCachedMetrics = false;
         }
     }
 
@@ -160,6 +168,14 @@ public sealed class AudioSpectrumAnalyzer
 
         lock (_sync)
         {
+            if (_hasCachedMetrics &&
+                _cachedMetrics is not null &&
+                MathF.Abs(_lastCachedEnergy - partyEnergy) < 0.01f &&
+                Stopwatch.GetElapsedTime(_lastCacheTicks, nowTicks).TotalMilliseconds < 11.0)
+            {
+                return _cachedMetrics;
+            }
+
             dtSec = Math.Clamp((float)Stopwatch.GetElapsedTime(_lastComputeTicks, nowTicks).TotalSeconds, 0.001f, 0.1f);
             _lastComputeTicks = nowTicks;
 
@@ -170,6 +186,7 @@ public sealed class AudioSpectrumAnalyzer
 
             if (!useLive)
             {
+                _hasCachedMetrics = false;
                 // Decay previous live spectrum gently before blending synthetic pulse
                 for (var b = 0; b < BandCount; b++)
                 {
@@ -183,7 +200,12 @@ public sealed class AudioSpectrumAnalyzer
             }
             else
             {
-                return RunLiveFftLocked(dtSec, partyEnergy);
+                var metrics = RunLiveFftLocked(dtSec, partyEnergy);
+                _cachedMetrics = metrics;
+                _lastCacheTicks = nowTicks;
+                _lastCachedEnergy = partyEnergy;
+                _hasCachedMetrics = true;
+                return metrics;
             }
         }
 

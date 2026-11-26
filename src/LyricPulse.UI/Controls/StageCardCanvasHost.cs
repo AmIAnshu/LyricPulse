@@ -119,6 +119,8 @@ public sealed class StageCardCanvasHost : ContentControl, IDisposable
 
     public void RequestWake() => _canvas.RequestWake();
 
+    public void RenderOnceWhenPaused() => _canvas.RequestSingleFrame();
+
     public void ReleaseGpuResources() => _canvas.ReleaseGpuResources();
 
     public void Dispose()
@@ -156,7 +158,14 @@ public sealed class StageCardCanvasHost : ContentControl, IDisposable
         base.OnLoaded(e);
         _canvas.IsPaused = IsCardPaused;
         _canvas.TargetMaxFps = TargetMaxFps;
-        _canvas.RequestWake();
+        if (IsCardPaused)
+        {
+            _canvas.RequestSingleFrame();
+        }
+        else
+        {
+            _canvas.RequestWake();
+        }
     }
 
     private FrameRenderPacket BuildPacket(float w, float h, float scale, double timeSec, float dt)

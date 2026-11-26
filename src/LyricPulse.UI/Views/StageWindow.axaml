@@ -308,8 +308,7 @@
                   BorderBrush="#2EFFFFFF"
                   BorderThickness="1"
                   CornerRadius="999"
-                  Padding="8,4"
-                  BoxShadow="{DynamicResource LpShadowPopover}">
+                  Padding="8,4">
             <StackPanel Orientation="Horizontal" Spacing="2">
               <StackPanel Orientation="Horizontal" Spacing="6" Margin="6,0,8,0" VerticalAlignment="Center">
                 <PathIcon Data="{StaticResource LpIconWaveform}" Width="14" Height="14"
@@ -338,8 +337,7 @@
                   BorderBrush="#2EFFFFFF"
                   BorderThickness="1"
                   CornerRadius="999"
-                  Padding="6,4"
-                  BoxShadow="{DynamicResource LpShadowPopover}">
+                  Padding="6,4">
             <Button x:Name="DiagnosticsPillBtn"
                     Background="Transparent" Padding="6,3" CornerRadius="999" Cursor="Hand"
                     Command="{Binding ToggleFlyoutCommand}" CommandParameter="{x:Static vm:StageFlyoutKind.Diagnostics}"
@@ -383,8 +381,7 @@
                   BorderBrush="#2EFFFFFF"
                   BorderThickness="1"
                   CornerRadius="999"
-                  Padding="6,4"
-                  BoxShadow="{DynamicResource LpShadowPopover}">
+                  Padding="6,4">
             <StackPanel Orientation="Horizontal" Spacing="4">
               <ToggleButton Content="Demo" FontSize="11" Padding="10,6" MinHeight="34" CornerRadius="999" Cursor="Hand"
                             IsChecked="{Binding IsDemoMode, Mode=OneWay}"
@@ -566,15 +563,17 @@
               <PathIcon Data="{StaticResource LpIconGlowRim}" Width="14" Height="14" Foreground="{DynamicResource LpAccentTextBrush}"/>
               <TextBlock Text="Edges Glow Perimeter" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
             </StackPanel>
-            <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="6">
-              <Button Classes="chip" Classes.active="{Binding IsEdgeGlowOff}" Grid.Column="0" Content="Off" FontSize="11" Padding="4,6" CornerRadius="8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+            <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto" ColumnSpacing="6" RowSpacing="6">
+              <Button Classes="chip" Classes.active="{Binding IsEdgeGlowOff}" Grid.Row="0" Grid.Column="0" Content="Off" FontSize="11" Padding="4,6" CornerRadius="8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                       Command="{Binding SelectEdgeGlowModeCommand}" CommandParameter="{x:Static m:EdgeGlowMode.Off}"/>
-              <Button Classes="chip" Classes.active="{Binding IsEdgeGlowSoftAmbient}" Grid.Column="1" Content="Ambient" FontSize="11" Padding="4,6" CornerRadius="8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+              <Button Classes="chip" Classes.active="{Binding IsEdgeGlowSoftAmbient}" Grid.Row="0" Grid.Column="1" Content="Ambient" FontSize="11" Padding="4,6" CornerRadius="8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                       Command="{Binding SelectEdgeGlowModeCommand}" CommandParameter="{x:Static m:EdgeGlowMode.SoftAmbient}"/>
-              <Button Classes="chip" Classes.active="{Binding IsEdgeGlowBeatPulse}" Grid.Column="2" Content="Pulse" FontSize="11" Padding="4,6" CornerRadius="8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+              <Button Classes="chip" Classes.active="{Binding IsEdgeGlowBeatPulse}" Grid.Row="0" Grid.Column="2" Content="Pulse" FontSize="11" Padding="4,6" CornerRadius="8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                       Command="{Binding SelectEdgeGlowModeCommand}" CommandParameter="{x:Static m:EdgeGlowMode.BeatPulse}"/>
-              <Button Classes="chip" Classes.active="{Binding IsEdgeGlowNeonRim}" Grid.Column="3" Content="Neon Rim" FontSize="11" Padding="4,6" CornerRadius="8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+              <Button Classes="chip" Classes.active="{Binding IsEdgeGlowNeonRim}" Grid.Row="1" Grid.Column="0" Content="Neon Rim" FontSize="11" Padding="4,6" CornerRadius="8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                       Command="{Binding SelectEdgeGlowModeCommand}" CommandParameter="{x:Static m:EdgeGlowMode.NeonRim}"/>
+              <Button Classes="chip" Classes.active="{Binding IsEdgeGlowNeonRush}" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Content="Neon Rush" FontSize="11" Padding="4,6" CornerRadius="8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                      Command="{Binding SelectEdgeGlowModeCommand}" CommandParameter="{x:Static m:EdgeGlowMode.NeonRush}"/>
             </Grid>
 
             <Grid ColumnDefinitions="*,Auto">

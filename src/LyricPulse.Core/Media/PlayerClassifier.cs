@@ -21,8 +21,30 @@ public static class PlayerClassifier
         "winamp",
         "dopamine",
         "youtubemusicdesktop",
+        "music.youtube",
         "cider",
-        "itunes"
+        "itunes",
+        "deezer",
+        "soundcloud",
+        "plexamp",
+        "mediamonkey",
+        "bandcamp",
+        "zune",
+        "microsoft.media.player",
+        "yandexmusic",
+        "netease",
+        "qqmusic"
+    ];
+
+    private static readonly string[] TitlePlatformSuffixes =
+    [
+        " - YouTube Music",
+        " | YouTube Music",
+        " • YouTube Music",
+        " - YouTube",
+        " | SoundCloud",
+        " | Spotify",
+        " - Spotify"
     ];
 
     private static readonly string[] BrowserTokens =
@@ -123,6 +145,16 @@ public static class PlayerClassifier
 
         if (isVideo)
         {
+            // Promote official music streams (YouTube Music Art Tracks / SoundCloud / full Album metadata)
+            // even when Chromium reports PlaybackType == Video.
+            var isTopicArtist = artist?.TrimEnd().EndsWith(" - Topic", StringComparison.OrdinalIgnoreCase) == true;
+            var isMusicPlatformTitle = trimmedTitle.Contains("YouTube Music", StringComparison.OrdinalIgnoreCase) ||
+                                       trimmedTitle.Contains("SoundCloud", StringComparison.OrdinalIgnoreCase);
+            if ((hasArtist && hasAlbum && endTime <= MaxSongDurationForLyrics) || isTopicArtist || isMusicPlatformTitle)
+            {
+                return MediaItemKind.Music;
+            }
+
             return MediaItemKind.Video;
         }
 
@@ -132,6 +164,50 @@ public static class PlayerClassifier
         }
 
         return MediaItemKind.Music;
+    }
+
+    public static void CleanDetectedMetadata(
+        string? rawTitle,
+        string? rawArtist,
+        out string cleanedTitle,
+        out string cleanedArtist)
+    {
+        var title = (rawTitle ?? string.Empty).Trim();
+        var artist = (rawArtist ?? string.Empty).Trim();
+
+        foreach (var suffix in TitlePlatformSuffixes)
+        {
+            if (title.Length > suffix.Length && title.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                title = title[..^suffix.Length].TrimEnd();
+            }
+        }
+
+        const string topicSuffix = " - Topic";
+        if (artist.Length > topicSuffix.Length && artist.EndsWith(topicSuffix, StringComparison.OrdinalIgnoreCase))
+        {
+            artist = artist[..^topicSuffix.Length].TrimEnd();
+        }
+
+        // If browser/VLC exposes "Artist - Song Title" with empty Artist, split cleanly.
+        if (string.IsNullOrWhiteSpace(artist))
+        {
+            var dashIdx = title.IndexOf(" - ", StringComparison.Ordinal);
+            if (dashIdx >= 2 && dashIdx + 3 <= title.Length - 2)
+            {
+                var left = title[..dashIdx].Trim();
+                var right = title[(dashIdx + 3)..].Trim();
+                if (!left.StartsWith("Part ", StringComparison.OrdinalIgnoreCase) &&
+                    !left.StartsWith("Pt.", StringComparison.OrdinalIgnoreCase))
+                {
+                    artist = left;
+                    title = right;
+                }
+            }
+        }
+
+        cleanedTitle = title;
+        cleanedArtist = artist;
     }
 
     private static bool IsSpotify(string aumid) =>

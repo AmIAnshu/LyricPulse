@@ -631,8 +631,8 @@ public sealed class QaGateRegressionAndCoverageTests : IDisposable
     public async Task SettingsOklabNormalizerAndVisualMatcher_CoverRemainingDefensiveBranches()
     {
         // AppSettings SourcePolicy & ValidateAndNormalize defensive branches
-        AppSettings.Default.SourcePolicy.Should().Be(MediaSourcePolicy.SupportedPlayersOnly);
-        (AppSettings.Default with { UniversalPlayerMode = true }).SourcePolicy.Should().Be(MediaSourcePolicy.UniversalFallback);
+        AppSettings.Default.SourcePolicy.Should().Be(MediaSourcePolicy.UniversalFallback);
+        (AppSettings.Default with { UniversalPlayerMode = false }).SourcePolicy.Should().Be(MediaSourcePolicy.SupportedPlayersOnly);
 
         var brokenSettings = new AppSettings
         {

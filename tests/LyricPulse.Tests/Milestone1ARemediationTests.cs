@@ -371,8 +371,11 @@ public sealed class Milestone1ARemediationTests : IDisposable
         ticks += (long)(0.160 * Frequency); // Only 210ms total elapsed (< 650ms), must already be settled at DemoPalette!
         controller.SampleFrame(ticks).ActivePalette.Should().Be(DemoSongProvider.DemoPalette);
 
-        // 3. ToggleUniversalPlayerModeAsync flips setting, persists, and pushes UniversalFallback policy
+        // 3. ToggleUniversalPlayerModeAsync flips setting (defaults true in v2.3), persists, and pushes policy
+        controller.Settings.UniversalPlayerMode.Should().BeTrue();
+        await controller.ToggleUniversalPlayerModeAsync();
         controller.Settings.UniversalPlayerMode.Should().BeFalse();
+        media.LastPolicy.Should().Be(MediaSourcePolicy.SupportedPlayersOnly);
         await controller.ToggleUniversalPlayerModeAsync();
         controller.Settings.UniversalPlayerMode.Should().BeTrue();
         media.LastPolicy.Should().Be(MediaSourcePolicy.UniversalFallback);

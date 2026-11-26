@@ -18,7 +18,6 @@ public sealed class AudioVisualizerRenderer : IDisposable
     private readonly SKPaint _fillPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _strokePaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round };
     private readonly SKPaint _glowPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round };
-    private readonly SKImageFilter _glowBlur = SKImageFilter.CreateBlur(8.0f, 8.0f);
     private readonly SKPath _wavePath = new();
     private readonly SKPath _haloPath = new();
     private readonly SKColor[] _gradColors = new SKColor[3];
@@ -83,7 +82,6 @@ public sealed class AudioVisualizerRenderer : IDisposable
         _fillPaint.Dispose();
         _strokePaint.Dispose();
         _glowPaint.Dispose();
-        _glowBlur.Dispose();
         _wavePath.Dispose();
         _haloPath.Dispose();
     }
@@ -184,19 +182,11 @@ public sealed class AudioVisualizerRenderer : IDisposable
 
         _haloPath.Close();
 
-        _glowPaint.StrokeWidth = packet.IsCompactCard ? 3.5f : 7.0f;
-        _glowPaint.Color = palette.AccentColor2.ToSkColorWithAlpha(0.28f * intensity);
-        _glowPaint.ImageFilter = _glowBlur;
-        try
-        {
-            canvas.DrawPath(_haloPath, _glowPaint);
-        }
-        finally
-        {
-            _glowPaint.ImageFilter = null;
-        }
+        _glowPaint.StrokeWidth = packet.IsCompactCard ? 4.5f : 9.5f;
+        _glowPaint.Color = palette.AccentColor2.ToSkColorWithAlpha(0.22f * intensity);
+        canvas.DrawPath(_haloPath, _glowPaint);
 
-        _strokePaint.StrokeWidth = packet.IsCompactCard ? 1.2f : 2.0f;
+        _strokePaint.StrokeWidth = packet.IsCompactCard ? 1.2f : 2.1f;
         _strokePaint.Color = palette.AccentColor1.ToSkColorWithAlpha(0.42f * intensity);
         canvas.DrawPath(_haloPath, _strokePaint);
     }
@@ -243,17 +233,9 @@ public sealed class AudioVisualizerRenderer : IDisposable
                 }
             }
 
-            _glowPaint.StrokeWidth = packet.IsCompactCard ? 4f : 8f;
-            _glowPaint.Color = color.ToSkColorWithAlpha(0.24f * intensity);
-            _glowPaint.ImageFilter = _glowBlur;
-            try
-            {
-                canvas.DrawPath(_wavePath, _glowPaint);
-            }
-            finally
-            {
-                _glowPaint.ImageFilter = null;
-            }
+            _glowPaint.StrokeWidth = packet.IsCompactCard ? 5.0f : 10.5f;
+            _glowPaint.Color = color.ToSkColorWithAlpha(0.18f * intensity);
+            canvas.DrawPath(_wavePath, _glowPaint);
 
             _strokePaint.StrokeWidth = packet.IsCompactCard ? 1.2f : 2.1f;
             _strokePaint.Color = color.ToSkColorWithAlpha(0.50f * intensity);

@@ -202,7 +202,10 @@ public sealed partial class WasapiLoopbackAudioProvider : IAudioSpectrumProvider
                 return;
             }
 
+            var activeDeviceId = SafeGetDeviceId(device);
             clientStarted = true;
+            var idleSilenceTicks = 0;
+
             while (!ct.IsCancellationRequested)
             {
                 hr = captureClient.GetNextPacketSize(out var packetFrames);
@@ -213,6 +216,19 @@ public sealed partial class WasapiLoopbackAudioProvider : IAudioSpectrumProvider
 
                 if (packetFrames == 0)
                 {
+                    idleSilenceTicks++;
+                    if (idleSilenceTicks >= 200) // ~2.0s without packets -> verify default output endpoint didn't change
+                    {
+                        idleSilenceTicks = 0;
+                        var latestDeviceId = TryGetDefaultEndpointId(enumerator);
+                        if (!string.IsNullOrEmpty(latestDeviceId) &&
+                            !string.IsNullOrEmpty(activeDeviceId) &&
+                            !string.Equals(latestDeviceId, activeDeviceId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            break;
+                        }
+                    }
+
                     if (ct.WaitHandle.WaitOne(10))
                     {
                         break;
@@ -220,6 +236,8 @@ public sealed partial class WasapiLoopbackAudioProvider : IAudioSpectrumProvider
 
                     continue;
                 }
+
+                idleSilenceTicks = 0;
 
                 while (packetFrames > 0 && !ct.IsCancellationRequested)
                 {
@@ -231,8 +249,14 @@ public sealed partial class WasapiLoopbackAudioProvider : IAudioSpectrumProvider
 
                     try
                     {
-                        if (framesRead > 0 && dataPtr != 0 && (flags & BufferSilentFlag) == 0)
+                        var isSilent = framesRead == 0 || dataPtr == 0 || (flags & BufferSilentFlag) != 0;
+                        if (isSilent)
                         {
+                            idleSilenceTicks++;
+                        }
+                        else
+                        {
+                            idleSilenceTicks = 0;
                             var sampleCount = (int)framesRead * format.Channels;
                             if (format.IsFloat32)
                             {
@@ -249,6 +273,18 @@ public sealed partial class WasapiLoopbackAudioProvider : IAudioSpectrumProvider
                     finally
                     {
                         _ = captureClient.ReleaseBuffer(framesRead);
+                    }
+
+                    if (idleSilenceTicks >= 200)
+                    {
+                        idleSilenceTicks = 0;
+                        var latestDeviceId = TryGetDefaultEndpointId(enumerator);
+                        if (!string.IsNullOrEmpty(latestDeviceId) &&
+                            !string.IsNullOrEmpty(activeDeviceId) &&
+                            !string.Equals(latestDeviceId, activeDeviceId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return;
+                        }
                     }
 
                     if (captureClient.GetNextPacketSize(out packetFrames) < 0)
@@ -355,6 +391,65 @@ public sealed partial class WasapiLoopbackAudioProvider : IAudioSpectrumProvider
     {
         [PreserveSig]
         int Activate([In] ref Guid iid, int dwClsCtx, nint pActivationParams, [MarshalAs(UnmanagedType.IUnknown)] out object ppInterface);
+
+        [PreserveSig]
+        int OpenPropertyStore(int stgmAccess, out nint ppProperties);
+
+        [PreserveSig]
+        int GetId(out nint ppstrId);
+    }
+
+    private static string? SafeGetDeviceId(IMMDevice? device)
+    {
+        if (device is null)
+        {
+            return null;
+        }
+
+        nint idPtr = 0;
+        try
+        {
+            if (device.GetId(out idPtr) >= 0 && idPtr != 0)
+            {
+                return Marshal.PtrToStringUni(idPtr);
+            }
+        }
+        catch
+        {
+        }
+        finally
+        {
+            if (idPtr != 0)
+            {
+                Marshal.FreeCoTaskMem(idPtr);
+            }
+        }
+
+        return null;
+    }
+
+    private static string? TryGetDefaultEndpointId(IMMDeviceEnumerator enumerator)
+    {
+        IMMDevice? current = null;
+        try
+        {
+            if (enumerator.GetDefaultAudioEndpoint(DataFlowRender, RoleConsole, out current) >= 0 && current is not null)
+            {
+                return SafeGetDeviceId(current);
+            }
+        }
+        catch
+        {
+        }
+        finally
+        {
+            if (current is not null)
+            {
+                Marshal.ReleaseComObject(current);
+            }
+        }
+
+        return null;
     }
 
     [ComImport]

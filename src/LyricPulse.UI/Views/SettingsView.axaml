@@ -257,15 +257,17 @@
                   AutomationProperties.Name="Audio visualizer intensity"/>
 
           <TextBlock Text="Edges Glow" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
-          <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="6">
-            <Button Classes="seg" Classes.active="{Binding IsEdgeGlowOff}" Grid.Column="0" Content="Off" FontSize="11" Padding="4,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+          <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto" ColumnSpacing="6" RowSpacing="6">
+            <Button Classes="seg" Classes.active="{Binding IsEdgeGlowOff}" Grid.Row="0" Grid.Column="0" Content="Off" FontSize="11" Padding="4,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Command="{Binding SelectEdgeGlowModeCommand}" CommandParameter="{x:Static m:EdgeGlowMode.Off}"/>
-            <Button Classes="seg" Classes.active="{Binding IsEdgeGlowSoftAmbient}" Grid.Column="1" Content="Ambient" FontSize="11" Padding="4,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+            <Button Classes="seg" Classes.active="{Binding IsEdgeGlowSoftAmbient}" Grid.Row="0" Grid.Column="1" Content="Ambient" FontSize="11" Padding="4,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Command="{Binding SelectEdgeGlowModeCommand}" CommandParameter="{x:Static m:EdgeGlowMode.SoftAmbient}"/>
-            <Button Classes="seg" Classes.active="{Binding IsEdgeGlowBeatPulse}" Grid.Column="2" Content="Pulse" FontSize="11" Padding="4,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+            <Button Classes="seg" Classes.active="{Binding IsEdgeGlowBeatPulse}" Grid.Row="0" Grid.Column="2" Content="Pulse" FontSize="11" Padding="4,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Command="{Binding SelectEdgeGlowModeCommand}" CommandParameter="{x:Static m:EdgeGlowMode.BeatPulse}"/>
-            <Button Classes="seg" Classes.active="{Binding IsEdgeGlowNeonRim}" Grid.Column="3" Content="Neon Rim" FontSize="11" Padding="4,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+            <Button Classes="seg" Classes.active="{Binding IsEdgeGlowNeonRim}" Grid.Row="1" Grid.Column="0" Content="Neon Rim" FontSize="11" Padding="4,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                     Command="{Binding SelectEdgeGlowModeCommand}" CommandParameter="{x:Static m:EdgeGlowMode.NeonRim}"/>
+            <Button Classes="seg" Classes.active="{Binding IsEdgeGlowNeonRush}" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Content="Neon Rush" FontSize="11" Padding="4,6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                    Command="{Binding SelectEdgeGlowModeCommand}" CommandParameter="{x:Static m:EdgeGlowMode.NeonRush}"/>
           </Grid>
 
           <Grid ColumnDefinitions="*,Auto">

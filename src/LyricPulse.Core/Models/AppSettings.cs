@@ -46,7 +46,8 @@ public enum EdgeGlowMode
     Off = 0,
     SoftAmbient = 1,
     BeatPulse = 2,
-    NeonRim = 3
+    NeonRim = 3,
+    NeonRush = 4
 }
 
 public enum AudioVisualizerMode
@@ -109,7 +110,7 @@ public sealed record AppSettings
     public const float DefaultFullscreenStageScale = 1.85f;
     public const float MinGlowIntensity = 0.2f;
     public const float MaxGlowIntensity = 1.5f;
-    public const float DefaultEdgeGlowIntensity = 0.80f;
+    public const float DefaultEdgeGlowIntensity = 0.90f;
     public const float MinVisualizerIntensity = 0.2f;
     public const float MaxVisualizerIntensity = 1.5f;
     public const float DefaultVisualizerIntensity = 0.75f;
@@ -137,7 +138,7 @@ public sealed record AppSettings
         ImmutableDictionary<string, OverlayBoundsConfig>.Empty;
 
     public ImmutableArray<string> DisabledDisplays { get; init; } = ImmutableArray<string>.Empty;
-    public bool UniversalPlayerMode { get; init; }
+    public bool UniversalPlayerMode { get; init; } = true;
     public bool IgnoreBrowserVideoSessions { get; init; } = true;
 
     public ImmutableArray<string> BlockedAppIds { get; init; } =
@@ -166,7 +167,7 @@ public sealed record AppSettings
     public float PartyEnergyLevel { get; init; } = DefaultPartyEnergyLevel;
     public float FullscreenStageScale { get; init; } = DefaultFullscreenStageScale;
     public bool DesktopOverlayEnabled { get; init; }
-    public EdgeGlowMode EdgeGlowMode { get; init; } = EdgeGlowMode.BeatPulse;
+    public EdgeGlowMode EdgeGlowMode { get; init; } = EdgeGlowMode.NeonRush;
     public float EdgeGlowIntensity { get; init; } = DefaultEdgeGlowIntensity;
     public AudioVisualizerMode AudioVisualizerMode { get; init; } = AudioVisualizerMode.RadialHalo;
     public float AudioVisualizerIntensity { get; init; } = DefaultVisualizerIntensity;
@@ -214,7 +215,7 @@ public sealed record AppSettings
             : StageBackdropMode.AmbientPartyMesh;
         var normalizedEdgeGlowMode = Enum.IsDefined(EdgeGlowMode)
             ? EdgeGlowMode
-            : EdgeGlowMode.BeatPulse;
+            : EdgeGlowMode.NeonRush;
         var normalizedEdgeGlowIntensity = float.IsFinite(EdgeGlowIntensity)
             ? Math.Clamp(EdgeGlowIntensity, MinGlowIntensity, MaxGlowIntensity)
             : DefaultEdgeGlowIntensity;

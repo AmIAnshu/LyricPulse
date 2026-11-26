@@ -172,6 +172,65 @@ public sealed class Phase4V2EffectsTests
     }
 
     [Fact]
+    public void EdgeGlowRenderer_NeonRush_DrawsChasingBeamsAndRespectsOverlayAndBottomFade()
+    {
+        using var edgeGlow = new EdgeGlowRenderer();
+        using var fonts = new FontAssetRegistry();
+        using var shaders = new ShaderLibrary();
+        using var pool = new OffscreenSurfacePool();
+        using var legibility = new LegibilityPipeline();
+
+        var info = new SKImageInfo(640, 360, SKColorType.Bgra8888, SKAlphaType.Premul);
+        var audio = CreateLiveAudioMetrics();
+
+        // Fullscreen / closed perimeter renders vivid beams while keeping center unobstructed
+        using (var surf = SKSurface.Create(info))
+        {
+            surf.Canvas.Clear(SKColors.Transparent);
+            var pkt = CreatePacket(
+                AppSettings.Default with { EdgeGlowMode = EdgeGlowMode.NeonRush, EdgeGlowIntensity = 1.0f },
+                StageRenderSurfaceMode.StageCanvas,
+                audio,
+                bottomFadeToBlack: false);
+            var ctx = new StyleRenderContext(surf.Canvas, null, fonts, shaders, pool, legibility, pkt, false, false);
+            edgeGlow.Render(in ctx);
+            using var bmp = SKBitmap.FromImage(surf.Snapshot());
+            CountLitPixels(bmp, out _).Should().BeGreaterThan(200);
+            bmp.GetPixel(1, 1).Alpha.Should().BeGreaterThan(0);
+            bmp.GetPixel(320, 180).Alpha.Should().Be(0);
+        }
+
+        // Windowed Top-U perimeter preserves bottomFadeToBlack so bottom row remains alpha=0
+        using (var fadeSurf = SKSurface.Create(info))
+        {
+            fadeSurf.Canvas.Clear(SKColors.Transparent);
+            var pkt = CreatePacket(
+                AppSettings.Default with { EdgeGlowMode = EdgeGlowMode.NeonRush, EdgeGlowIntensity = 1.0f },
+                StageRenderSurfaceMode.StageCanvas,
+                audio,
+                bottomFadeToBlack: true);
+            var ctx = new StyleRenderContext(fadeSurf.Canvas, null, fonts, shaders, pool, legibility, pkt, false, false);
+            edgeGlow.Render(in ctx);
+            using var bmp = SKBitmap.FromImage(fadeSurf.Snapshot());
+            bmp.GetPixel(320, 359).Alpha.Should().Be(0);
+        }
+
+        // DesktopOverlay skips edge glow completely
+        using (var desktopSurf = SKSurface.Create(info))
+        {
+            desktopSurf.Canvas.Clear(SKColors.Transparent);
+            var pkt = CreatePacket(
+                AppSettings.Default with { EdgeGlowMode = EdgeGlowMode.NeonRush, EdgeGlowIntensity = 1.2f },
+                StageRenderSurfaceMode.DesktopOverlay,
+                audio);
+            var ctx = new StyleRenderContext(desktopSurf.Canvas, null, fonts, shaders, pool, legibility, pkt, false, false);
+            edgeGlow.Render(in ctx);
+            using var bmp = SKBitmap.FromImage(desktopSurf.Snapshot());
+            CountLitPixels(bmp, out _).Should().Be(0);
+        }
+    }
+
+    [Fact]
     public void AudioVisualizerRenderer_AllFiveModes_RenderDistinctPixels_AndSkipReducedMotionOrDesktopOverlay()
     {
         using var visualizer = new AudioVisualizerRenderer();

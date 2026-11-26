@@ -42,6 +42,7 @@ public sealed class LyricCanvasControl : Control, IDisposable
     private bool _hasCommittedFrame;
     private int _targetMaxFps;
     private bool _isPaused;
+    private bool _singleFramePending;
     private bool _disposed;
 
     public LyricCanvasControl(
@@ -143,6 +144,26 @@ public sealed class LyricCanvasControl : Control, IDisposable
         }
     }
 
+    /// <summary>
+    /// Renders a single up-to-date frame even when <see cref="IsPaused"/> is true (zero idle RAF spin).
+    /// </summary>
+    public void RequestSingleFrame()
+    {
+        if (Volatile.Read(ref _disposed) || !_isAttached || !IsVisible)
+        {
+            return;
+        }
+
+        Volatile.Write(ref _singleFramePending, true);
+        if (!_rafScheduled && _topLevel is not null)
+        {
+            _hasLastFrameTime = false;
+            _hasCommittedFrame = false;
+            _rafScheduled = true;
+            _topLevel.RequestAnimationFrame(OnAnimationFrame);
+        }
+    }
+
     public void ReleaseGpuResources()
     {
         lock (_renderSync)
@@ -190,9 +211,17 @@ public sealed class LyricCanvasControl : Control, IDisposable
         _isAttached = true;
         _topLevel = TopLevel.GetTopLevel(this);
         _hasLastFrameTime = false;
-        if (IsVisible)
+        if (IsVisible && (!Volatile.Read(ref _isPaused) || Volatile.Read(ref _singleFramePending)))
         {
-            ScheduleNextFrame();
+            if (Volatile.Read(ref _singleFramePending) && _topLevel is not null && !_rafScheduled)
+            {
+                _rafScheduled = true;
+                _topLevel.RequestAnimationFrame(OnAnimationFrame);
+            }
+            else
+            {
+                ScheduleNextFrame();
+            }
         }
     }
 
@@ -265,22 +294,28 @@ public sealed class LyricCanvasControl : Control, IDisposable
     private void OnAnimationFrame(TimeSpan frameTime)
     {
         _rafScheduled = false;
-        if (Volatile.Read(ref _disposed) || Volatile.Read(ref _isPaused) || !_isAttached || !IsVisible)
+        var isSingle = Volatile.Read(ref _singleFramePending);
+        if (Volatile.Read(ref _disposed) || (Volatile.Read(ref _isPaused) && !isSingle) || !_isAttached || !IsVisible)
         {
+            Volatile.Write(ref _singleFramePending, false);
             return;
         }
 
-        var maxFps = Volatile.Read(ref _targetMaxFps);
-        if (maxFps > 0 && _hasCommittedFrame)
+        if (!isSingle)
         {
-            var minIntervalSec = 0.92 / maxFps;
-            if ((frameTime - _lastCommittedFrameTime).TotalSeconds < minIntervalSec)
+            var maxFps = Volatile.Read(ref _targetMaxFps);
+            if (maxFps > 0 && _hasCommittedFrame)
             {
-                ScheduleNextFrame();
-                return;
+                var minIntervalSec = 0.92 / maxFps;
+                if ((frameTime - _lastCommittedFrameTime).TotalSeconds < minIntervalSec)
+                {
+                    ScheduleNextFrame();
+                    return;
+                }
             }
         }
 
+        Volatile.Write(ref _singleFramePending, false);
         _lastCommittedFrameTime = frameTime;
         _hasCommittedFrame = true;
 
@@ -292,7 +327,7 @@ public sealed class LyricCanvasControl : Control, IDisposable
 
         InvalidateVisual();
 
-        if (hasActiveMotion)
+        if (hasActiveMotion && !Volatile.Read(ref _isPaused))
         {
             ScheduleNextFrame();
         }

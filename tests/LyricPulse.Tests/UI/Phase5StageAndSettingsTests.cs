@@ -307,4 +307,29 @@ public sealed class Phase5StageAndSettingsTests
         vm.IsPreviewsToggleEnabled.Should().BeFalse();
         vm.PausePreviewsLabel.Should().Be("Paused (Reduced Motion)");
     }
+
+    [Fact]
+    public async Task StageViewModel_V23Defaults_NeonRushAndUniversalPlayerModeEnabled()
+    {
+        AppSettings.Default.UniversalPlayerMode.Should().BeTrue();
+        AppSettings.Default.IgnoreBrowserVideoSessions.Should().BeTrue();
+        AppSettings.Default.EdgeGlowMode.Should().Be(EdgeGlowMode.NeonRush);
+
+        await using var runtime = await CreateStartedControllerAsync();
+        using var vm = new StageViewModel(runtime);
+        vm.ApplySnapshot(runtime.SampleFrame());
+
+        vm.EdgeGlowMode.Should().Be(EdgeGlowMode.NeonRush);
+        vm.IsEdgeGlowNeonRush.Should().BeTrue();
+
+        vm.SelectEdgeGlowModeCommand.Execute(EdgeGlowMode.SoftAmbient);
+        await Task.Delay(60);
+        vm.ApplySnapshot(runtime.SampleFrame());
+        vm.IsEdgeGlowNeonRush.Should().BeFalse();
+
+        vm.SelectEdgeGlowModeCommand.Execute(EdgeGlowMode.NeonRush);
+        await Task.Delay(60);
+        vm.ApplySnapshot(runtime.SampleFrame());
+        vm.IsEdgeGlowNeonRush.Should().BeTrue();
+    }
 }
