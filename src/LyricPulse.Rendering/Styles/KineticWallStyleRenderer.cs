@@ -183,31 +183,10 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
             DrawArchitecturalBackplane(in context, font, fontId, slice, anchorX, anchorY);
         }
 
-        // Layer 2: Primary 3D-tilted Perspective Typography Wall
-        var save = context.Canvas.Save();
-        try
-        {
-            if (!packet.ReducedMotion)
-            {
-                var pitchDeg = RestingPitchDegrees + (_smoothedBass * 2.4f);
-                var rollDeg = Math.Clamp((_cameraYawDeg.Value / MaxYawDegrees) * MaxRollDegrees, -MaxRollDegrees, MaxRollDegrees);
-                var perspective = Create3DPerspectiveMatrix(
-                    pitchDeg,
-                    _cameraYawDeg.Value,
-                    rollDeg,
-                    PerspectiveFocalLength * Math.Max(packet.RenderScaling, 1f),
-                    anchorX,
-                    anchorY);
-                context.Canvas.Concat(in perspective);
-                context.Canvas.Translate(_cameraX.Value, _cameraY.Value);
-            }
-
-            DrawScatteredWordCascade(in context, font, fontId, slice, anchorX, anchorY, isFullStage);
-        }
-        finally
-        {
-            context.Canvas.RestoreToCount(save);
-        }
+        // Layer 2: Primary 3D-projected Typography Wall
+        // Project every anchor into pure 2D affine transforms (never concatenate projective Persp0/Persp1
+        // onto a GPU SKCanvas that draws text or SKImageFilter blurs, preventing Skia glyph-atlas artifacts).
+        DrawScatteredWordCascade(in context, font, fontId, slice, anchorX, anchorY, isFullStage);
 
         // Layer 3 (StageCanvas only): Left Line Index Pill & Audio Telemetry VU Spine (clear of DesktopOverlay corners)
         if (isFullStage)
@@ -236,6 +215,46 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
         _fillPaint.Dispose();
         _tracePaint.Dispose();
         _tracePath.Dispose();
+    }
+
+    internal static (SKPoint Projected, float DepthScale) Project3DPoint(
+        float x,
+        float y,
+        float z,
+        float pitchDeg,
+        float yawDeg,
+        float rollDeg,
+        float focalLength,
+        float originX,
+        float originY)
+    {
+        var f = Math.Max(focalLength, 200f);
+        var rx = pitchDeg * (MathF.PI / 180f);
+        var ry = yawDeg * (MathF.PI / 180f);
+        var rz = rollDeg * (MathF.PI / 180f);
+
+        var cx = MathF.Cos(rx);
+        var sx = MathF.Sin(rx);
+        var cy = MathF.Cos(ry);
+        var sy = MathF.Sin(ry);
+        var cz = MathF.Cos(rz);
+        var sz = MathF.Sin(rz);
+
+        var dx = x - originX;
+        var dy = y - originY;
+        var dz = z;
+
+        // Rotate around X (pitch), then Y (yaw), then Z (roll)
+        var y1 = (dy * cx) - (dz * sx);
+        var z1 = (dy * sx) + (dz * cx);
+        var x2 = (dx * cy) + (z1 * sy);
+        var z2 = (-dx * sy) + (z1 * cy);
+        var x3 = (x2 * cz) - (y1 * sz);
+        var y3 = (x2 * sz) + (y1 * cz);
+
+        var denom = Math.Max(f * 0.28f, f + z2);
+        var depthScale = Math.Clamp(f / denom, 0.36f, 2.15f);
+        return (new SKPoint(originX + (x3 * depthScale), originY + (y3 * depthScale)), depthScale);
     }
 
     internal static SKMatrix Create3DPerspectiveMatrix(
@@ -292,93 +311,86 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
         var h = packet.ViewportHeightDip;
         var palette = packet.Palette;
 
-        // Slower deep parallax perspective matrix (38% camera intensity)
-        var backSave = canvas.Save();
-        try
+        var padX = Math.Clamp(w * 0.11f, 44f, 120f);
+        var padY = Math.Clamp(h * 0.14f, 40f, 96f);
+        var frame = new SKRect(padX, padY, w - padX, h - padY);
+        var tickLen = Math.Clamp(MathF.Min(w, h) * 0.025f, 10f, 20f);
+
+        var pitch = packet.ReducedMotion ? 0f : RestingPitchDegrees * 0.55f;
+        var yaw = packet.ReducedMotion ? 0f : _cameraYawDeg.Value * 0.38f;
+        var f = PerspectiveFocalLength * Math.Max(packet.RenderScaling, 1f);
+        var panX = packet.ReducedMotion ? 0f : _cameraX.Value * 0.35f;
+        var panY = packet.ReducedMotion ? 0f : _cameraY.Value * 0.35f;
+
+        SKPoint ProjBack(float x, float y, float z = 95f)
         {
-            if (!packet.ReducedMotion)
-            {
-                var perspective = Create3DPerspectiveMatrix(
-                    RestingPitchDegrees * 0.55f,
-                    _cameraYawDeg.Value * 0.38f,
-                    0f,
-                    PerspectiveFocalLength * Math.Max(packet.RenderScaling, 1f),
-                    centerX,
-                    centerY);
-                canvas.Concat(in perspective);
-                canvas.Translate(_cameraX.Value * 0.35f, _cameraY.Value * 0.35f);
-            }
-
-            // Editorial stage frame registration brackets & horizon rules
-            var padX = Math.Clamp(w * 0.11f, 44f, 120f);
-            var padY = Math.Clamp(h * 0.14f, 40f, 96f);
-            var frame = new SKRect(padX, padY, w - padX, h - padY);
-            var tickLen = Math.Clamp(MathF.Min(w, h) * 0.025f, 10f, 20f);
-
-            var ruleAlpha = Math.Clamp(0.11f + (_smoothedBass * 0.12f), 0.08f, 0.28f);
-            _hairlinePaint.StrokeWidth = 1.0f;
-            _hairlinePaint.Color = palette.AccentColor3.ToSkColorWithAlpha(ruleAlpha * 0.55f);
-            canvas.DrawLine(frame.Left, centerY, frame.Right, centerY, _hairlinePaint);
-
-            // Subtle vertical guide rules at left/right golden thirds
-            _hairlinePaint.Color = palette.AccentColor1.ToSkColorWithAlpha(ruleAlpha * 0.35f);
-            canvas.DrawLine(w * 0.26f, frame.Top, w * 0.26f, frame.Bottom, _hairlinePaint);
-            canvas.DrawLine(w * 0.74f, frame.Top, w * 0.74f, frame.Bottom, _hairlinePaint);
-
-            // Architectural corner L-brackets around focal stage
-            _hairlinePaint.StrokeWidth = 1.5f;
-            _hairlinePaint.Color = palette.AccentColor1.ToSkColorWithAlpha(ruleAlpha);
-            DrawCornerBracket(canvas, frame.Left, frame.Top, tickLen, tickLen);
-            DrawCornerBracket(canvas, frame.Right, frame.Top, -tickLen, tickLen);
-            if (!packet.BottomFadeToBlack)
-            {
-                DrawCornerBracket(canvas, frame.Left, frame.Bottom, tickLen, -tickLen);
-                DrawCornerBracket(canvas, frame.Right, frame.Bottom, -tickLen, -tickLen);
-            }
-
-            // Monumental active-word watermark echo floating in deep shadow behind wall
-            var line = slice.CurrentLine!;
-            var watermarkText = !line.Words.IsEmpty
-                ? line.Words[Math.Clamp(slice.ActiveWordIndex, 0, line.Words.Length - 1)].Text.ToUpperInvariant()
-                : line.RawText.ToUpperInvariant();
-
-            if (!string.IsNullOrWhiteSpace(watermarkText))
-            {
-                var wmScale = 2.65f + (_smoothedBeat * 0.18f);
-                var wmMeasured = TextShaperService.MeasureWidth(watermarkText, font, context.Fonts);
-                var wmFit = TextShaperService.ComputeAutoFitScale(wmMeasured * wmScale, w * 0.90f, 1.0f);
-                var finalWmScale = wmScale * wmFit;
-                var wmAlpha = Math.Clamp(0.055f + (_smoothedBeat * 0.045f), 0.04f, 0.13f);
-
-                font.GetFontMetrics(out var metrics);
-                var baselineOffset = -((metrics.Ascent + metrics.Descent) * 0.5f);
-
-                var wmSave = canvas.Save();
-                try
-                {
-                    canvas.Translate(centerX, centerY);
-                    canvas.Scale(finalWmScale, finalWmScale);
-                    context.Legibility.DrawLegibleText(
-                        canvas,
-                        watermarkText,
-                        0f,
-                        baselineOffset,
-                        SKTextAlign.Center,
-                        font,
-                        fontId,
-                        StyleLayoutHelper.BlendSrgb(palette.AccentColor2, palette.AccentColor3, 0.5f),
-                        opacity: wmAlpha,
-                        fonts: context.Fonts);
-                }
-                finally
-                {
-                    canvas.RestoreToCount(wmSave);
-                }
-            }
+            var (pt, _) = Project3DPoint(x + panX, y + panY, z, pitch, yaw, 0f, f, centerX, centerY);
+            return pt;
         }
-        finally
+
+        // Editorial stage frame registration brackets & horizon rules in projected 3D coordinates (affine CTM)
+        var ruleAlpha = Math.Clamp(0.11f + (_smoothedBass * 0.12f), 0.08f, 0.28f);
+        _hairlinePaint.StrokeWidth = 1.0f;
+        _hairlinePaint.Color = palette.AccentColor3.ToSkColorWithAlpha(ruleAlpha * 0.55f);
+        canvas.DrawLine(ProjBack(frame.Left, centerY), ProjBack(frame.Right, centerY), _hairlinePaint);
+
+        _hairlinePaint.Color = palette.AccentColor1.ToSkColorWithAlpha(ruleAlpha * 0.35f);
+        canvas.DrawLine(ProjBack(w * 0.26f, frame.Top), ProjBack(w * 0.26f, frame.Bottom), _hairlinePaint);
+        canvas.DrawLine(ProjBack(w * 0.74f, frame.Top), ProjBack(w * 0.74f, frame.Bottom), _hairlinePaint);
+
+        _hairlinePaint.StrokeWidth = 1.5f;
+        _hairlinePaint.Color = palette.AccentColor1.ToSkColorWithAlpha(ruleAlpha);
+        var tl = ProjBack(frame.Left, frame.Top);
+        var tr = ProjBack(frame.Right, frame.Top);
+        DrawCornerBracket(canvas, tl.X, tl.Y, tickLen, tickLen);
+        DrawCornerBracket(canvas, tr.X, tr.Y, -tickLen, tickLen);
+        if (!packet.BottomFadeToBlack)
         {
-            canvas.RestoreToCount(backSave);
+            var bl = ProjBack(frame.Left, frame.Bottom);
+            var br = ProjBack(frame.Right, frame.Bottom);
+            DrawCornerBracket(canvas, bl.X, bl.Y, tickLen, -tickLen);
+            DrawCornerBracket(canvas, br.X, br.Y, -tickLen, -tickLen);
+        }
+
+        // Monumental active-word watermark echo floating in deep shadow behind wall (pure affine Scale!)
+        var line = slice.CurrentLine!;
+        var watermarkText = !line.Words.IsEmpty
+            ? line.Words[Math.Clamp(slice.ActiveWordIndex, 0, line.Words.Length - 1)].Text.ToUpperInvariant()
+            : line.RawText.ToUpperInvariant();
+
+        if (!string.IsNullOrWhiteSpace(watermarkText))
+        {
+            var wmCenter = ProjBack(centerX, centerY, 130f);
+            var wmScale = 2.65f + (_smoothedBeat * 0.18f);
+            var wmMeasured = TextShaperService.MeasureWidth(watermarkText, font, context.Fonts);
+            var wmFit = TextShaperService.ComputeAutoFitScale(wmMeasured * wmScale, w * 0.90f, 1.0f);
+            var finalWmScale = wmScale * wmFit;
+            var wmAlpha = Math.Clamp(0.055f + (_smoothedBeat * 0.045f), 0.04f, 0.13f);
+
+            font.GetFontMetrics(out var metrics);
+            var baselineOffset = -((metrics.Ascent + metrics.Descent) * 0.5f);
+
+            var wmSave = canvas.Save();
+            try
+            {
+                canvas.Translate(wmCenter.X, wmCenter.Y);
+                canvas.Scale(finalWmScale, finalWmScale);
+                context.Legibility.DrawLegibleText(
+                    canvas,
+                    watermarkText,
+                    0f,
+                    baselineOffset,
+                    SKTextAlign.Center,
+                    font,
+                    fontId,
+                    StyleLayoutHelper.BlendSrgb(palette.AccentColor2, palette.AccentColor3, 0.5f),
+                    opacity: wmAlpha,
+                    fonts: context.Fonts);
+            }
+            finally
+            {
+                canvas.RestoreToCount(wmSave);
+            }
         }
     }
 
@@ -482,14 +494,24 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
         var slotPitch = font.Size * (packet.IsCompactCard ? 1.15f : 1.24f);
         var spreadX = packet.ViewportWidthDip * (packet.IsCompactCard ? 0.14f : 0.15f);
 
-        // Previous line whisper (top-left editorial context)
+        var pitchDeg = packet.ReducedMotion ? 0f : RestingPitchDegrees + (_smoothedBass * 2.4f);
+        var yawDeg = packet.ReducedMotion ? 0f : _cameraYawDeg.Value;
+        var rollDeg = packet.ReducedMotion ? 0f : Math.Clamp((_cameraYawDeg.Value / MaxYawDegrees) * MaxRollDegrees, -MaxRollDegrees, MaxRollDegrees);
+        var focal = PerspectiveFocalLength * Math.Max(packet.RenderScaling, 1f);
+        var camX = packet.ReducedMotion ? 0f : _cameraX.Value;
+        var camY = packet.ReducedMotion ? 0f : _cameraY.Value;
+
+        // Previous line whisper (top-left editorial 3D depth context)
         if (!packet.IsCompactCard && slice.PreviousLine is not null)
         {
+            var (prevPt, prevDepth) = packet.ReducedMotion
+                ? (new SKPoint(centerX - (spreadX * 0.82f), centerY - (slotPitch * 2.35f)), 1f)
+                : Project3DPoint(centerX - (spreadX * 0.82f) + camX, centerY - (slotPitch * 2.35f) + camY, 85f, pitchDeg, yawDeg, rollDeg, focal, centerX, centerY);
             var ghostSave = context.Canvas.Save();
             try
             {
-                context.Canvas.Translate(centerX - (spreadX * 0.82f), centerY - (slotPitch * 2.35f));
-                context.Canvas.Scale(0.52f, 0.52f);
+                context.Canvas.Translate(prevPt.X, prevPt.Y);
+                context.Canvas.Scale(0.52f * prevDepth, 0.52f * prevDepth);
                 context.Legibility.DrawLegibleText(
                     context.Canvas,
                     slice.PreviousLine.RawText,
@@ -511,11 +533,14 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
         // Next line preview whisper (lower-right diagonal anticipation on full stage)
         if (isFullStage && slice.NextLine is not null && !slice.NextLine.IsInstrumentalBreak)
         {
+            var (nextPt, nextDepth) = packet.ReducedMotion
+                ? (new SKPoint(centerX + (spreadX * 0.86f), centerY + (slotPitch * 2.38f)), 1f)
+                : Project3DPoint(centerX + (spreadX * 0.86f) + camX, centerY + (slotPitch * 2.38f) + camY, 85f, pitchDeg, yawDeg, rollDeg, focal, centerX, centerY);
             var nextSave = context.Canvas.Save();
             try
             {
-                context.Canvas.Translate(centerX + (spreadX * 0.86f), centerY + (slotPitch * 2.38f));
-                context.Canvas.Scale(0.48f, 0.48f);
+                context.Canvas.Translate(nextPt.X, nextPt.Y);
+                context.Canvas.Scale(0.48f * nextDepth, 0.48f * nextDepth);
                 context.Legibility.DrawLegibleText(
                     context.Canvas,
                     slice.NextLine.RawText,
@@ -534,7 +559,9 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
             }
         }
 
-        // Pass 1: Precompute sculpted cascade positions & draw continuous kinetic trace links between spoken words
+        // Pass 1: Project sculpted 3D cascade positions into pure affine space & draw kinetic trace links
+        Span<float> depthScales = stackalloc float[8];
+        depthScales.Fill(1.0f);
         var anchorCount = Math.Min(visibleCount, _wordAnchors.Length);
         for (var i = startIdx; i <= endIdx && (i - startIdx) < anchorCount; i++)
         {
@@ -546,11 +573,18 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
             var measured = TextShaperService.MeasureWidth(words[i].Text, font, context.Fonts);
             var isActive = i == activeIdx;
             var scale = isActive && !packet.ReducedMotion ? _wordSlamScale.Value : (i < activeIdx ? 0.88f : 0.80f);
-            var fit = TextShaperService.ComputeAutoFitScale(measured * scale, packet.ViewportWidthDip * 0.72f, 1.0f);
-            var finalScale = scale * fit;
+            var zOffset = isActive ? -32f : (relRow * 42f);
+
+            var (projPt, depthScale) = packet.ReducedMotion
+                ? (new SKPoint(rawX, wordY), 1.0f)
+                : Project3DPoint(rawX + camX, wordY + camY, zOffset, pitchDeg, yawDeg, rollDeg, focal, centerX, centerY);
+
+            var fit = TextShaperService.ComputeAutoFitScale(measured * scale * depthScale, packet.ViewportWidthDip * 0.72f, 1.0f);
+            var finalScale = scale * fit * depthScale;
             var halfW = (measured * finalScale * 0.5f) + 20f;
-            var clampedX = Math.Clamp(rawX, halfW, Math.Max(halfW, packet.ViewportWidthDip - halfW));
-            _wordAnchors[k] = new SKPoint(clampedX, wordY);
+            var clampedX = Math.Clamp(projPt.X, halfW, Math.Max(halfW, packet.ViewportWidthDip - halfW));
+            _wordAnchors[k] = new SKPoint(clampedX, projPt.Y);
+            depthScales[k] = depthScale;
         }
 
         var completedAnchors = Math.Min(anchorCount - 1, activeIdx - startIdx);
@@ -580,6 +614,7 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
             var word = words[i];
             var k = i - startIdx;
             var posPt = k < anchorCount ? _wordAnchors[k] : new SKPoint(centerX, centerY);
+            var depthScale = k < anchorCount ? depthScales[k] : 1.0f;
             var clampedX = posPt.X;
             var wordY = posPt.Y;
 
@@ -590,8 +625,8 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
                 : isPast ? 0.72f : 0.34f;
             var scale = isActive && !packet.ReducedMotion ? _wordSlamScale.Value : (isPast ? 0.88f : 0.80f);
             var measured = TextShaperService.MeasureWidth(word.Text, font, context.Fonts);
-            var fit = TextShaperService.ComputeAutoFitScale(measured * scale, packet.ViewportWidthDip * 0.72f, 1.0f);
-            var finalScale = scale * fit;
+            var fit = TextShaperService.ComputeAutoFitScale(measured * scale * depthScale, packet.ViewportWidthDip * 0.72f, 1.0f);
+            var finalScale = scale * fit * depthScale;
 
             if (isActive)
             {

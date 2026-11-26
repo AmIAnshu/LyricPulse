@@ -10,37 +10,38 @@ using SkiaSharp;
 namespace LyricPulse.Rendering.Styles;
 
 /// <summary>
-/// Style #11 — Vinyl Groove: Tactile Hi-Fi turntable platter spinning smoothly with playback,
-/// oversized 0.50R center song album cover (decoded safely across JPEG/WebP/PNG or rich procedural
-/// studio sleeve in Demo/fallback mode), anisotropic album-tinted specular grooves, song-progress
-/// pivoting tonearm with luminous stylus spark, beat strobe rim, and 3D-tilted extruded kinetic
-/// typography stage right beside the platter.
+/// Style #11 — Vinyl Groove 3D Listening Room:
+/// Perspective 3D studio room with receding wireframe depth, oversized 0.54R circularly-cropped
+/// center song album cover (or procedural studio sleeve artwork) with punched spindle cutout,
+/// 3-pass Z-depth orbiting 3D extruded lyrics that physically weave BEHIND and IN FRONT OF the
+/// spinning turntable, tracking tonearm &amp; stylus beam, using strictly affine canvas transforms
+/// so GPU glyph atlases remain 100% artifact-free.
 /// </summary>
 public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
 {
     private const int GrooveRingCount = 11;
     private const int StrobeDotCount = 36;
     private const float SpinDegreesPerSecond = 44f;
-    private const float PerspectiveFocalLength = 1050f;
+    private const float PerspectiveFocalLength = 960f;
 
     private readonly AestheticsOverlayRenderer _aesthetics = new();
     private readonly ReactiveVisualIconRenderer _moodIcons = new();
     private readonly SKPaint _fillPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _strokePaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round };
     private readonly SKPaint _glowPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _roomPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round };
     private readonly SKPath _armPath = new();
     private readonly SKPath _labelClipPath = new();
-    private readonly SKPath _sheenPath = new();
+    private readonly List<Projected3DWordSlot> _wordSlots = new(16);
     private readonly SKColor[] _sheenColors = new SKColor[5];
     private readonly float[] _sheenStops = [0.00f, 0.25f, 0.50f, 0.75f, 1.00f];
     private readonly SKColor[] _radialColors = new SKColor[3];
     private readonly float[] _radialStops = [0.00f, 0.48f, 1.00f];
-    private readonly List<WrappedWordRow> _rows = new(4);
 
-    private SpringState _wordScale = SpringState.AtRest(1.14f);
+    private SpringState _wordScale = SpringState.AtRest(1.15f);
     private SpringState _tonearmProgress = SpringState.AtRest(0.15f);
     private SpringState _spinRate = SpringState.AtRest(1.0f);
-    private SpringState _lyricYawDeg = SpringState.AtRest(-7.5f);
+    private SpringState _roomYawDeg = SpringState.AtRest(-7.0f);
     private (int LineIndex, int WordIndex) _lastWordKey = (-1, -1);
     private float _lastWordDurationSec = 0.32f;
     private float _spinAngleDeg = 18f;
@@ -52,20 +53,29 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
     private SKImage? _cachedLabelImage;
     private bool _disposed;
 
-    private sealed class WrappedWordRow
-    {
-        public readonly List<(int Index, LyricWord Word, float Width)> Items = new(8);
-        public float TotalWidth;
-    }
+    private readonly record struct Projected3DWordSlot(
+        int WordIndex,
+        string Text,
+        float ScreenX,
+        float ScreenY,
+        float WorldZ,
+        float DepthScale,
+        float WordScale,
+        float MeasuredWidth,
+        float SkewY,
+        float Opacity,
+        RgbColor Color,
+        bool IsActive,
+        bool IsFrontPass);
 
     public OverlayStyleId StyleId => OverlayStyleId.VinylGroove;
 
     public void ResetState()
     {
-        _wordScale = SpringState.AtRest(1.14f);
+        _wordScale = SpringState.AtRest(1.15f);
         _tonearmProgress = SpringState.AtRest(0.15f);
         _spinRate = SpringState.AtRest(1.0f);
-        _lyricYawDeg = SpringState.AtRest(-7.5f);
+        _roomYawDeg = SpringState.AtRest(-7.0f);
         _lastWordKey = (-1, -1);
         _lastWordDurationSec = 0.32f;
         _smoothedBass = 0f;
@@ -102,7 +112,7 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
             _beatKick = packet.ReducedMotion ? 0f : Math.Clamp(0.45f + (audio.BeatPulse * 0.45f) + (audio.ClimaxIntensity * 0.40f), 0f, 1f);
             if (!packet.ReducedMotion)
             {
-                _wordScale = new SpringState(Value: 0.92f, Velocity: 2.15f * packet.SafePartyEnergy, Target: 1.15f)
+                _wordScale = new SpringState(Value: 0.90f, Velocity: 2.25f * packet.SafePartyEnergy, Target: 1.16f)
                     .Step(SpringTokens.WordSnap.WithTempoCompression(_lastWordDurationSec), dt);
             }
             else
@@ -112,20 +122,19 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         }
         else if (!packet.ReducedMotion)
         {
-            _wordScale = _wordScale.WithTarget(1.15f).Step(SpringTokens.WordSnap.WithTempoCompression(_lastWordDurationSec), dt);
+            _wordScale = _wordScale.WithTarget(1.16f).Step(SpringTokens.WordSnap.WithTempoCompression(_lastWordDurationSec), dt);
         }
 
-        // Smooth 3D yaw sweep across active word progression inside the right typography plane
+        // Smooth 3D listening room camera orbit synchronized with line cadence
         var wordCount = slice.CurrentLine?.Words.IsEmpty == false ? slice.CurrentLine.Words.Length : 1;
         var wordFrac = wordCount <= 1 ? 0.5f : Math.Clamp(slice.ActiveWordIndex / (float)(wordCount - 1), 0f, 1f);
         var targetYaw = packet.ReducedMotion
             ? 0f
-            : Math.Clamp((-9.5f + (wordFrac * 13.0f)) * Math.Clamp(packet.SafePartyEnergy, 0.75f, 1.3f), -11f, 8f);
-        _lyricYawDeg = packet.ReducedMotion
+            : Math.Clamp((-8.5f + (wordFrac * 15.0f)) * Math.Clamp(packet.SafePartyEnergy, 0.75f, 1.3f), -11f, 10f);
+        _roomYawDeg = packet.ReducedMotion
             ? SpringState.AtRest(0f)
-            : _lyricYawDeg.WithTarget(targetYaw).Step(SpringTokens.CameraDrift, dt);
+            : _roomYawDeg.WithTarget(targetYaw).Step(SpringTokens.CameraDrift, dt);
 
-        // Smooth platter rotation inertia
         var targetSpin = (isPlaying && !packet.ReducedMotion) ? 1.0f : 0.0f;
         _spinRate = packet.ReducedMotion
             ? SpringState.AtRest(0f)
@@ -138,7 +147,6 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
             _spinAngleDeg = (_spinAngleDeg + (dt * SpinDegreesPerSecond * (_spinRate.Value + climaxSpeedBonus))) % 360f;
         }
 
-        // Tonearm tracking progress across playable groove band (0..1)
         var targetTrackProgress = ComputeNormalizedSongProgress(packet, slice);
         if (!_hasArmInit || packet.ReducedMotion)
         {
@@ -158,7 +166,7 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
 
         UpdateCachedLabelImage(packet.PlaybackSnapshot?.AlbumArt);
 
-        return !packet.ReducedMotion && (isPlaying || !_wordScale.IsAtRest || !_tonearmProgress.IsAtRest || !_lyricYawDeg.IsAtRest || _spinRate.Value > 0.01f);
+        return !packet.ReducedMotion && (isPlaying || !_wordScale.IsAtRest || !_tonearmProgress.IsAtRest || !_roomYawDeg.IsAtRest || _spinRate.Value > 0.01f);
     }
 
     public void Render(in StyleRenderContext context, in LifecycleFrameState lifecycle)
@@ -180,11 +188,11 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         var fontSize = StyleLayoutHelper.ResolveStyleFontSize(packet, styleMultiplier: packet.IsCompactCard ? 0.56f : 0.68f);
         var font = context.Fonts.GetOrCreateFont(fontId, fontSize, enforceMinOverlayFloor: !packet.IsCompactCard);
 
-        // Balanced floating scrim strictly around turntable + lyric cluster (leaves DesktopOverlay 4 corners alpha == 0)
-        var scrimLeft = Math.Max(8f, geom.Cx - (geom.PlatterRadius * 1.18f));
-        var scrimRight = Math.Min(packet.ViewportWidthDip - 8f, geom.LyricRight + 16f);
-        var scrimTop = Math.Max(8f, geom.Cy - (geom.PlatterRadius * 1.12f));
-        var scrimBottom = Math.Min(packet.ViewportHeightDip - 8f, geom.Cy + (geom.PlatterRadius * 1.12f));
+        // Tight ambient scrim keeping DesktopOverlay 4 corners strictly transparent (alpha == 0)
+        var scrimLeft = Math.Max(10f, geom.Cx - (geom.PlatterRadius * 1.18f));
+        var scrimRight = Math.Min(packet.ViewportWidthDip - 10f, geom.LyricRight + 16f);
+        var scrimTop = Math.Max(10f, geom.Cy - (geom.PlatterRadius * 1.12f));
+        var scrimBottom = Math.Min(packet.ViewportHeightDip - 10f, geom.Cy + (geom.PlatterRadius * 1.12f));
         if (packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay)
         {
             scrimLeft = Math.Max(22f, scrimLeft);
@@ -203,22 +211,33 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
 
         var audio = packet.EffectiveAudioMetrics;
         var climaxGlow = (!packet.ReducedMotion && audio.IsClimaxActive && BeatDropEffectRenderer.IsEnabled(in packet))
-            ? audio.ClimaxIntensity * 0.55f * BeatDropEffectRenderer.ResolveDropIntensity(in packet)
+            ? audio.ClimaxIntensity * 0.58f * BeatDropEffectRenderer.ResolveDropIntensity(in packet)
             : 0f;
 
-        // 1. Turntable LP Disc, Strobe Rim, Oversized Song Album Cover Center, and Tracking Tonearm
+        // Precompute 3D spatial word slots (front Z < 40 vs back Z >= 40 relative to vinyl disc)
+        BuildProjected3DWordSlots(in context, font, slice, geom, fontSize, climaxGlow);
+
+        // PASS 0 (StageCanvas Only): 3D Perspective Listening Room Architecture (floor grid, walls, neon room arch)
+        if (geom.IsFullStage)
+        {
+            Draw3DRoomEnvironment(canvas, packet, geom, climaxGlow);
+        }
+
+        // PASS 1 (Z >= 40 BEHIND VINYL): Back-plane orbiting 3D text + deep background watermark + Previous Line whisper
+        DrawBackPlaneDepthPass(in context, font, fontId, slice, geom, fontSize, climaxGlow);
+
+        // PASS 2 (Z = 0 MID-PLANE): Spinning Vinyl Turntable + Oversized 0.54R Cropped Album Cover + Tracking Tonearm
         var progress = Math.Clamp(_tonearmProgress.Value, 0f, 1f);
         DrawTurntablePlatter(canvas, in context, geom, progress, climaxGlow);
         var (needleX, needleY) = DrawTonearmAndStylus(canvas, packet, geom, progress, climaxGlow);
 
-        // 2. Luminous Stylus-to-Lyric Horizon Light Beam on StageCanvas
         if (geom.IsFullStage && !packet.ReducedMotion)
         {
             DrawStylusBridgeThread(canvas, packet.Palette, needleX, needleY, geom, climaxGlow);
         }
 
-        // 3. Right-Column 3D Perspective Kinetic Typography Stage beside the Vinyl Player
-        DrawRightColumn3DLyricStage(in context, font, fontId, slice, geom, fontSize, climaxGlow);
+        // PASS 3 (Z < 40 IN FRONT OF VINYL): Foreground 3D extruded active & orbiting words + subtle next whisper
+        DrawFrontPlaneDepthPass(in context, font, fontId, slice, geom, fontSize, climaxGlow);
     }
 
     public void Dispose()
@@ -236,9 +255,451 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         _fillPaint.Dispose();
         _strokePaint.Dispose();
         _glowPaint.Dispose();
+        _roomPaint.Dispose();
         _armPath.Dispose();
         _labelClipPath.Dispose();
-        _sheenPath.Dispose();
+    }
+
+    private void Draw3DRoomEnvironment(
+        SKCanvas canvas,
+        FrameRenderPacket packet,
+        TurntableGeometry geom,
+        float climaxGlow)
+    {
+        var w = packet.ViewportWidthDip;
+        var h = packet.ViewportHeightDip;
+        var palette = packet.Palette;
+        var focal = PerspectiveFocalLength * Math.Max(packet.RenderScaling, 1f);
+        var pitch = packet.ReducedMotion ? 0f : (7.2f + (_smoothedBass * 2.2f));
+        var yaw = packet.ReducedMotion ? 0f : (_roomYawDeg.Value * 0.52f);
+        var vanishX = w * 0.48f;
+        var vanishY = h * 0.49f;
+
+        SKPoint ProjRoom(float rx, float ry, float rz)
+        {
+            var (pt, _) = KineticWallStyleRenderer.Project3DPoint(
+                vanishX + rx,
+                vanishY + ry,
+                rz,
+                pitch,
+                yaw,
+                rollDeg: 0f,
+                focal,
+                vanishX,
+                vanishY);
+            return pt;
+        }
+
+        var roomAlpha = Math.Clamp(0.14f + (_smoothedBass * 0.14f) + (climaxGlow * 0.24f), 0.10f, 0.44f);
+        var halfW = w * 0.54f;
+        var floorY = h * 0.46f;
+        var ceilY = -h * 0.46f;
+        const float zNear = -90f;
+        const float zFar = 520f;
+
+        // 4 receding corner rails forming a 3D room bounding perspective prism
+        _roomPaint.StrokeWidth = 1.25f + (climaxGlow * 0.8f);
+        _roomPaint.Color = palette.AccentColor3.ToSkColorWithAlpha(roomAlpha * 0.65f);
+        canvas.DrawLine(ProjRoom(-halfW, floorY, zNear), ProjRoom(-halfW, floorY, zFar), _roomPaint);
+        canvas.DrawLine(ProjRoom(halfW, floorY, zNear), ProjRoom(halfW, floorY, zFar), _roomPaint);
+        canvas.DrawLine(ProjRoom(-halfW, ceilY, zNear), ProjRoom(-halfW, ceilY, zFar), _roomPaint);
+        canvas.DrawLine(ProjRoom(halfW, ceilY, zNear), ProjRoom(halfW, ceilY, zFar), _roomPaint);
+
+        // Glowing back soundstage wall outline at zFar
+        var bl = ProjRoom(-halfW, floorY, zFar);
+        var br = ProjRoom(halfW, floorY, zFar);
+        var tl = ProjRoom(-halfW, ceilY, zFar);
+        var tr = ProjRoom(halfW, ceilY, zFar);
+        _roomPaint.StrokeWidth = 1.5f + (climaxGlow * 1.4f);
+        _roomPaint.Color = palette.AccentColor2.ToSkColorWithAlpha(roomAlpha * 0.85f);
+        canvas.DrawLine(tl, tr, _roomPaint);
+        canvas.DrawLine(tr, br, _roomPaint);
+        canvas.DrawLine(br, bl, _roomPaint);
+        canvas.DrawLine(bl, tl, _roomPaint);
+
+        // Perspective receding 3D floor grid rays
+        _roomPaint.StrokeWidth = 0.9f;
+        _roomPaint.Color = palette.AccentColor3.ToSkColorWithAlpha(roomAlpha * 0.45f);
+        for (var i = -2; i <= 2; i++)
+        {
+            var gx = (halfW * 0.34f) * i;
+            canvas.DrawLine(ProjRoom(gx, floorY, zNear), ProjRoom(gx, floorY, zFar), _roomPaint);
+        }
+
+        // Cross-depth floor horizon bars + subtle ceiling acoustic ribs
+        for (var d = 0; d < 5; d++)
+        {
+            var z = zNear + ((zFar - zNear) * (d / 4f));
+            var fade = 1f - (d * 0.14f);
+            _roomPaint.Color = palette.AccentColor1.ToSkColorWithAlpha(roomAlpha * 0.34f * fade);
+            canvas.DrawLine(ProjRoom(-halfW, floorY, z), ProjRoom(halfW, floorY, z), _roomPaint);
+            if (d is 1 or 3)
+            {
+                canvas.DrawLine(ProjRoom(-halfW, ceilY, z), ProjRoom(halfW, ceilY, z), _roomPaint);
+            }
+        }
+    }
+
+    private void BuildProjected3DWordSlots(
+        in StyleRenderContext context,
+        SKFont font,
+        ActiveLyricSlice slice,
+        TurntableGeometry geom,
+        float fontSize,
+        float climaxGlow)
+    {
+        _wordSlots.Clear();
+        var line = slice.CurrentLine!;
+        var words = line.Words;
+        var packet = context.Packet;
+        if (words.IsEmpty)
+        {
+            return;
+        }
+
+        var focal = PerspectiveFocalLength * Math.Max(packet.RenderScaling, 1f);
+        var pitch = packet.ReducedMotion ? 0f : (5.5f + (_smoothedBass * 2.8f) + (climaxGlow * 2.0f));
+        var yaw = packet.ReducedMotion ? 0f : _roomYawDeg.Value;
+        var roll = packet.ReducedMotion ? 0f : Math.Clamp(yaw * 0.14f, -1.6f, 1.6f);
+
+        var activeIdx = Math.Clamp(slice.ActiveWordIndex, 0, words.Length - 1);
+        var rowLimitW = geom.LyricWidth * 0.90f;
+        var spaceW = fontSize * 0.34f;
+
+        // First wrap words into balanced rows on the right stage zone
+        var rowBuckets = new List<(int Start, int End, float Width)>(4);
+        var rowStart = 0;
+        var accumW = 0f;
+        for (var i = 0; i < words.Length; i++)
+        {
+            var wW = TextShaperService.MeasureWidth(words[i].Text, font, context.Fonts);
+            var candidate = i == rowStart ? wW : accumW + spaceW + wW;
+            if (i > rowStart && candidate > rowLimitW && rowBuckets.Count < 3)
+            {
+                rowBuckets.Add((rowStart, i - 1, accumW));
+                rowStart = i;
+                accumW = wW;
+            }
+            else
+            {
+                accumW = candidate;
+            }
+        }
+        rowBuckets.Add((rowStart, words.Length - 1, accumW));
+
+        var lineH = fontSize * 1.26f;
+        var startBaselineY = geom.LyricCy - (((rowBuckets.Count - 1) * lineH) * 0.5f) + (fontSize * 0.34f);
+        var tOrb = packet.ReducedMotion ? 0f : (float)(packet.RenderTimeSeconds * 0.72);
+
+        for (var rIdx = 0; rIdx < rowBuckets.Count; rIdx++)
+        {
+            var (start, end, totalW) = rowBuckets[rIdx];
+            var rowScale = totalW > rowLimitW ? Math.Clamp(rowLimitW / totalW, 0.45f, 1f) : 1f;
+            var baseRowY = startBaselineY + (rIdx * lineH);
+            var cursorX = geom.LyricMidX - ((totalW * rowScale) * 0.5f);
+
+            for (var i = start; i <= end; i++)
+            {
+                var word = words[i];
+                var rawW = TextShaperService.MeasureWidth(word.Text, font, context.Fonts);
+                var scaledW = rawW * rowScale;
+                var worldX = cursorX + (scaledW * 0.5f);
+
+                var isActive = i == activeIdx;
+                var isPast = i < activeIdx;
+
+                // True 3D Z assignment: Active word jumps IN FRONT (Z < 0 closer to camera);
+                // non-active words oscillate smoothly around vinyl plane so alternating words tuck BEHIND (Z >= 40)
+                // and sweep IN FRONT (Z < 40) as the orbital room rotates!
+                float worldZ;
+                if (!geom.IsFullStage || packet.ReducedMotion)
+                {
+                    worldZ = isActive ? -35f : 15f;
+                }
+                else if (isActive)
+                {
+                    worldZ = -75f - (climaxGlow * 32f);
+                    // Bring foreground spotlight slightly closer toward vinyl right edge for bold depth overlap
+                    worldX = Math.Max(geom.Cx + (geom.PlatterRadius * 0.62f), worldX - (geom.PlatterRadius * 0.14f));
+                }
+                else
+                {
+                    var wave = MathF.Sin((i * 1.45f) + (line.Index * 0.85f) + tOrb);
+                    if (wave > 0.12f)
+                    {
+                        // Orbit behind vinyl record edge!
+                        worldZ = 90f + (wave * 135f);
+                        worldX -= geom.PlatterRadius * (0.28f + (0.22f * wave));
+                    }
+                    else
+                    {
+                        // Float forward in foreground room lane
+                        worldZ = -20f + (wave * 30f);
+                    }
+                }
+
+                var (projPt, depthScale) = packet.ReducedMotion
+                    ? (new SKPoint(worldX, baseRowY), 1.0f)
+                    : KineticWallStyleRenderer.Project3DPoint(
+                        worldX,
+                        baseRowY,
+                        worldZ,
+                        pitch,
+                        yaw,
+                        roll,
+                        focal,
+                        geom.LyricMidX,
+                        geom.LyricCy);
+
+                var isFrontPass = isActive || worldZ < 40f || !geom.IsFullStage;
+                var baseColor = isActive ? packet.Palette.AccentColor1
+                    : isPast ? packet.Palette.AccentColor3
+                    : packet.Palette.AccentColor1;
+                var baseOpacity = isActive ? 1.0f
+                    : !isFrontPass ? 0.52f
+                    : isPast ? 0.72f : 0.44f;
+                var wordScale = isActive ? _wordScale.Value * rowScale : rowScale;
+                var skewY = packet.ReducedMotion ? 0f : Math.Clamp((worldX - geom.LyricMidX) / Math.Max(320f, geom.LyricWidth) * (yaw * 0.008f), -0.07f, 0.07f);
+
+                _wordSlots.Add(new Projected3DWordSlot(
+                    WordIndex: i,
+                    Text: word.Text,
+                    ScreenX: projPt.X,
+                    ScreenY: projPt.Y,
+                    WorldZ: worldZ,
+                    DepthScale: depthScale,
+                    WordScale: wordScale,
+                    MeasuredWidth: scaledW,
+                    SkewY: skewY,
+                    Opacity: baseOpacity,
+                    Color: baseColor,
+                    IsActive: isActive,
+                    IsFrontPass: isFrontPass));
+
+                cursorX += scaledW + (spaceW * rowScale);
+            }
+        }
+
+        // Depth-sort back-to-front so overlapping 3D words stack naturally!
+        _wordSlots.Sort(static (a, b) => b.WorldZ.CompareTo(a.WorldZ));
+    }
+
+    private void DrawBackPlaneDepthPass(
+        in StyleRenderContext context,
+        SKFont font,
+        LyricFontId fontId,
+        ActiveLyricSlice slice,
+        TurntableGeometry geom,
+        float fontSize,
+        float climaxGlow)
+    {
+        var canvas = context.Canvas;
+        var packet = context.Packet;
+        var words = slice.CurrentLine!.Words;
+
+        if (geom.IsFullStage)
+        {
+            // Deep back-wall 3D extruded active word echo tucked partially behind turntable rim
+            var wmText = !words.IsEmpty
+                ? words[Math.Clamp(slice.ActiveWordIndex, 0, words.Length - 1)].Text.ToUpperInvariant()
+                : slice.CurrentLine.RawText.ToUpperInvariant();
+            if (!string.IsNullOrWhiteSpace(wmText))
+            {
+                var wmX = packet.ViewportWidthDip * 0.49f;
+                var wmY = geom.Cy + (fontSize * 0.25f);
+                var wmScale = 2.25f + (_smoothedBeat * 0.18f) + (climaxGlow * 0.16f);
+                var wmMeasured = TextShaperService.MeasureWidth(wmText, font, context.Fonts);
+                var wmFit = TextShaperService.ComputeAutoFitScale(wmMeasured * wmScale, packet.ViewportWidthDip * 0.72f, 1.0f);
+                var wmSave = canvas.Save();
+                try
+                {
+                    canvas.Translate(wmX, wmY);
+                    canvas.Scale(wmScale * wmFit, wmScale * wmFit);
+                    context.Legibility.DrawLegibleText(
+                        canvas,
+                        wmText,
+                        0f,
+                        0f,
+                        SKTextAlign.Center,
+                        font,
+                        fontId,
+                        StyleLayoutHelper.BlendSrgb(packet.Palette.AccentColor2, packet.Palette.AccentColor3, 0.5f),
+                        opacity: Math.Clamp(0.08f + (_smoothedBeat * 0.05f) + (climaxGlow * 0.07f), 0.06f, 0.22f),
+                        fonts: context.Fonts);
+                }
+                finally
+                {
+                    canvas.RestoreToCount(wmSave);
+                }
+            }
+
+            // Previous line whisper floating in rear Z plane
+            if (slice.PreviousLine is not null)
+            {
+                var prevSave = canvas.Save();
+                try
+                {
+                    canvas.Translate(geom.LyricMidX - (geom.LyricWidth * 0.08f), geom.LyricCy - (fontSize * 2.02f));
+                    canvas.Scale(0.48f, 0.48f);
+                    context.Legibility.DrawLegibleText(canvas, slice.PreviousLine.RawText, 0f, 0f, SKTextAlign.Center, font, fontId, packet.Palette.AccentColor3, opacity: 0.26f, fonts: context.Fonts);
+                }
+                finally
+                {
+                    canvas.RestoreToCount(prevSave);
+                }
+            }
+        }
+
+        // Draw every word currently routed behind the turntable (Z >= 40) BEFORE platter draws!
+        for (var i = 0; i < _wordSlots.Count; i++)
+        {
+            var slot = _wordSlots[i];
+            if (!slot.IsFrontPass)
+            {
+                DrawProjectedWordSlot(in context, font, fontId, in slot, slice.WordProgress, fontSize, climaxGlow);
+            }
+        }
+    }
+
+    private void DrawFrontPlaneDepthPass(
+        in StyleRenderContext context,
+        SKFont font,
+        LyricFontId fontId,
+        ActiveLyricSlice slice,
+        TurntableGeometry geom,
+        float fontSize,
+        float climaxGlow)
+    {
+        var canvas = context.Canvas;
+        var packet = context.Packet;
+        var line = slice.CurrentLine!;
+
+        if (geom.IsFullStage && packet.PlaybackSnapshot?.Track is { IsValid: true } track)
+        {
+            var captionFont = context.Fonts.GetOrCreateFont(LyricFontId.Jost, Math.Clamp(fontSize * 0.32f, 11f, 17f), enforceMinOverlayFloor: false);
+            var headerText = $"33\u2153 RPM \u00B7 {track.RawTitle.ToUpperInvariant()}";
+            var measuredH = TextShaperService.MeasureWidth(headerText, captionFont, context.Fonts);
+            var fitH = TextShaperService.ComputeAutoFitScale(measuredH, geom.LyricWidth, 0.94f);
+            var headerSave = canvas.Save();
+            try
+            {
+                canvas.Translate(geom.LyricMidX, Math.Max(22f, geom.Cy - (geom.PlatterRadius * 0.95f)));
+                canvas.Scale(fitH, fitH);
+                context.Legibility.DrawLegibleText(canvas, headerText, 0f, 0f, SKTextAlign.Center, captionFont, LyricFontId.Jost, packet.Palette.AccentColor3, opacity: 0.46f, fonts: context.Fonts);
+            }
+            finally
+            {
+                canvas.RestoreToCount(headerSave);
+            }
+        }
+
+        // Line-level LRC fallback
+        if (line.Words.IsEmpty)
+        {
+            var measuredLine = TextShaperService.MeasureWidth(line.RawText, font, context.Fonts);
+            var fit = TextShaperService.ComputeAutoFitScale(measuredLine, geom.LyricWidth * 0.90f, 0.96f);
+            var save = canvas.Save();
+            try
+            {
+                canvas.Translate(geom.LyricMidX, geom.LyricCy);
+                canvas.Scale(fit, fit);
+                Draw3DExtrudedWord(in context, font, fontId, line.RawText, SKTextAlign.Center, packet.Palette.AccentColor1, 1f, isActive: true, climaxGlow);
+            }
+            finally
+            {
+                canvas.RestoreToCount(save);
+            }
+
+            StyleLayoutHelper.DrawSecondarySubline(in context, line, geom.LyricMidX, geom.LyricCy + (fontSize * 1.1f), fontSize, opacity: 0.74f);
+            return;
+        }
+
+        var dotX = geom.LyricMidX;
+        var dotY = geom.LyricCy;
+        var foundActive = false;
+
+        // Draw every word in the Front Z plane AFTER platter draws so active words sit sharply IN FRONT of vinyl!
+        for (var i = 0; i < _wordSlots.Count; i++)
+        {
+            var slot = _wordSlots[i];
+            if (!slot.IsFrontPass)
+            {
+                continue;
+            }
+
+            if (slot.IsActive)
+            {
+                foundActive = true;
+                dotX = slot.ScreenX;
+                dotY = slot.ScreenY + (fontSize * 0.36f * slot.DepthScale);
+            }
+
+            DrawProjectedWordSlot(in context, font, fontId, in slot, slice.WordProgress, fontSize, climaxGlow);
+        }
+
+        if (foundActive && !packet.ReducedMotion)
+        {
+            _aesthetics.DrawFollowingDot(canvas, packet, dotX, dotY, Math.Clamp(fontSize * 0.11f, 3f, 7f), 0.92f);
+        }
+
+        StyleLayoutHelper.DrawSecondarySubline(in context, line, geom.LyricMidX, geom.LyricCy + (fontSize * 1.72f), fontSize, opacity: 0.74f);
+
+        if (geom.IsFullStage && slice.NextLine is not null && !slice.NextLine.IsInstrumentalBreak)
+        {
+            var nextY = Math.Min(packet.ViewportHeightDip - 16f, geom.LyricCy + (fontSize * 2.30f));
+            var nextSave = canvas.Save();
+            try
+            {
+                canvas.Translate(geom.LyricMidX + (geom.LyricWidth * 0.06f), nextY);
+                canvas.Scale(0.46f, 0.46f);
+                context.Legibility.DrawLegibleText(canvas, slice.NextLine.RawText, 0f, 0f, SKTextAlign.Center, font, fontId, packet.Palette.AccentColor1, opacity: 0.24f, fonts: context.Fonts);
+            }
+            finally
+            {
+                canvas.RestoreToCount(nextSave);
+            }
+        }
+    }
+
+    private void DrawProjectedWordSlot(
+        in StyleRenderContext context,
+        SKFont font,
+        LyricFontId fontId,
+        in Projected3DWordSlot slot,
+        double wordProgress,
+        float fontSize,
+        float climaxGlow)
+    {
+        var canvas = context.Canvas;
+        var packet = context.Packet;
+        var totalScale = Math.Clamp(slot.WordScale * slot.DepthScale, 0.38f, 1.85f);
+
+        if (slot.IsActive && packet.ShowColorSweepLayer)
+        {
+            var wordBounds = new SKRect(
+                slot.ScreenX - (slot.MeasuredWidth * totalScale * 0.50f),
+                slot.ScreenY - (fontSize * 0.85f * totalScale),
+                slot.ScreenX + (slot.MeasuredWidth * totalScale * 0.50f),
+                slot.ScreenY + (fontSize * 0.18f));
+            _aesthetics.DrawWordColorSweep(canvas, wordBounds, wordProgress, packet, 0.94f);
+        }
+
+        var save = canvas.Save();
+        try
+        {
+            canvas.Translate(slot.ScreenX, slot.ScreenY);
+            if (!packet.ReducedMotion && MathF.Abs(slot.SkewY) > 0.002f)
+            {
+                canvas.Skew(0f, slot.SkewY);
+            }
+
+            canvas.Scale(totalScale, totalScale);
+            Draw3DExtrudedWord(in context, font, fontId, slot.Text, SKTextAlign.Center, slot.Color, slot.Opacity, slot.IsActive, climaxGlow);
+        }
+        finally
+        {
+            canvas.RestoreToCount(save);
+        }
     }
 
     private void DrawTurntablePlatter(
@@ -253,7 +714,6 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         var r = geom.PlatterRadius;
         var isFullStage = geom.IsFullStage;
 
-        // Warm stage backlight halo behind turntable platter (StageCanvas / GalleryCard only)
         if (packet.SurfaceMode != StageRenderSurfaceMode.DesktopOverlay)
         {
             var haloR = r * (1.30f + (_smoothedBass * 0.16f) + (climaxGlow * 0.28f));
@@ -290,7 +750,6 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         _strokePaint.Color = palette.AccentColor1.ToSkColorWithAlpha(0.30f + (_beatKick * 0.28f) + (climaxGlow * 0.34f));
         canvas.DrawCircle(geom.Cx, geom.Cy, plinthR, _strokePaint);
 
-        // Strobe perimeter timing dots on StageCanvas
         if (isFullStage)
         {
             var strobeR = r * 1.032f;
@@ -332,7 +791,6 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
             }
         }
 
-        // Anisotropic conical studio light sheen across the black vinyl grooves
         var sheenAlpha = Math.Clamp(0.18f + (_beatKick * 0.14f) + (climaxGlow * 0.22f), 0f, 0.52f);
         _sheenColors[0] = palette.AccentColor1.ToSkColorWithAlpha(0f);
         _sheenColors[1] = palette.AccentColor1.ToSkColorWithAlpha(sheenAlpha);
@@ -358,9 +816,9 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
             }
         }
 
-        // 11 concentric micro-grooves outside center cover (0.54R..0.95R)
+        // 11 concentric grooves cleanly surrounding the 0.54R circular album cover
         var grooveOuter = r * 0.95f;
-        var grooveInner = r * 0.54f;
+        var grooveInner = r * 0.58f;
         var activeGrooveR = grooveOuter - ((grooveOuter - grooveInner) * trackProgress);
         for (var i = 0; i < GrooveRingCount; i++)
         {
@@ -375,8 +833,8 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
             canvas.DrawCircle(geom.Cx, geom.Cy, gr, _strokePaint);
         }
 
-        // Oversized 0.50R Spinning Song Album Cover Picture-Disc Center
-        var coverR = r * 0.50f;
+        // Oversized 0.54R Circularly-Cropped Center Song Album Cover Photo + Punched Center Spindle Cutout
+        var coverR = r * 0.54f;
         var spinSave = canvas.Save();
         try
         {
@@ -402,23 +860,18 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
             canvas.RestoreToCount(spinSave);
         }
 
-        // Glossy glass sheen highlight over stationary upper-left cover arc
-        _sheenPath.Rewind();
-        _sheenPath.AddArc(new SKRect(geom.Cx - coverR * 0.92f, geom.Cy - coverR * 0.92f, geom.Cx + coverR * 0.92f, geom.Cy + coverR * 0.92f), 198f, 118f);
-        _strokePaint.StrokeWidth = Math.Max(2.2f, r * 0.045f);
-        _strokePaint.Color = SKColors.White.WithAlpha(34);
-        canvas.DrawPath(_sheenPath, _strokePaint);
-
-        // Luminous foil collar bezel around cover + subtle minimalist center spindle
-        _strokePaint.StrokeWidth = Math.Max(1.4f, r * 0.018f);
-        _strokePaint.Color = palette.AccentColor1.ToSkColorWithAlpha(0.55f + (climaxGlow * 0.35f));
+        // Crisp luminous vinyl cutout collar & punched-out center hole around album cover
+        _strokePaint.StrokeWidth = Math.Max(1.6f, r * 0.020f);
+        _strokePaint.Color = palette.AccentColor1.ToSkColorWithAlpha(0.65f + (climaxGlow * 0.30f));
         canvas.DrawCircle(geom.Cx, geom.Cy, coverR, _strokePaint);
 
+        var holeR = Math.Max(2.8f, r * 0.044f);
         _fillPaint.Shader = null;
-        _fillPaint.Color = new SKColor(0xE2, 0xE8, 0xF0, 230);
-        canvas.DrawCircle(geom.Cx, geom.Cy, Math.Max(2.4f, r * 0.036f), _fillPaint);
-        _fillPaint.Color = new SKColor(0x0B, 0x0C, 0x16, 255);
-        canvas.DrawCircle(geom.Cx, geom.Cy, Math.Max(1.3f, r * 0.018f), _fillPaint);
+        _fillPaint.Color = new SKColor(0x07, 0x08, 0x0E, 255);
+        canvas.DrawCircle(geom.Cx, geom.Cy, holeR, _fillPaint);
+        _strokePaint.StrokeWidth = Math.Max(1.1f, r * 0.012f);
+        _strokePaint.Color = new SKColor(0xE2, 0xE8, 0xF0, 210);
+        canvas.DrawCircle(geom.Cx, geom.Cy, holeR, _strokePaint);
     }
 
     private void DrawProceduralAlbumSleeveCover(
@@ -431,7 +884,6 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         var palette = packet.Palette;
         var coverBounds = new SKRect(geom.Cx - coverR, geom.Cy - coverR, geom.Cx + coverR, geom.Cy + coverR);
 
-        // Multi-stop diagonal album-cover backdrop (synth-sleeve aesthetic when art missing/Demo)
         _radialColors[0] = palette.AccentColor1.ToSkColorWithAlpha(0.95f);
         _radialColors[1] = palette.AccentColor2.ToSkColorWithAlpha(0.92f);
         _radialColors[2] = StyleLayoutHelper.BlendSrgb(palette.AccentColor3, new RgbColor(0x0B, 0x0C, 0x16), 0.45f).ToSkColorWithAlpha(0.98f);
@@ -454,7 +906,6 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
             }
         }
 
-        // Horizon sun orb & lower reflection bands inside procedural album cover
         var horizonY = geom.Cy + (coverR * 0.14f);
         _fillPaint.Color = palette.AccentColor1.ToSkColorWithAlpha(0.28f);
         canvas.DrawCircle(geom.Cx, geom.Cy - (coverR * 0.12f), coverR * 0.44f, _fillPaint);
@@ -465,22 +916,12 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         _strokePaint.Color = palette.AccentColor2.ToSkColorWithAlpha(0.60f);
         canvas.DrawLine(coverBounds.Left, horizonY, coverBounds.Right, horizonY, _strokePaint);
 
-        // Ambient TrackMoodVisual emblem above horizon line
         if (packet.PlaybackSnapshot?.TrackMoodVisual is { } mood && coverR >= 16f)
         {
-            var emblemSize = Math.Clamp(coverR * 0.48f, 12f, 44f);
-            _moodIcons.DrawVisual(
-                canvas,
-                in context,
-                mood,
-                geom.Cx,
-                geom.Cy - (coverR * 0.24f),
-                emblemSize,
-                opacity: 0.94f,
-                isActive: true);
+            var emblemSize = Math.Clamp(coverR * 0.46f, 12f, 44f);
+            _moodIcons.DrawVisual(canvas, in context, mood, geom.Cx, geom.Cy - (coverR * 0.24f), emblemSize, 0.94f, isActive: true);
         }
 
-        // Crisp track title strip stamped onto bottom half of album sleeve
         var rawTitle = packet.PlaybackSnapshot?.Track?.RawTitle;
         if (!string.IsNullOrWhiteSpace(rawTitle) && coverR >= 26f)
         {
@@ -516,9 +957,8 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         var pivotX = Math.Clamp(geom.Cx + (r * 0.96f), 14f, packet.ViewportWidthDip - 14f);
         var pivotY = Math.Clamp(geom.Cy - (r * 0.84f), 14f, packet.ViewportHeightDip - 14f);
 
-        // Stylus rides across outer vinyl groove band (0.94R -> 0.55R) cleanly outside 0.50R center cover
-        var grooveRadius = r * (0.94f - (0.39f * trackProgress));
-        var landingAngle = (-34f + (24f * trackProgress)) * (MathF.PI / 180f);
+        var grooveRadius = r * (0.94f - (0.35f * trackProgress));
+        var landingAngle = (-34f + (22f * trackProgress)) * (MathF.PI / 180f);
         var needleX = geom.Cx + (MathF.Cos(landingAngle) * grooveRadius);
         var needleY = geom.Cy + (MathF.Sin(landingAngle) * grooveRadius);
 
@@ -591,266 +1031,6 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         canvas.DrawLine(needleX, needleY, targetX, geom.LyricCy, _strokePaint);
     }
 
-    private void DrawRightColumn3DLyricStage(
-        in StyleRenderContext context,
-        SKFont font,
-        LyricFontId fontId,
-        ActiveLyricSlice slice,
-        TurntableGeometry geom,
-        float fontSize,
-        float climaxGlow)
-    {
-        var packet = context.Packet;
-        var canvas = context.Canvas;
-        var line = slice.CurrentLine!;
-        var words = line.Words;
-        var align = SKTextAlign.Center;
-
-        // Monumental active-word 3D watermark & micro LP header behind right column on StageCanvas
-        if (geom.IsFullStage)
-        {
-            var watermarkText = !words.IsEmpty
-                ? words[Math.Clamp(slice.ActiveWordIndex, 0, words.Length - 1)].Text.ToUpperInvariant()
-                : line.RawText.ToUpperInvariant();
-            if (!string.IsNullOrWhiteSpace(watermarkText))
-            {
-                var wmScale = 2.05f + (_smoothedBeat * 0.16f) + (climaxGlow * 0.14f);
-                var wmMeasured = TextShaperService.MeasureWidth(watermarkText, font, context.Fonts);
-                var wmFit = TextShaperService.ComputeAutoFitScale(wmMeasured * wmScale, geom.LyricWidth * 0.96f, 1.0f);
-                var wmAlpha = Math.Clamp(0.06f + (_smoothedBeat * 0.045f) + (climaxGlow * 0.06f), 0.05f, 0.18f);
-
-                var wmSave = canvas.Save();
-                try
-                {
-                    if (!packet.ReducedMotion)
-                    {
-                        var back3D = KineticWallStyleRenderer.Create3DPerspectiveMatrix(
-                            3.5f,
-                            _lyricYawDeg.Value * 0.45f,
-                            0f,
-                            PerspectiveFocalLength * Math.Max(packet.RenderScaling, 1f),
-                            geom.LyricMidX,
-                            geom.LyricCy);
-                        canvas.Concat(in back3D);
-                    }
-
-                    canvas.Translate(geom.LyricMidX, geom.LyricCy + (fontSize * 0.28f));
-                    canvas.Scale(wmScale * wmFit, wmScale * wmFit);
-                    context.Legibility.DrawLegibleText(
-                        canvas,
-                        watermarkText,
-                        0f,
-                        0f,
-                        SKTextAlign.Center,
-                        font,
-                        fontId,
-                        StyleLayoutHelper.BlendSrgb(packet.Palette.AccentColor2, packet.Palette.AccentColor3, 0.5f),
-                        opacity: wmAlpha,
-                        fonts: context.Fonts);
-                }
-                finally
-                {
-                    canvas.RestoreToCount(wmSave);
-                }
-            }
-
-            if (packet.PlaybackSnapshot?.Track is { IsValid: true } track)
-            {
-                var captionFont = context.Fonts.GetOrCreateFont(LyricFontId.Jost, Math.Clamp(fontSize * 0.32f, 11f, 17f), enforceMinOverlayFloor: false);
-                var headerText = $"33\u2153 RPM \u00B7 {track.RawTitle.ToUpperInvariant()}";
-                var measuredH = TextShaperService.MeasureWidth(headerText, captionFont, context.Fonts);
-                var fitH = TextShaperService.ComputeAutoFitScale(measuredH, geom.LyricWidth, 0.94f);
-                var headerSave = canvas.Save();
-                try
-                {
-                    canvas.Translate(geom.LyricMidX, Math.Max(22f, geom.Cy - (geom.PlatterRadius * 0.94f)));
-                    canvas.Scale(fitH, fitH);
-                    context.Legibility.DrawLegibleText(
-                        canvas,
-                        headerText,
-                        0f,
-                        0f,
-                        SKTextAlign.Center,
-                        captionFont,
-                        LyricFontId.Jost,
-                        packet.Palette.AccentColor3,
-                        opacity: 0.44f,
-                        fonts: context.Fonts);
-                }
-                finally
-                {
-                    canvas.RestoreToCount(headerSave);
-                }
-            }
-        }
-
-        // Previous / Next line whispers anchored gently on StageCanvas
-        if (geom.IsFullStage && slice.PreviousLine is not null)
-        {
-            var prevSave = canvas.Save();
-            try
-            {
-                canvas.Translate(geom.LyricMidX - (geom.LyricWidth * 0.06f), geom.LyricCy - (fontSize * 1.92f));
-                canvas.Scale(0.48f, 0.48f);
-                context.Legibility.DrawLegibleText(canvas, slice.PreviousLine.RawText, 0f, 0f, align, font, fontId, packet.Palette.AccentColor3, opacity: 0.24f, fonts: context.Fonts);
-            }
-            finally
-            {
-                canvas.RestoreToCount(prevSave);
-            }
-        }
-
-        // Apply living 3D pinhole perspective tilt across the main lyric stage beside the vinyl player
-        var stage3DSave = canvas.Save();
-        try
-        {
-            if (!packet.ReducedMotion)
-            {
-                var pitchDeg = 6.2f + (_smoothedBass * 3.0f) + (climaxGlow * 2.5f);
-                var rollDeg = Math.Clamp(_lyricYawDeg.Value * 0.16f, -1.8f, 1.8f);
-                var mat = KineticWallStyleRenderer.Create3DPerspectiveMatrix(
-                    pitchDeg,
-                    _lyricYawDeg.Value,
-                    rollDeg,
-                    PerspectiveFocalLength * Math.Max(packet.RenderScaling, 1f),
-                    geom.LyricMidX,
-                    geom.LyricCy);
-                canvas.Concat(in mat);
-            }
-
-            if (words.IsEmpty)
-            {
-                var measuredLine = TextShaperService.MeasureWidth(line.RawText, font, context.Fonts);
-                var fit = TextShaperService.ComputeAutoFitScale(measuredLine, geom.LyricWidth * 0.90f, 0.96f);
-                var save = canvas.Save();
-                try
-                {
-                    canvas.Translate(geom.LyricMidX, geom.LyricCy);
-                    canvas.Scale(fit, fit);
-                    Draw3DExtrudedWord(in context, font, fontId, line.RawText, SKTextAlign.Center, packet.Palette.AccentColor1, 1f, isActive: true, climaxGlow);
-                }
-                finally
-                {
-                    canvas.RestoreToCount(save);
-                }
-
-                return;
-            }
-
-            // Wrap timed words inside the 3D right editorial column
-            var spaceW = fontSize * 0.34f;
-            var rowLimitW = geom.LyricWidth * 0.90f;
-            _rows.Clear();
-            var currentRow = new WrappedWordRow();
-            for (var i = 0; i < words.Length; i++)
-            {
-                var wWidth = TextShaperService.MeasureWidth(words[i].Text, font, context.Fonts);
-                var nextW = currentRow.Items.Count == 0
-                    ? wWidth
-                    : currentRow.TotalWidth + spaceW + wWidth;
-                if (currentRow.Items.Count > 0 && nextW > rowLimitW && _rows.Count < 3)
-                {
-                    _rows.Add(currentRow);
-                    currentRow = new WrappedWordRow();
-                }
-
-                currentRow.Items.Add((i, words[i], wWidth));
-                currentRow.TotalWidth = currentRow.Items.Count == 1 ? wWidth : currentRow.TotalWidth + spaceW + wWidth;
-            }
-
-            if (currentRow.Items.Count > 0)
-            {
-                _rows.Add(currentRow);
-            }
-
-            var activeIdx = Math.Clamp(slice.ActiveWordIndex, 0, words.Length - 1);
-            var lineH = fontSize * 1.24f;
-            var startBaselineY = geom.LyricCy - (((_rows.Count - 1) * lineH) * 0.5f) + (fontSize * 0.34f);
-
-            var dotX = geom.LyricMidX;
-            var dotY = geom.LyricCy;
-            var foundActive = false;
-
-            for (var rIdx = 0; rIdx < _rows.Count; rIdx++)
-            {
-                var row = _rows[rIdx];
-                var rowScale = row.TotalWidth > rowLimitW ? Math.Clamp(rowLimitW / row.TotalWidth, 0.45f, 1f) : 1f;
-                var baselineY = startBaselineY + (rIdx * lineH);
-                var cursorX = geom.LyricMidX - ((row.TotalWidth * rowScale) * 0.5f);
-
-                for (var itemIdx = 0; itemIdx < row.Items.Count; itemIdx++)
-                {
-                    var (wordIndex, word, rawW) = row.Items[itemIdx];
-                    var scaledW = rawW * rowScale;
-                    var wordCx = cursorX + (scaledW * 0.5f);
-                    var isActive = wordIndex == activeIdx;
-                    var isPast = wordIndex < activeIdx;
-
-                    var color = isActive ? packet.Palette.AccentColor1
-                        : isPast ? packet.Palette.AccentColor3
-                        : packet.Palette.AccentColor1;
-                    var opacity = isActive ? 1.0f : isPast ? 0.72f : 0.40f;
-                    var wordScale = isActive ? _wordScale.Value * rowScale : rowScale;
-
-                    if (isActive)
-                    {
-                        foundActive = true;
-                        dotX = wordCx;
-                        dotY = baselineY + (fontSize * 0.36f);
-                        var wordBounds = new SKRect(
-                            wordCx - (scaledW * 0.52f),
-                            baselineY - (fontSize * 0.85f * wordScale),
-                            wordCx + (scaledW * 0.52f),
-                            baselineY + (fontSize * 0.18f));
-                        _aesthetics.DrawWordColorSweep(canvas, wordBounds, slice.WordProgress, packet, 0.94f);
-                    }
-
-                    var save = canvas.Save();
-                    try
-                    {
-                        canvas.Translate(wordCx, baselineY);
-                        canvas.Scale(wordScale, wordScale);
-                        Draw3DExtrudedWord(in context, font, fontId, word.Text, SKTextAlign.Center, color, opacity, isActive, climaxGlow);
-                    }
-                    finally
-                    {
-                        canvas.RestoreToCount(save);
-                    }
-
-                    cursorX += scaledW + (spaceW * rowScale);
-                }
-            }
-
-            if (foundActive && !packet.ReducedMotion)
-            {
-                _aesthetics.DrawFollowingDot(canvas, packet, dotX, dotY, Math.Clamp(fontSize * 0.11f, 3f, 7f), 0.92f);
-            }
-
-            var subBaseY = startBaselineY + ((_rows.Count - 0.1f) * lineH);
-            StyleLayoutHelper.DrawSecondarySubline(in context, line, geom.LyricMidX, subBaseY, fontSize, opacity: 0.74f);
-        }
-        finally
-        {
-            canvas.RestoreToCount(stage3DSave);
-        }
-
-        if (geom.IsFullStage && slice.NextLine is not null && !slice.NextLine.IsInstrumentalBreak)
-        {
-            var nextY = Math.Min(packet.ViewportHeightDip - 16f, geom.LyricCy + (fontSize * 2.15f));
-            var nextSave = canvas.Save();
-            try
-            {
-                canvas.Translate(geom.LyricMidX + (geom.LyricWidth * 0.06f), nextY);
-                canvas.Scale(0.46f, 0.46f);
-                context.Legibility.DrawLegibleText(canvas, slice.NextLine.RawText, 0f, 0f, align, font, fontId, packet.Palette.AccentColor1, opacity: 0.22f, fonts: context.Fonts);
-            }
-            finally
-            {
-                canvas.RestoreToCount(nextSave);
-            }
-        }
-    }
-
     private void Draw3DExtrudedWord(
         in StyleRenderContext context,
         SKFont font,
@@ -865,15 +1045,14 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         var canvas = context.Canvas;
         var packet = context.Packet;
         var depthSteps = isActive ? 3 : 1;
-        var stepPx = packet.IsCompactCard ? 0.9f : 1.55f;
+        var stepPx = packet.IsCompactCard ? 0.9f : 1.65f;
 
-        // Multi-step physical 3D extrusion bevel shadow behind glyphs (solid offset strokes/fills)
         if (!packet.ReducedMotion)
         {
             for (var layer = depthSteps; layer >= 1; layer--)
             {
                 var off = layer * stepPx;
-                var layerAlpha = Math.Clamp((isActive ? 0.44f : 0.20f) * opacity * (1f - ((layer - 1) * 0.22f)), 0.04f, 0.65f);
+                var layerAlpha = Math.Clamp((isActive ? 0.46f : 0.22f) * opacity * (1f - ((layer - 1) * 0.22f)), 0.04f, 0.65f);
                 var extrudeColor = layer == depthSteps
                     ? new SKColor(0x09, 0x0A, 0x14, (byte)MathF.Round(255f * layerAlpha))
                     : packet.Palette.AccentColor3.ToSkColorWithAlpha(layerAlpha);
@@ -883,7 +1062,6 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
                 canvas.DrawText(text, off, off, align, font, _fillPaint);
             }
 
-            // Chromatic stereo prism split on beats and Beat Drop surges
             if (isActive && (_smoothedBeat > 0.06f || climaxGlow > 0.04f))
             {
                 var splitDx = (2.1f * _smoothedBeat) + (3.6f * climaxGlow);
@@ -892,7 +1070,6 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
             }
         }
 
-        // Front AAA-legible glyph face
         context.Legibility.DrawLegibleText(
             canvas,
             text,
@@ -961,7 +1138,7 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
             var deskR = Math.Clamp(MathF.Min(w, h) * 0.148f, 34f, 68f);
             var deskCx = MathF.Max(deskR + 30f, ax - Math.Min(w * 0.18f, 195f));
             var lyricLeft = deskCx + deskR + 22f;
-            var lyricRight = MathF.Max(lyricLeft + 120f, w - 34f);
+            var lyricRight = Math.Max(lyricLeft + 120f, w - 34f);
             return new TurntableGeometry(
                 Cx: deskCx,
                 Cy: ay,
@@ -975,12 +1152,12 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         }
 
         var platterR = Math.Max(
-            packet.IsCompactCard ? 28f : 76f,
+            packet.IsCompactCard ? 28f : 78f,
             MathF.Min(w * (packet.IsCompactCard ? 0.20f : 0.21f), h * (packet.IsCompactCard ? 0.36f : 0.35f)));
-        var cx = w * (packet.IsCompactCard ? 0.27f : 0.28f);
+        var cx = w * (packet.IsCompactCard ? 0.27f : 0.30f);
         var cy = h * 0.50f;
-        var stageLyricLeft = cx + platterR + Math.Max(packet.IsCompactCard ? 16f : 34f, w * 0.048f);
-        var stageLyricRight = w - (packet.IsCompactCard ? 14f : 44f);
+        var stageLyricLeft = cx + platterR + Math.Max(packet.IsCompactCard ? 16f : 28f, w * 0.042f);
+        var stageLyricRight = w - (packet.IsCompactCard ? 14f : 42f);
         var stageLyricW = Math.Max(110f, stageLyricRight - stageLyricLeft);
         return new TurntableGeometry(
             Cx: cx,
