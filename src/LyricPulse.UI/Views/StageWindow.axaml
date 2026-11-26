@@ -554,10 +554,12 @@
               <TextBlock Text="Party Aesthetics &amp; Backdrop" FontWeight="SemiBold" FontSize="14" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
               <Button Grid.Column="1" Content="Done" FontSize="11" Padding="8,3" Command="{Binding ClosePopupsCommand}"/>
             </Grid>
-            <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
-              <Button Classes="chip" Classes.active="{Binding IsAmbientPartyMesh}" Grid.Column="0" Content="Ambient Party Mesh" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" CornerRadius="8"
+            <Grid ColumnDefinitions="*,*,*" ColumnSpacing="6">
+              <Button Classes="chip" Classes.active="{Binding IsAmbientPartyMesh}" Grid.Column="0" Content="Ambient Mesh" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" CornerRadius="8"
                       Command="{Binding SelectBackdropModeCommand}" CommandParameter="{x:Static m:StageBackdropMode.AmbientPartyMesh}"/>
-              <Button Classes="chip" Classes.active="{Binding IsPureBlackBackdrop}" Grid.Column="1" Content="Pure Black" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" CornerRadius="8"
+              <Button Classes="chip" Classes.active="{Binding IsAlbumArtBackdrop}" Grid.Column="1" Content="Album Art" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" CornerRadius="8"
+                      Command="{Binding SelectBackdropModeCommand}" CommandParameter="{x:Static m:StageBackdropMode.AlbumArtBlur}"/>
+              <Button Classes="chip" Classes.active="{Binding IsPureBlackBackdrop}" Grid.Column="2" Content="Pure Black" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" CornerRadius="8"
                       Command="{Binding SelectBackdropModeCommand}" CommandParameter="{x:Static m:StageBackdropMode.PureBlack}"/>
             </Grid>
             <Grid ColumnDefinitions="*,Auto">

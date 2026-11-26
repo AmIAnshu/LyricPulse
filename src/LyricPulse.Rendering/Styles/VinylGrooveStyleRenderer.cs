@@ -1,6 +1,7 @@
 using System.Globalization;
 using LyricPulse.Core.Audio;
 using LyricPulse.Core.Color;
+using LyricPulse.Core.Lyrics;
 using LyricPulse.Core.Models;
 using LyricPulse.Core.Runtime;
 using LyricPulse.Rendering.Color;
@@ -14,15 +15,17 @@ namespace LyricPulse.Rendering.Styles;
 
 /// <summary>
 /// Style #11 — Glass Stage (stored under <see cref="OverlayStyleId.VinylGroove"/> for settings compat):
-/// full-bleed lightly-blurred playing album cover background synced to song color vibe,
-/// sleek medium Apple GlassOS rounded album cover card with hover transport slot alignment,
-/// harmonious OKLCH color cycling, and front/back Z-depth kinetic 3D lyrics. Zero per-frame allocs.
+/// Apple-Music-caliber split stage pairing a left-column square album cover card + live scrubber
+/// bar + centered track metadata (with Apple GlassOS hover transport overlay aligned to cover bounds)
+/// alongside a right-column left-aligned multi-line scrolling lyric stack with enhanced 3D word pop
+/// and Z-depth room perspective over a lightly blurred full-bleed cover backdrop.
+/// Zero per-frame heap allocations.
 /// </summary>
 public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
 {
-    public const float RestingPitchDegrees = 5.5f;
-    public const float MaxYawDegrees = 9.0f;
-    public const float PerspectiveFocalLength = 1100f;
+    public const float RestingPitchDegrees = 4.5f;
+    public const float MaxYawDegrees = 7.5f;
+    public const float PerspectiveFocalLength = 1150f;
 
     private static readonly SKSamplingOptions LinearSampling = new(SKFilterMode.Linear, SKMipmapMode.None);
 
@@ -34,20 +37,19 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
     private readonly SKPaint _ambientImagePaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPath _cardClipPath = new();
     private readonly SKImageFilter _backdropLightBlur = SKImageFilter.CreateBlur(11f, 11f);
-    private readonly SKImageFilter _cardGlowBlur = SKImageFilter.CreateBlur(20f, 20f);
+    private readonly SKImageFilter _cardShadowBlur = SKImageFilter.CreateBlur(22f, 22f);
 
     private readonly SKColor[] _grad2Colors = new SKColor[2];
     private readonly SKColor[] _grad3Colors = new SKColor[3];
-    private readonly SKColor[] _grad4Colors = new SKColor[4];
     private readonly float[] _stops2 = [0f, 1f];
     private readonly float[] _stops3 = [0f, 0.5f, 1f];
-    private readonly float[] _stops4 = [0f, 0.34f, 0.72f, 1f];
+    private readonly List<string> _wrapLineBuffer = new(6);
 
     private readonly List<WordRow> _rowBuckets = new(6);
     private readonly List<WordSlot> _rowSlotBuffer = new(24);
     private readonly List<ProjectedWordDraw> _projectedWords = new(24);
 
-    // Cached GPU textures decoded once per track art change (crisp square cover + lightly blurred backdrop)
+    // Cached GPU textures decoded once per track art change
     private string? _cachedArtHash;
     private int _cachedArtLength;
     private SKImage? _cachedCoverArt;
@@ -57,8 +59,7 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
     private float _smoothedBeat;
     private float _smoothedMid;
     private float _highlightFade = 1.0f;
-    private SpringState _cameraYawDeg = SpringState.AtRest(-4f);
-    private SpringState _cameraX = SpringState.AtRest(0f);
+    private SpringState _cameraYawDeg = SpringState.AtRest(-3.5f);
     private SpringState _wordSlamScale = SpringState.AtRest(1.12f);
     private (int LineIndex, int WordIndex) _lastWordKey = (-1, -1);
     private float _lastWordDurationSec = 0.32f;
@@ -67,8 +68,8 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
     public OverlayStyleId StyleId => OverlayStyleId.VinylGroove;
 
     /// <summary>
-    /// Computes the exact medium rounded album cover card rectangle in DIPs so Avalonia hover controls
-    /// align pixel-accurately with the Skia-rendered album cover across window sizes and fullscreen transitions.
+    /// Computes the exact album cover square card rectangle in DIPs so Avalonia GlassOS hover controls
+    /// align pixel-accurately with the Skia-rendered cover card across window sizes and fullscreen transitions.
     /// </summary>
     public static SKRect ResolveCoverCardBounds(
         float viewportWidthDip,
@@ -91,18 +92,18 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
             var anchorX = Math.Clamp((float)(w * cfg.AnchorX), minX, maxX);
             var anchorY = Math.Clamp((float)(h * cfg.AnchorY), minY, maxY);
 
-            var side = Math.Clamp(MathF.Min(w * 0.13f, h * 0.22f), 54f, 124f);
-            var cx = Math.Clamp(anchorX - (side * 1.45f), side * 0.5f + 24f, w * 0.42f);
+            var side = Math.Clamp(MathF.Min(w * 0.14f, h * 0.24f), 58f, 136f);
+            var cx = Math.Clamp(anchorX - (side * 1.55f), side * 0.5f + 24f, w * 0.40f);
             var cy = Math.Clamp(anchorY, side * 0.5f + 24f, h - (side * 0.5f) - 24f);
             return new SKRect(cx - (side * 0.5f), cy - (side * 0.5f), cx + (side * 0.5f), cy + (side * 0.5f));
         }
 
         var isCompact = surfaceMode == StageRenderSurfaceMode.GalleryCard;
         var cardSide = isCompact
-            ? Math.Clamp(MathF.Min(w * 0.26f, h * 0.48f), 54f, 118f)
-            : Math.Clamp(MathF.Min(w * 0.23f, h * 0.44f), 112f, 236f);
-        var centerX = isCompact ? w * 0.28f : w * 0.29f;
-        var centerY = h * 0.50f;
+            ? Math.Clamp(MathF.Min(w * 0.27f, h * 0.48f), 52f, 118f)
+            : Math.Clamp(MathF.Min(w * 0.275f, h * 0.48f), 112f, 256f);
+        var centerX = w * 0.26f;
+        var centerY = isCompact ? h * 0.46f : h * 0.43f;
         return new SKRect(
             centerX - (cardSide * 0.5f),
             centerY - (cardSide * 0.5f),
@@ -116,8 +117,7 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         _smoothedBeat = 0f;
         _smoothedMid = 0f;
         _highlightFade = 1.0f;
-        _cameraYawDeg = SpringState.AtRest(-4f);
-        _cameraX = SpringState.AtRest(0f);
+        _cameraYawDeg = SpringState.AtRest(-3.5f);
         _wordSlamScale = SpringState.AtRest(1.12f);
         _lastWordKey = (-1, -1);
         _lastWordDurationSec = 0.32f;
@@ -152,8 +152,7 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
 
         var wordFrac = wordCount <= 1 ? 0.5f : (activeIdx / (float)(wordCount - 1));
         var targetYaw = ((wordFrac - 0.5f) * 2f) * MaxYawDegrees * Math.Clamp(packet.SafePartyEnergy, 0.7f, 1.3f);
-        var targetCamX = (0.5f - wordFrac) * Math.Min(packet.ViewportWidthDip * 0.08f, 62f);
-        var activeRestScale = packet.IsCompactCard ? 1.07f : 1.14f;
+        var activeRestScale = packet.IsCompactCard ? 1.06f : 1.12f;
 
         var key = (slice.ActiveLineIndex, activeIdx);
         if (key != _lastWordKey)
@@ -163,12 +162,11 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
             {
                 _wordSlamScale = SpringState.AtRest(1.0f);
                 _cameraYawDeg = SpringState.AtRest(0f);
-                _cameraX = SpringState.AtRest(0f);
                 _highlightFade = 0f;
             }
             else
             {
-                _wordSlamScale = new SpringState(activeRestScale + 0.15f + (_smoothedBeat * 0.08f), 0f, activeRestScale);
+                _wordSlamScale = new SpringState(activeRestScale + 0.16f + (_smoothedBeat * 0.08f), 0f, activeRestScale);
                 _highlightFade = 0f;
             }
         }
@@ -183,21 +181,19 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         {
             _wordSlamScale = SpringState.AtRest(1.0f);
             _cameraYawDeg = SpringState.AtRest(0f);
-            _cameraX = SpringState.AtRest(0f);
             _aesthetics.ResetDot();
             return _highlightFade < 0.999f;
         }
 
         _cameraYawDeg = _cameraYawDeg.WithTarget(Math.Clamp(targetYaw, -MaxYawDegrees, MaxYawDegrees)).Step(SpringTokens.CameraDrift, dt);
-        _cameraX = _cameraX.WithTarget(targetCamX).Step(SpringTokens.CameraDrift, dt);
         _wordSlamScale = _wordSlamScale.WithTarget(activeRestScale).Step(SpringTokens.WordEnter.WithTempoCompression(_lastWordDurationSec), dt);
 
-        var (stageX, stageY) = ResolveLyricsOrigin(packet);
-        var dotTargetX = stageX + ((wordFrac - 0.5f) * packet.ViewportWidthDip * 0.22f);
-        var dotTargetY = stageY + (StyleLayoutHelper.ResolveStyleFontSize(packet, 0.72f) * 0.85f);
+        var (lyricsLeftX, colW, centerY) = ResolveLyricsColumnGeometry(packet);
+        var dotTargetX = lyricsLeftX + (wordFrac * colW * 0.75f);
+        var dotTargetY = centerY + (ResolveGlassStageFontSize(packet) * 1.1f);
         var dotActive = packet.ShowFollowingDot && _aesthetics.AdvanceDot(key, dotTargetX, dotTargetY, dt, false, _lastWordDurationSec);
 
-        return !_cameraYawDeg.IsAtRest || !_cameraX.IsAtRest || !_wordSlamScale.IsAtRest || dotActive || _highlightFade < 0.999f || isPlaying;
+        return !_cameraYawDeg.IsAtRest || !_wordSlamScale.IsAtRest || dotActive || _highlightFade < 0.999f || isPlaying;
     }
 
     public void Render(in StyleRenderContext context, in LifecycleFrameState lifecycle) =>
@@ -253,9 +249,9 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         EnsureAlbumTexturesCached(packet.PlaybackSnapshot?.AlbumArt);
 
         var cardRect = ResolveCoverCardBounds(w, h, packet.SurfaceMode, packet.BoundsConfig, packet.RenderScaling);
-        var (lyricsOriginX, lyricsOriginY) = ResolveLyricsOrigin(packet);
+        var (lyricsLeftX, lyricsColW, lyricsCenterY) = ResolveLyricsColumnGeometry(packet);
 
-        // Layer 0: Lightly blurred full-bleed playing album cover background (StageCanvas / GalleryCard only; DesktopOverlay stays transparent)
+        // Layer 0: Lightly-blurred full-bleed cover room (StageCanvas / GalleryCard only; DesktopOverlay stays transparent)
         if (!skipStageBackdrop)
         {
             if (packet.ShouldDrawStageBackdrop)
@@ -265,68 +261,74 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
             else if (slice.CurrentLine is not null)
             {
                 var scrimRect = new SKRect(
-                    Math.Max(18f, Math.Min(cardRect.Left - 14f, lyricsOriginX - (w * 0.22f))),
-                    Math.Max(18f, Math.Min(cardRect.Top - 14f, lyricsOriginY - (h * 0.16f))),
-                    Math.Min(w - 18f, Math.Max(cardRect.Right + 14f, lyricsOriginX + (w * 0.24f))),
-                    Math.Min(h - 18f, Math.Max(cardRect.Bottom + 14f, lyricsOriginY + (h * 0.18f))));
+                    Math.Max(18f, Math.Min(cardRect.Left - 14f, lyricsLeftX - 18f)),
+                    Math.Max(18f, Math.Min(cardRect.Top - 14f, lyricsCenterY - (h * 0.20f))),
+                    Math.Min(w - 18f, Math.Max(cardRect.Right + 14f, lyricsLeftX + lyricsColW + 14f)),
+                    Math.Min(h - 18f, Math.Max(cardRect.Bottom + 14f, lyricsCenterY + (h * 0.22f))));
                 context.Legibility.DrawAmbientScrim(
                     canvas,
                     scrimRect,
-                    StyleLayoutHelper.ResolveStyleFontSize(packet, 0.72f),
+                    StyleLayoutHelper.ResolveStyleFontSize(packet, 0.68f),
                     theme.DeepAmbient,
                     packet.ScrimIntensity,
                     packet.HighContrastScrim);
             }
         }
 
-        var lyricAlpha = applyLifecycleToLyricsOnly ? Math.Clamp(lifecycle.ContentOpacity, 0f, 1f) : 1.0f;
-
-        // Layer 1: Back-Plane 3D Lyrics & Echoes
-        var hasWords = lyricAlpha > 0.004f && Build3DWordSlots(in themedContext, theme, slice, lyricsOriginX, lyricsOriginY);
-        if (hasWords)
-        {
-            var lyricSave = lyricAlpha < 0.999f ? context.Legibility.BeginGlobalOpacityLayer(canvas, lyricAlpha) : canvas.Save();
-            try
-            {
-                DrawBackPlane3DLayer(in themedContext, theme, slice, lyricsOriginX, lyricsOriginY);
-            }
-            finally
-            {
-                LegibilityPipeline.EndGlobalOpacityLayer(canvas, lyricSave);
-            }
-        }
-
-        // Layer 2: Medium Apple GlassOS Album Cover Card (sharp square art with smooth rounded glass bevel — ZERO vinyl disc or spindle hole)
+        // Layer 1: Left-Column Medium Album Cover + Apple Music Scrubber Bar + Title/Artist Meta
         DrawMediumGlassCoverCard(in themedContext, theme, cardRect);
+        DrawLeftScrubberAndTrackMeta(in themedContext, theme, cardRect);
 
-        // Layer 3: Foreground & Pop-Out 3D Lyrics
-        if (lyricAlpha > 0.004f)
+        var lyricAlpha = applyLifecycleToLyricsOnly ? Math.Clamp(lifecycle.ContentOpacity, 0f, 1f) : 1.0f;
+        if (lyricAlpha <= 0.004f)
         {
-            var lyricSave = lyricAlpha < 0.999f ? context.Legibility.BeginGlobalOpacityLayer(canvas, lyricAlpha) : canvas.Save();
-            try
-            {
-                if (hasWords)
-                {
-                    DrawFrontAndFocal3DLayer(in themedContext, theme, slice, lyricsOriginX, lyricsOriginY);
-                }
-                else if (slice.CurrentLine is not null)
-                {
-                    DrawFallbackPlainLine(in themedContext, theme, slice.CurrentLine, lyricsOriginX, lyricsOriginY);
-                }
-
-                if (slice.CurrentLine is not null)
-                {
-                    var fontSize = ResolveGlassStageFontSize(packet);
-                    StyleLayoutHelper.DrawSecondarySubline(in themedContext, slice.CurrentLine, lyricsOriginX, lyricsOriginY + (fontSize * 2.55f), fontSize, 0.78f);
-                }
-            }
-            finally
-            {
-                LegibilityPipeline.EndGlobalOpacityLayer(canvas, lyricSave);
-            }
+            return;
         }
 
-        DrawCardFooterBar(in themedContext, theme, cardRect);
+        // Layer 2 & 3: Right-Column Left-Aligned Multi-Line 3D Lyric Stack (back-plane context + popping active 3D words)
+        var hasWords = BuildLeftAlignedActiveWordSlots(in themedContext, slice, lyricsLeftX, lyricsColW, lyricsCenterY, out var activeBlockTopY, out var activeBlockBottomY);
+        var lyricSave = lyricAlpha < 0.999f ? context.Legibility.BeginGlobalOpacityLayer(canvas, lyricAlpha) : canvas.Save();
+        try
+        {
+            if (!packet.IsCompactCard)
+            {
+                DrawContextualHistoryAndUpcomingLines(
+                    in themedContext,
+                    theme,
+                    slice,
+                    lyricsLeftX,
+                    lyricsColW,
+                    lyricsCenterY,
+                    activeBlockTopY,
+                    activeBlockBottomY);
+            }
+
+            if (hasWords)
+            {
+                DrawProjectedActiveLineWords(in themedContext, theme, lyricsLeftX, lyricsColW, lyricsCenterY);
+            }
+            else if (slice.CurrentLine is not null)
+            {
+                DrawLeftFallbackPlainLine(in themedContext, slice.CurrentLine, lyricsLeftX, lyricsColW, lyricsCenterY);
+            }
+
+            if (slice.CurrentLine is not null)
+            {
+                var fontSize = ResolveGlassStageFontSize(packet);
+                var subText = StyleLayoutHelper.ResolveSecondaryLineText(slice.CurrentLine, packet.SecondaryLineMode);
+                if (!string.IsNullOrWhiteSpace(subText))
+                {
+                    var subSize = Math.Clamp(fontSize * 0.48f, packet.IsCompactCard ? 9f : 13f, 26f);
+                    var subFont = context.Fonts.GetOrCreateFont(LyricFontId.Mulish, subSize, enforceMinOverlayFloor: false);
+                    var subY = Math.Min(h - 14f, (hasWords ? activeBlockBottomY : lyricsCenterY + (fontSize * 0.8f)) + (fontSize * 0.55f));
+                    DrawFittedLeftText(in themedContext, subFont, subText, lyricsLeftX, subY, lyricsColW, theme.Primary, 0.82f);
+                }
+            }
+        }
+        finally
+        {
+            LegibilityPipeline.EndGlobalOpacityLayer(canvas, lyricSave);
+        }
     }
 
     public void Dispose()
@@ -346,7 +348,7 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         _ambientImagePaint.Dispose();
         _cardClipPath.Dispose();
         _backdropLightBlur.Dispose();
-        _cardGlowBlur.Dispose();
+        _cardShadowBlur.Dispose();
     }
 
     private void DisposeCachedTextures()
@@ -418,8 +420,8 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         double anchorChroma;
         if (srcPalette.IsMonochromeFallback || anchor.C < 0.025)
         {
-            anchorHue = 224.0;
-            anchorChroma = 0.09;
+            anchorHue = 34.0;
+            anchorChroma = 0.11;
         }
         else
         {
@@ -444,8 +446,8 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         var primaryL = Math.Clamp(0.82 + (_smoothedBeat * 0.04), 0.74, 0.92);
         var secondaryL = Math.Clamp(0.70 + (_smoothedMid * 0.05), 0.60, 0.82);
         var tertiaryL = 0.80;
-        var deepL = Math.Clamp(0.40 + (_smoothedBass * 0.07), 0.34, 0.50);
-        var washL = Math.Clamp(0.56 + (_smoothedBass * 0.08), 0.48, 0.66);
+        var deepL = Math.Clamp(0.38 + (_smoothedBass * 0.07), 0.32, 0.48);
+        var washL = Math.Clamp(0.54 + (_smoothedBass * 0.08), 0.46, 0.64);
 
         var primary = OklabColorMath.OklchToSrgbGamutMapped(new OklchColor(primaryL, Math.Clamp(anchorChroma * 0.98, 0.11, 0.25), primaryHue));
         var secondary = OklabColorMath.OklchToSrgbGamutMapped(new OklchColor(secondaryL, Math.Clamp(anchorChroma * 0.92, 0.10, 0.24), secondaryHue));
@@ -466,9 +468,8 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         var isPlaying = packet.PlaybackSnapshot?.IsPlaying ?? true;
         var t = packet.ReducedMotion || !isPlaying ? 0f : (float)packet.RenderTimeSeconds;
 
-        // 1. Harmonious album-vibe gradient base
-        var baseTopLeft = StyleLayoutHelper.BlendSrgb(new RgbColor(12, 11, 18), theme.DeepAmbient, 0.90f);
-        var baseBottomRight = StyleLayoutHelper.BlendSrgb(new RgbColor(10, 9, 15), theme.WashGlow, 0.62f);
+        var baseTopLeft = StyleLayoutHelper.BlendSrgb(new RgbColor(16, 10, 10), theme.DeepAmbient, 0.90f);
+        var baseBottomRight = StyleLayoutHelper.BlendSrgb(new RgbColor(10, 9, 14), theme.WashGlow, 0.62f);
 
         _grad2Colors[0] = baseTopLeft.ToSkColor();
         _grad2Colors[1] = baseBottomRight.ToSkColor();
@@ -480,7 +481,6 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
             _fillPaint.Shader = null;
         }
 
-        // 2. Full-bleed lightly-blurred playing album cover (aspect-fill so artwork remains recognizable without distortion)
         var coverSource = _cachedBackdropBlur ?? _cachedCoverArt;
         if (coverSource is not null)
         {
@@ -496,7 +496,7 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
                 ((w + drawW) * 0.5f) + driftX,
                 ((h + drawH) * 0.5f) + driftY);
 
-            var coverAlpha = (byte)Math.Clamp(MathF.Round((0.80f + (_smoothedBass * 0.10f)) * 255f), 0f, 245f);
+            var coverAlpha = (byte)Math.Clamp(MathF.Round((0.82f + (_smoothedBass * 0.10f)) * 255f), 0f, 246f);
             _ambientImagePaint.Color = SKColors.White.WithAlpha(coverAlpha);
             _ambientImagePaint.ImageFilter = _backdropLightBlur;
             try
@@ -510,13 +510,12 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         }
         else
         {
-            // No album cover yet (Demo / fallback): smooth atmospheric aura matching song mood color vibe
-            var cloud1X = (w * 0.30f) + (packet.ReducedMotion ? 0f : MathF.Sin(t * 0.38f) * (w * 0.05f));
-            var cloud1Y = (h * 0.50f) + (packet.ReducedMotion ? 0f : MathF.Cos(t * 0.32f) * (h * 0.04f));
+            var cloud1X = (w * 0.28f) + (packet.ReducedMotion ? 0f : MathF.Sin(t * 0.38f) * (w * 0.05f));
+            var cloud1Y = (h * 0.48f) + (packet.ReducedMotion ? 0f : MathF.Cos(t * 0.32f) * (h * 0.04f));
             var cloudR = MathF.Max(w, h) * 0.78f;
 
-            _grad3Colors[0] = theme.WashGlow.ToSkColorWithAlpha(0.62f + (_smoothedBass * 0.14f));
-            _grad3Colors[1] = theme.Primary.ToSkColorWithAlpha(0.30f);
+            _grad3Colors[0] = theme.WashGlow.ToSkColorWithAlpha(0.60f + (_smoothedBass * 0.14f));
+            _grad3Colors[1] = theme.Primary.ToSkColorWithAlpha(0.28f);
             _grad3Colors[2] = theme.DeepAmbient.ToSkColorWithAlpha(0.08f);
             using (var cloud = SKShader.CreateRadialGradient(new SKPoint(cloud1X, cloud1Y), cloudR, _grad3Colors, _stops3, SKShaderTileMode.Clamp))
             {
@@ -527,11 +526,11 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
             }
         }
 
-        // 3. Soft GlassOS tonal scrim keeping lyrics legible on top of bright album art
-        _grad3Colors[0] = theme.DeepAmbient.ToSkColorWithAlpha(0.22f);
-        _grad3Colors[1] = new SKColor(0, 0, 0, 72);
-        _grad3Colors[2] = theme.DeepAmbient.ToSkColorWithAlpha(0.42f);
-        using (var scrim = SKShader.CreateLinearGradient(new SKPoint(0, 0), new SKPoint(w, h), _grad3Colors, _stops3, SKShaderTileMode.Clamp))
+        // Apple-Music style depth scrim: slightly richer darkness across the right lyric column for high legibility
+        _grad3Colors[0] = theme.DeepAmbient.ToSkColorWithAlpha(0.20f);
+        _grad3Colors[1] = new SKColor(0, 0, 0, 74);
+        _grad3Colors[2] = new SKColor(0, 0, 0, 108);
+        using (var scrim = SKShader.CreateLinearGradient(new SKPoint(0, 0), new SKPoint(w, 0), _grad3Colors, _stops3, SKShaderTileMode.Clamp))
         {
             _fillPaint.Shader = scrim;
             _fillPaint.Color = SKColors.White;
@@ -548,33 +547,32 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         var canvas = context.Canvas;
         var packet = context.Packet;
         var side = MathF.Min(cardRect.Width, cardRect.Height);
-        var radius = Math.Clamp(side * 0.115f, 10f, 24f);
-        var beatExpand = packet.ReducedMotion ? 0f : (_smoothedBeat * 3.5f);
+        var radius = Math.Clamp(side * 0.068f, 6f, 16f);
+        var beatExpand = packet.ReducedMotion ? 0f : (_smoothedBeat * 2.5f);
         var drawRect = new SKRect(
             cardRect.Left - (beatExpand * 0.5f),
             cardRect.Top - (beatExpand * 0.5f),
             cardRect.Right + (beatExpand * 0.5f),
             cardRect.Bottom + (beatExpand * 0.5f));
 
-        // 1. Soft colored GlassOS ambient glow & deep elevation shadow behind medium cover card
-        var haloRect = new SKRect(
-            drawRect.Left - 8f,
-            drawRect.Top + 6f,
-            drawRect.Right + 8f,
+        // 1. Soft elevation shadow behind cover card
+        var shadowRect = new SKRect(
+            drawRect.Left - 6f,
+            drawRect.Top + 8f,
+            drawRect.Right + 6f,
             drawRect.Bottom + 16f);
-        _glowPaint.Color = SKColors.Black.WithAlpha(128);
-        _glowPaint.MaskFilter = null;
-        _glowPaint.ImageFilter = _cardGlowBlur;
+        _glowPaint.Color = SKColors.Black.WithAlpha(138);
+        _glowPaint.ImageFilter = _cardShadowBlur;
         try
         {
-            canvas.DrawRoundRect(haloRect, radius + 4f, radius + 4f, _glowPaint);
+            canvas.DrawRoundRect(shadowRect, radius + 3f, radius + 3f, _glowPaint);
         }
         finally
         {
             _glowPaint.ImageFilter = null;
         }
 
-        // 2. Clipped album cover artwork or frosted procedural GlassOS placeholder card
+        // 2. Clipped album cover artwork or rich GlassOS procedural card
         var clipSave = canvas.Save();
         try
         {
@@ -594,8 +592,8 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
             }
             else
             {
-                _grad3Colors[0] = StyleLayoutHelper.BlendSrgb(theme.DeepAmbient, theme.Primary, 0.52f).ToSkColor();
-                _grad3Colors[1] = StyleLayoutHelper.BlendSrgb(theme.WashGlow, theme.Secondary, 0.48f).ToSkColor();
+                _grad3Colors[0] = StyleLayoutHelper.BlendSrgb(theme.DeepAmbient, theme.Primary, 0.54f).ToSkColor();
+                _grad3Colors[1] = StyleLayoutHelper.BlendSrgb(theme.WashGlow, theme.Secondary, 0.50f).ToSkColor();
                 _grad3Colors[2] = theme.DeepAmbient.ToSkColor();
                 using var artGrad = SKShader.CreateLinearGradient(
                     new SKPoint(drawRect.Left, drawRect.Top),
@@ -608,7 +606,6 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
                 canvas.DrawRect(drawRect, _fillPaint);
                 _fillPaint.Shader = null;
 
-                // Subtle centered GlassOS note/mood emblem when track has no artwork image bytes
                 var moodVisual = packet.PlaybackSnapshot?.TrackMoodVisual;
                 if (moodVisual is not null)
                 {
@@ -623,33 +620,15 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
                         isActive: true);
                 }
             }
-
-            // Delicate top GlassOS reflection glaze
-            _grad4Colors[0] = SKColors.White.WithAlpha(46);
-            _grad4Colors[1] = SKColors.White.WithAlpha(12);
-            _grad4Colors[2] = SKColors.Transparent;
-            _grad4Colors[3] = SKColors.Black.WithAlpha(24);
-            using (var glassSheen = SKShader.CreateLinearGradient(
-                new SKPoint(drawRect.Left, drawRect.Top),
-                new SKPoint(drawRect.Left + (drawRect.Width * 0.35f), drawRect.Bottom),
-                _grad4Colors,
-                _stops4,
-                SKShaderTileMode.Clamp))
-            {
-                _fillPaint.Shader = glassSheen;
-                _fillPaint.Color = SKColors.White;
-                canvas.DrawRect(drawRect, _fillPaint);
-                _fillPaint.Shader = null;
-            }
         }
         finally
         {
             canvas.RestoreToCount(clipSave);
         }
 
-        // 3. Crisp specular Apple Liquid Glass rim border
-        _grad2Colors[0] = SKColors.White.WithAlpha(138);
-        _grad2Colors[1] = theme.Primary.ToSkColorWithAlpha(0.28f);
+        // 3. Subtle Apple Glass hairline border
+        _grad2Colors[0] = SKColors.White.WithAlpha(92);
+        _grad2Colors[1] = theme.Primary.ToSkColorWithAlpha(0.24f);
         using var rimShader = SKShader.CreateLinearGradient(
             new SKPoint(drawRect.Left, drawRect.Top),
             new SKPoint(drawRect.Right, drawRect.Bottom),
@@ -658,7 +637,7 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
             SKShaderTileMode.Clamp);
         _strokePaint.Shader = rimShader;
         _strokePaint.Color = SKColors.White;
-        _strokePaint.StrokeWidth = packet.IsCompactCard ? 1.0f : 1.4f;
+        _strokePaint.StrokeWidth = packet.IsCompactCard ? 0.9f : 1.15f;
         try
         {
             canvas.DrawRoundRect(drawRect, radius, radius, _strokePaint);
@@ -669,12 +648,85 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         }
     }
 
-    private bool Build3DWordSlots(
+    private void DrawLeftScrubberAndTrackMeta(
         in StyleRenderContext context,
         in AlbumCycleTheme theme,
+        SKRect cardRect)
+    {
+        var packet = context.Packet;
+        if (packet.IsCompactCard || packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay)
+        {
+            return;
+        }
+
+        var track = packet.SceneSnapshot.Track;
+        var compactHeight = packet.ViewportHeightDip <= 400f;
+        var barY = Math.Min(packet.ViewportHeightDip - (compactHeight ? 58f : 74f), cardRect.Bottom + (compactHeight ? 11f : 16f));
+        var posSec = Math.Max(0.0, packet.SceneSnapshot.EffectivePosition.TotalSeconds);
+        var durSec = track?.Duration.TotalSeconds > 0.5 ? track.Duration.TotalSeconds : DemoSongProvider.LoopDuration.TotalSeconds;
+        var frac = Math.Clamp((float)(posSec / durSec), 0f, 1f);
+
+        // 1. Minimalist Apple Music horizontal scrubber bar aligned exactly with cover edges
+        var barLeft = cardRect.Left;
+        var barRight = cardRect.Right;
+        var barW = Math.Max(10f, barRight - barLeft);
+        var fillEndX = barLeft + (barW * frac);
+
+        _fillPaint.Shader = null;
+        _fillPaint.Color = new SKColor(255, 255, 255, 68);
+        context.Canvas.DrawRoundRect(new SKRect(barLeft, barY - 1.5f, barRight, barY + 1.5f), 1.5f, 1.5f, _fillPaint);
+
+        _fillPaint.Color = new SKColor(255, 255, 255, 232);
+        context.Canvas.DrawRoundRect(new SKRect(barLeft, barY - 1.5f, Math.Max(barLeft + 2f, fillEndX), barY + 1.5f), 1.5f, 1.5f, _fillPaint);
+
+        _fillPaint.Color = SKColors.White;
+        context.Canvas.DrawCircle(fillEndX, barY, 3.2f, _fillPaint);
+
+        // 2. Left & right elapsed/total timestamps directly below scrubber
+        var timeY = barY + (compactHeight ? 12f : 14f);
+        var monoFont = context.Fonts.GetOrCreateFont(LyricFontId.SystemMono, compactHeight ? 9.5f : 10.5f, enforceMinOverlayFloor: false);
+        var elapsedStr = FormatClock(TimeSpan.FromSeconds(posSec));
+        var durationStr = FormatClock(TimeSpan.FromSeconds(durSec));
+
+        context.Legibility.DrawLegibleText(
+            context.Canvas, elapsedStr, barLeft, timeY, SKTextAlign.Left, monoFont, LyricFontId.SystemMono,
+            new RgbColor(235, 238, 245), opacity: 0.78f, includeStrokeHalo: false, fonts: context.Fonts);
+        context.Legibility.DrawLegibleText(
+            context.Canvas, durationStr, barRight, timeY, SKTextAlign.Right, monoFont, LyricFontId.SystemMono,
+            new RgbColor(235, 238, 245), opacity: 0.78f, includeStrokeHalo: false, fonts: context.Fonts);
+
+        if (track is null || string.IsNullOrWhiteSpace(track.RawTitle))
+        {
+            return;
+        }
+
+        // 3. Centered Bold Song Title + Subtitle directly underneath scrubber
+        var titleSize = Math.Clamp(packet.ViewportHeightDip * 0.042f, compactHeight ? 14f : 16f, 21f);
+        var titleFont = context.Fonts.GetOrCreateFont(LyricFontId.Jost, titleSize, enforceMinOverlayFloor: false);
+        var titleY = timeY + (compactHeight ? 18f : 22f);
+        DrawFittedCenterText(in context, titleFont, track.RawTitle, cardRect.MidX, titleY, barW * 1.15f, new RgbColor(255, 255, 255), 0.96f);
+
+        var subParts = !string.IsNullOrWhiteSpace(track.AlbumTitle) && !string.Equals(track.AlbumTitle, track.RawTitle, StringComparison.OrdinalIgnoreCase)
+            ? $"{track.RawArtist}  •  {track.AlbumTitle}"
+            : track.RawArtist;
+        if (!string.IsNullOrWhiteSpace(subParts))
+        {
+            var subSize = Math.Clamp(titleSize * 0.70f, 10.5f, 14f);
+            var subFont = context.Fonts.GetOrCreateFont(LyricFontId.Mulish, subSize, enforceMinOverlayFloor: false);
+            DrawFittedCenterText(
+                in context, subFont, subParts, cardRect.MidX, titleY + (compactHeight ? 14f : 18f), barW * 1.15f,
+                StyleLayoutHelper.BlendSrgb(theme.Primary, new RgbColor(240, 244, 250), 0.65f), 0.76f);
+        }
+    }
+
+    private bool BuildLeftAlignedActiveWordSlots(
+        in StyleRenderContext context,
         ActiveLyricSlice slice,
-        float originX,
-        float originY)
+        float leftX,
+        float maxColWidth,
+        float centerY,
+        out float blockTopY,
+        out float blockBottomY)
     {
         _rowBuckets.Clear();
         _rowSlotBuffer.Clear();
@@ -683,6 +735,8 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         var line = slice.CurrentLine;
         if (line is null || line.Words.IsEmpty)
         {
+            blockTopY = centerY - 18f;
+            blockBottomY = centerY + 18f;
             return false;
         }
 
@@ -690,8 +744,7 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         var fontId = packet.ActiveFontId;
         var fontSize = ResolveGlassStageFontSize(packet);
         var font = context.Fonts.GetOrCreateFont(fontId, fontSize, enforceMinOverlayFloor: !packet.IsCompactCard);
-        var spaceW = Math.Max(fontSize * 0.28f, TextShaperService.MeasureWidth(" ", font, context.Fonts));
-        var maxRowWidth = ResolveLyricsColumnWidth(packet);
+        var spaceW = Math.Max(fontSize * 0.27f, TextShaperService.MeasureWidth(" ", font, context.Fonts));
 
         var words = line.Words;
         var activeIdx = Math.Clamp(slice.ActiveWordIndex, 0, words.Length - 1);
@@ -703,7 +756,7 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         {
             var measured = TextShaperService.MeasureWidth(words[i].Text, font, context.Fonts);
             var addW = currentRow.Count == 0 ? measured : spaceW + measured;
-            if (currentRow.Count > 0 && currentRow.TotalWidth + addW > maxRowWidth)
+            if (currentRow.Count > 0 && currentRow.TotalWidth + addW > maxColWidth)
             {
                 _rowBuckets.Add(currentRow);
                 currentRow = new WordRow(i, 0, 0f);
@@ -719,26 +772,31 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
             _rowBuckets.Add(currentRow);
         }
 
-        var pitchDeg = packet.ReducedMotion ? 0f : RestingPitchDegrees + (_smoothedBass * 2.0f);
+        var pitchDeg = packet.ReducedMotion ? 0f : RestingPitchDegrees + (_smoothedBass * 1.8f);
         var yawDeg = packet.ReducedMotion ? 0f : _cameraYawDeg.Value;
         var focal = PerspectiveFocalLength * Math.Max(packet.RenderScaling, 1f);
-        var camX = packet.ReducedMotion ? 0f : _cameraX.Value;
-        var rowHeight = fontSize * 1.48f;
-        var startRowY = originY - ((_rowBuckets.Count - 1) * rowHeight * 0.5f);
+        var rowHeight = fontSize * 1.28f;
+        var startRowY = centerY - ((_rowBuckets.Count - 1) * rowHeight * 0.5f);
+        var pivotX = leftX + (maxColWidth * 0.25f);
+
+        blockTopY = startRowY - (fontSize * 0.62f);
+        blockBottomY = startRowY + ((_rowBuckets.Count - 1) * rowHeight) + (fontSize * 0.62f);
 
         for (var r = 0; r < _rowBuckets.Count; r++)
         {
             var row = _rowBuckets[r];
             var rowY = startRowY + (r * rowHeight);
-            var cursorX = originX - (row.TotalWidth * 0.5f);
+            var fitScale = row.TotalWidth > maxColWidth ? maxColWidth / Math.Max(1f, row.TotalWidth) : 1.0f;
+            var cursorX = leftX;
 
             for (var s = 0; s < row.Count; s++)
             {
                 var slot = _rowSlotBuffer[row.StartBufferIndex + s];
                 var wordIdx = slot.WordIndex;
                 var word = words[wordIdx];
-                var centerX = cursorX + (slot.Width * 0.5f);
-                cursorX += slot.Width + spaceW;
+                var wordW = slot.Width * fitScale;
+                var wordCenterX = cursorX + (wordW * 0.5f);
+                cursorX += wordW + (spaceW * fitScale);
 
                 var isActive = wordIdx == activeIdx;
                 var isPast = wordIdx < activeIdx;
@@ -746,6 +804,7 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
                     ? Math.Clamp((posSec - word.StartTime.TotalSeconds) / (word.EndTime - word.StartTime).TotalSeconds, 0.0, 1.0)
                     : 0.5;
 
+                // Active word bursts forward in 3D Z (-46..-74); upcoming waves oscillate smoothly; past stays crisp near-focal
                 float worldZ;
                 if (packet.ReducedMotion)
                 {
@@ -753,22 +812,20 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
                 }
                 else if (isActive)
                 {
-                    worldZ = -34f - (_smoothedBeat * 22f);
+                    worldZ = -44f - (_smoothedBeat * 24f);
                 }
                 else if (isPast)
                 {
-                    var driftWave = MathF.Sin((t * 1.1f) + (wordIdx * 0.9f)) * 18f;
-                    worldZ = 42f + driftWave;
+                    worldZ = -6f + (MathF.Sin((t * 1.0f) + (wordIdx * 0.8f)) * 8f);
                 }
                 else
                 {
-                    var oscZ = MathF.Sin((t * 1.35f) + (wordIdx * 1.25f) + (line.Index * 0.7f));
-                    worldZ = oscZ >= 0f ? (-18f * oscZ) : (52f * -oscZ);
+                    worldZ = 14f + (MathF.Sin((t * 1.35f) + (wordIdx * 1.2f) + (line.Index * 0.7f)) * 18f);
                 }
 
                 var (projPt, depthScale) = packet.ReducedMotion
-                    ? (new SKPoint(centerX, rowY), 1.0f)
-                    : KineticWallStyleRenderer.Project3DPoint(centerX + camX, rowY, worldZ, pitchDeg, yawDeg, 0f, focal, originX, originY);
+                    ? (new SKPoint(wordCenterX, rowY), 1.0f)
+                    : KineticWallStyleRenderer.Project3DPoint(wordCenterX, rowY, worldZ, pitchDeg, yawDeg, 0f, focal, pivotX, centerY);
 
                 if (packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay)
                 {
@@ -780,9 +837,9 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
                 _projectedWords.Add(new ProjectedWordDraw(
                     wordIdx,
                     word,
-                    slot.Width,
+                    wordW,
                     projPt,
-                    depthScale,
+                    depthScale * fitScale,
                     worldZ,
                     isActive,
                     isPast,
@@ -794,169 +851,272 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         return _projectedWords.Count > 0;
     }
 
-    private void DrawBackPlane3DLayer(
+    private void DrawProjectedActiveLineWords(
         in StyleRenderContext context,
         in AlbumCycleTheme theme,
-        ActiveLyricSlice slice,
-        float originX,
-        float originY)
+        float leftX,
+        float colW,
+        float centerY)
     {
         var packet = context.Packet;
         var fontSize = ResolveGlassStageFontSize(packet);
         var font = context.Fonts.GetOrCreateFont(packet.ActiveFontId, fontSize, enforceMinOverlayFloor: !packet.IsCompactCard);
-        var pitchDeg = packet.ReducedMotion ? 0f : RestingPitchDegrees;
-        var yawDeg = packet.ReducedMotion ? 0f : _cameraYawDeg.Value;
-        var focal = PerspectiveFocalLength * Math.Max(packet.RenderScaling, 1f);
-
-        if (!packet.IsCompactCard && slice.PreviousLine is not null)
-        {
-            var (prevPt, prevScale) = packet.ReducedMotion
-                ? (new SKPoint(originX, originY - (fontSize * 2.15f)), 0.72f)
-                : KineticWallStyleRenderer.Project3DPoint(originX, originY - (fontSize * 2.15f), 115f, pitchDeg, yawDeg, 0f, focal, originX, originY);
-            DrawScaledLineText(in context, font, slice.PreviousLine.RawText, prevPt, 0.56f * prevScale, theme.Tertiary, 0.48f);
-        }
-
-        if (!packet.IsCompactCard && slice.NextLine is not null)
-        {
-            var (nextPt, nextScale) = packet.ReducedMotion
-                ? (new SKPoint(originX, originY + (fontSize * 2.15f)), 0.72f)
-                : KineticWallStyleRenderer.Project3DPoint(originX, originY + (fontSize * 2.15f), 96f, pitchDeg, yawDeg, 0f, focal, originX, originY);
-            DrawScaledLineText(in context, font, slice.NextLine.RawText, nextPt, 0.58f * nextScale, theme.Secondary, 0.52f);
-        }
-
-        for (var i = 0; i < _projectedWords.Count; i++)
-        {
-            var item = _projectedWords[i];
-            if (item.WorldZ > 8f)
-            {
-                DrawProjectedWord(in context, theme, font, item);
-            }
-        }
-    }
-
-    private void DrawFrontAndFocal3DLayer(
-        in StyleRenderContext context,
-        in AlbumCycleTheme theme,
-        ActiveLyricSlice slice,
-        float originX,
-        float originY)
-    {
-        var packet = context.Packet;
-        var fontSize = ResolveGlassStageFontSize(packet);
-        var font = context.Fonts.GetOrCreateFont(packet.ActiveFontId, fontSize, enforceMinOverlayFloor: !packet.IsCompactCard);
+        var highlightEased = Ease.Highlight(_highlightFade);
+        font.GetFontMetrics(out var metrics);
+        var baselineOffset = -((metrics.Ascent + metrics.Descent) * 0.5f);
 
         SKPoint? activeDotPt = null;
         for (var i = 0; i < _projectedWords.Count; i++)
         {
             var item = _projectedWords[i];
-            if (item.WorldZ <= 8f)
+            var activeScale = item.IsActive ? _wordSlamScale.Value : 1.0f;
+            var finalScale = Math.Clamp(item.DepthScale * activeScale, 0.55f, 1.38f);
+            var opacity = item.IsActive ? 1.0f : (item.IsPast ? 0.94f : 0.78f);
+
+            // Multi-layer 3D extruded chromatic depth behind protruding active word
+            if (item.IsActive && !packet.ReducedMotion)
             {
-                DrawProjectedWord(in context, theme, font, item);
+                var echoX = Math.Clamp(3.6f + (_smoothedBeat * 3.8f), 2.5f, 8.0f);
+                var backSave = context.Canvas.Save();
+                try
+                {
+                    context.Canvas.Translate(item.ScreenPos.X + echoX, item.ScreenPos.Y + (echoX * 0.70f));
+                    context.Canvas.Scale(finalScale * 0.98f, finalScale * 0.98f);
+                    context.Legibility.DrawLegibleText(context.Canvas, item.Word.Text, 0f, baselineOffset, SKTextAlign.Center, font, packet.ActiveFontId, theme.Secondary, 0.30f, fonts: context.Fonts);
+                }
+                finally
+                {
+                    context.Canvas.RestoreToCount(backSave);
+                }
+            }
+
+            var fillColor = item.IsActive
+                ? StyleLayoutHelper.BlendSrgb(theme.Primary, new RgbColor(255, 255, 255), 0.76f * highlightEased)
+                : item.IsPast
+                    ? new RgbColor(255, 255, 255)
+                    : StyleLayoutHelper.BlendSrgb(theme.Tertiary, new RgbColor(245, 248, 255), 0.65f);
+
+            var wordSave = context.Canvas.Save();
+            try
+            {
+                context.Canvas.Translate(item.ScreenPos.X, item.ScreenPos.Y);
+                context.Canvas.Scale(finalScale, finalScale);
+
+                var wordRect = new SKRect(-item.MeasuredWidth * 0.5f, -font.Size * 0.54f, item.MeasuredWidth * 0.5f, font.Size * 0.48f);
+                if (item.IsActive)
+                {
+                    _aesthetics.DrawWordColorSweep(context.Canvas, wordRect, item.WordProgress, packet, opacity);
+                }
+
+                context.Legibility.DrawLegibleText(
+                    context.Canvas,
+                    item.Word.Text,
+                    0f,
+                    baselineOffset,
+                    SKTextAlign.Center,
+                    font,
+                    packet.ActiveFontId,
+                    fillColor,
+                    opacity: opacity,
+                    activeGlowColor: item.IsActive ? theme.Primary : null,
+                    fonts: context.Fonts);
+
+                if (item.IsActive &&
+                    StyleLayoutHelper.ResolveWordVisual(item.Word, packet, allowTrackMoodFallback: false) is { } visual)
+                {
+                    _aesthetics.DrawReactiveVisual(context.Canvas, in context, visual, 0f, -font.Size * 0.76f, Math.Clamp(font.Size * 0.44f, 13f, 24f), 0.92f, isActive: true);
+                }
+            }
+            finally
+            {
+                context.Canvas.RestoreToCount(wordSave);
             }
 
             if (item.IsActive)
             {
-                activeDotPt = new SKPoint(item.ScreenPos.X, item.ScreenPos.Y + (fontSize * 0.72f));
+                activeDotPt = new SKPoint(item.ScreenPos.X, item.ScreenPos.Y + (fontSize * 0.70f));
             }
         }
 
         if (activeDotPt is { } dot)
         {
-            _aesthetics.DrawFollowingDot(context.Canvas, packet, dot.X, dot.Y, Math.Clamp(fontSize * 0.11f, 2.8f, 6.2f));
+            _aesthetics.DrawFollowingDot(context.Canvas, packet, dot.X, dot.Y, Math.Clamp(fontSize * 0.11f, 2.8f, 5.8f));
         }
     }
 
-    private void DrawProjectedWord(
+    private void DrawContextualHistoryAndUpcomingLines(
         in StyleRenderContext context,
         in AlbumCycleTheme theme,
-        SKFont font,
-        in ProjectedWordDraw item)
+        ActiveLyricSlice slice,
+        float leftX,
+        float colWidth,
+        float centerY,
+        float activeTopY,
+        float activeBottomY)
     {
-        var canvas = context.Canvas;
         var packet = context.Packet;
-        var fontId = packet.ActiveFontId;
-        var highlightEased = Ease.Highlight(_highlightFade);
+        var doc = packet.SceneSnapshot.Document;
+        var lines = doc is not null && !doc.Lines.IsEmpty ? doc.Lines : default;
+        var activeIdx = slice.ActiveLineIndex;
 
-        font.GetFontMetrics(out var metrics);
-        var baselineOffset = -((metrics.Ascent + metrics.Descent) * 0.5f);
+        var contextSize = ResolveGlassStageFontSize(packet) * 0.86f;
+        var contextFont = context.Fonts.GetOrCreateFont(packet.ActiveFontId, contextSize, enforceMinOverlayFloor: false);
+        var lineH = contextSize * 1.18f;
+        var lineGap = contextSize * 0.42f;
+        var pitchDeg = packet.ReducedMotion ? 0f : RestingPitchDegrees;
+        var yawDeg = packet.ReducedMotion ? 0f : _cameraYawDeg.Value;
+        var focal = PerspectiveFocalLength * Math.Max(packet.RenderScaling, 1f);
+        var pivotX = leftX + (colWidth * 0.25f);
+        var tintedWhite = StyleLayoutHelper.BlendSrgb(theme.Tertiary, new RgbColor(248, 250, 252), 0.78f);
 
-        var activeScale = item.IsActive ? _wordSlamScale.Value : 1.0f;
-        var finalScale = Math.Clamp(item.DepthScale * activeScale, 0.55f, 1.48f);
-
-        var depthDim = item.WorldZ > 8f ? Math.Clamp(1f - ((item.WorldZ - 8f) / 140f), 0.44f, 0.88f) : 1.0f;
-        var opacity = item.IsActive ? 1.0f : (item.IsPast ? 0.70f : 0.86f) * depthDim;
-
-        if (item.IsActive && !packet.ReducedMotion)
+        // 1. Walk UPWARD drawing up to 2 past lines receding into 3D space (matches top rows in reference screenshot)
+        var cursorUpY = activeTopY - lineGap;
+        for (var delta = 1; delta <= 2; delta++)
         {
-            var echoOffset = Math.Clamp(4.5f + (_smoothedBeat * 5.0f), 3f, 10f);
-            var echoSave = canvas.Save();
-            try
+            var lineObj = GetLineByOffset(lines, activeIdx, -delta, delta == 1 ? slice.PreviousLine : null);
+            if (lineObj is null || string.IsNullOrWhiteSpace(lineObj.RawText))
             {
-                canvas.Translate(item.ScreenPos.X + echoOffset, item.ScreenPos.Y + (echoOffset * 0.65f));
-                canvas.Scale(finalScale * 0.98f, finalScale * 0.98f);
-                context.Legibility.DrawLegibleText(canvas, item.Word.Text, 0f, baselineOffset, SKTextAlign.Center, font, fontId, theme.Secondary, 0.28f, fonts: context.Fonts);
+                continue;
             }
-            finally
+
+            WrapTextIntoBuffer(lineObj.RawText, contextFont, context.Fonts, colWidth, maxRows: 2);
+            var rowCount = _wrapLineBuffer.Count;
+            if (rowCount == 0)
             {
-                canvas.RestoreToCount(echoSave);
+                continue;
             }
+
+            var blockTop = cursorUpY - (rowCount * lineH);
+            if (blockTop < 16f)
+            {
+                break;
+            }
+
+            var worldZ = 34f * delta;
+            var opacity = delta == 1 ? 0.42f : 0.25f;
+            for (var r = 0; r < rowCount; r++)
+            {
+                var rowY = blockTop + (r * lineH) + (lineH * 0.5f);
+                var (pt, scale) = packet.ReducedMotion
+                    ? (new SKPoint(leftX, rowY), 1.0f)
+                    : KineticWallStyleRenderer.Project3DPoint(leftX, rowY, worldZ, pitchDeg, yawDeg, 0f, focal, pivotX, centerY);
+                DrawLeftRow3D(in context, contextFont, _wrapLineBuffer[r], pt, scale, colWidth, tintedWhite, opacity);
+            }
+
+            cursorUpY = blockTop - lineGap;
         }
 
-        var fillColor = item.IsActive
-            ? StyleLayoutHelper.BlendSrgb(theme.Primary, new RgbColor(255, 255, 255), 0.58f * highlightEased)
-            : item.IsPast
-                ? StyleLayoutHelper.BlendSrgb(theme.Primary, theme.Tertiary, 0.45f)
-                : StyleLayoutHelper.BlendSrgb(theme.Secondary, new RgbColor(245, 248, 255), 0.35f);
-
-        var wordSave = canvas.Save();
-        try
+        // 2. Walk DOWNWARD drawing up to 3 upcoming lines fading smoothly deeper in 3D space
+        var cursorDownY = activeBottomY + lineGap;
+        var maxBottom = packet.ViewportHeightDip - 16f;
+        for (var delta = 1; delta <= 3; delta++)
         {
-            canvas.Translate(item.ScreenPos.X, item.ScreenPos.Y);
-            canvas.Scale(finalScale, finalScale);
-
-            var wordRect = new SKRect(-item.MeasuredWidth * 0.5f, -font.Size * 0.54f, item.MeasuredWidth * 0.5f, font.Size * 0.48f);
-            if (item.IsActive)
+            var lineObj = GetLineByOffset(lines, activeIdx, delta, delta == 1 ? slice.NextLine : null);
+            if (lineObj is null || string.IsNullOrWhiteSpace(lineObj.RawText))
             {
-                _aesthetics.DrawWordColorSweep(canvas, wordRect, item.WordProgress, packet, opacity);
+                continue;
             }
 
-            context.Legibility.DrawLegibleText(
-                canvas,
-                item.Word.Text,
-                0f,
-                baselineOffset,
-                SKTextAlign.Center,
-                font,
-                fontId,
-                fillColor,
-                opacity: opacity,
-                activeGlowColor: item.IsActive ? theme.Primary : null,
-                fonts: context.Fonts);
-
-            if ((item.IsActive || item.WorldZ < -8f) &&
-                StyleLayoutHelper.ResolveWordVisual(item.Word, packet, allowTrackMoodFallback: false) is { } visual)
+            WrapTextIntoBuffer(lineObj.RawText, contextFont, context.Fonts, colWidth, maxRows: 2);
+            var rowCount = _wrapLineBuffer.Count;
+            if (rowCount == 0)
             {
-                _aesthetics.DrawReactiveVisual(canvas, in context, visual, 0f, -font.Size * 0.78f, Math.Clamp(font.Size * 0.48f, 14f, 28f), opacity * 0.92f, item.IsActive);
+                continue;
             }
-        }
-        finally
-        {
-            canvas.RestoreToCount(wordSave);
+
+            if (cursorDownY + lineH > maxBottom)
+            {
+                break;
+            }
+
+            var worldZ = 28f * delta;
+            var opacity = delta == 1 ? 0.44f : (delta == 2 ? 0.28f : 0.16f);
+            for (var r = 0; r < rowCount; r++)
+            {
+                var rowY = cursorDownY + (r * lineH) + (lineH * 0.5f);
+                if (rowY > maxBottom)
+                {
+                    break;
+                }
+
+                var (pt, scale) = packet.ReducedMotion
+                    ? (new SKPoint(leftX, rowY), 1.0f)
+                    : KineticWallStyleRenderer.Project3DPoint(leftX, rowY, worldZ, pitchDeg, yawDeg, 0f, focal, pivotX, centerY);
+                DrawLeftRow3D(in context, contextFont, _wrapLineBuffer[r], pt, scale, colWidth, tintedWhite, opacity);
+            }
+
+            cursorDownY += (rowCount * lineH) + lineGap;
         }
     }
 
-    private static void DrawScaledLineText(
+    private static LyricLine? GetLineByOffset(
+        System.Collections.Immutable.ImmutableArray<LyricLine> lines,
+        int activeIndex,
+        int delta,
+        LyricLine? singleFallback)
+    {
+        if (!lines.IsDefaultOrEmpty && activeIndex >= 0)
+        {
+            var idx = activeIndex + delta;
+            if (idx >= 0 && idx < lines.Length)
+            {
+                return lines[idx];
+            }
+
+            return null;
+        }
+
+        return singleFallback;
+    }
+
+    private void WrapTextIntoBuffer(string text, SKFont font, FontAssetRegistry fonts, float maxWidth, int maxRows)
+    {
+        _wrapLineBuffer.Clear();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var current = string.Empty;
+        for (var i = 0; i < words.Length; i++)
+        {
+            var candidate = current.Length == 0 ? words[i] : $"{current} {words[i]}";
+            if (current.Length > 0 && TextShaperService.MeasureWidth(candidate, font, fonts) > maxWidth)
+            {
+                _wrapLineBuffer.Add(current);
+                if (_wrapLineBuffer.Count >= maxRows - 1)
+                {
+                    _wrapLineBuffer.Add(string.Join(' ', words, i, words.Length - i));
+                    return;
+                }
+
+                current = words[i];
+            }
+            else
+            {
+                current = candidate;
+            }
+        }
+
+        if (current.Length > 0)
+        {
+            _wrapLineBuffer.Add(current);
+        }
+    }
+
+    private static void DrawLeftRow3D(
         in StyleRenderContext context,
         SKFont font,
         string text,
         SKPoint pos,
         float scale,
+        float maxWidth,
         RgbColor color,
         float opacity)
     {
-        var maxW = ResolveLyricsColumnWidth(context.Packet);
         var measured = TextShaperService.MeasureWidth(text, font, context.Fonts);
-        var fit = TextShaperService.ComputeAutoFitScale(measured * scale, maxW, 0.94f);
+        var fit = TextShaperService.ComputeAutoFitScale(measured * scale, maxWidth, 0.96f);
         var finalScale = scale * fit;
 
         font.GetFontMetrics(out var metrics);
@@ -967,7 +1127,7 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         {
             context.Canvas.Translate(pos.X, pos.Y);
             context.Canvas.Scale(finalScale, finalScale);
-            context.Legibility.DrawLegibleText(context.Canvas, text, 0f, baselineOffset, SKTextAlign.Center, font, context.Packet.ActiveFontId, color, opacity, fonts: context.Fonts);
+            context.Legibility.DrawLegibleText(context.Canvas, text, 0f, baselineOffset, SKTextAlign.Left, font, context.Packet.ActiveFontId, color, opacity, includeStrokeHalo: false, fonts: context.Fonts);
         }
         finally
         {
@@ -975,55 +1135,75 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         }
     }
 
-    private static void DrawFallbackPlainLine(
+    private static void DrawLeftFallbackPlainLine(
         in StyleRenderContext context,
-        in AlbumCycleTheme theme,
         LyricLine line,
-        float originX,
+        float leftX,
+        float colWidth,
         float originY)
     {
         var fontSize = ResolveGlassStageFontSize(context.Packet);
         var font = context.Fonts.GetOrCreateFont(context.Packet.ActiveFontId, fontSize, enforceMinOverlayFloor: !context.Packet.IsCompactCard);
-        DrawScaledLineText(in context, font, line.RawText, new SKPoint(originX, originY), 1.0f, StyleLayoutHelper.BlendSrgb(theme.Primary, new RgbColor(255, 255, 255), 0.5f), 0.96f);
+        DrawFittedLeftText(in context, font, line.RawText, leftX, originY, colWidth, new RgbColor(255, 255, 255), 0.96f);
     }
 
-    private static void DrawCardFooterBar(
+    private static void DrawFittedLeftText(
         in StyleRenderContext context,
-        in AlbumCycleTheme theme,
-        SKRect cardRect)
+        SKFont font,
+        string text,
+        float leftX,
+        float baselineCenterY,
+        float maxWidth,
+        RgbColor color,
+        float opacity)
     {
-        var packet = context.Packet;
-        if (packet.IsCompactCard || packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay)
+        var measured = TextShaperService.MeasureWidth(text, font, context.Fonts);
+        var fit = TextShaperService.ComputeAutoFitScale(measured, maxWidth, 0.96f);
+        font.GetFontMetrics(out var metrics);
+        var baselineOffset = -((metrics.Ascent + metrics.Descent) * 0.5f);
+
+        var save = context.Canvas.Save();
+        try
         {
-            return;
+            context.Canvas.Translate(leftX, baselineCenterY);
+            context.Canvas.Scale(fit, fit);
+            context.Legibility.DrawLegibleText(context.Canvas, text, 0f, baselineOffset, SKTextAlign.Left, font, context.Packet.ActiveFontId, color, opacity, fonts: context.Fonts);
         }
-
-        var track = packet.SceneSnapshot.Track;
-        if (track is null || string.IsNullOrWhiteSpace(track.RawTitle))
+        finally
         {
-            return;
+            context.Canvas.RestoreToCount(save);
         }
-
-        var footerY = Math.Min(packet.ViewportHeightDip - 24f, cardRect.Bottom + 28f);
-        var captionFont = context.Fonts.GetOrCreateFont(LyricFontId.SystemMono, 12f, enforceMinOverlayFloor: false);
-        var caption = string.IsNullOrWhiteSpace(track.RawArtist)
-            ? track.RawTitle
-            : $"{track.RawArtist}  •  {track.RawTitle}";
-
-        context.Legibility.DrawLegibleText(
-            context.Canvas,
-            caption,
-            cardRect.MidX,
-            footerY,
-            SKTextAlign.Center,
-            captionFont,
-            LyricFontId.SystemMono,
-            StyleLayoutHelper.BlendSrgb(theme.Primary, new RgbColor(255, 255, 255), 0.45f),
-            opacity: 0.84f,
-            fonts: context.Fonts);
     }
 
-    private static (float OriginX, float OriginY) ResolveLyricsOrigin(FrameRenderPacket packet)
+    private static void DrawFittedCenterText(
+        in StyleRenderContext context,
+        SKFont font,
+        string text,
+        float centerX,
+        float baselineCenterY,
+        float maxWidth,
+        RgbColor color,
+        float opacity)
+    {
+        var measured = TextShaperService.MeasureWidth(text, font, context.Fonts);
+        var fit = TextShaperService.ComputeAutoFitScale(measured, maxWidth, 0.96f);
+        font.GetFontMetrics(out var metrics);
+        var baselineOffset = -((metrics.Ascent + metrics.Descent) * 0.5f);
+
+        var save = context.Canvas.Save();
+        try
+        {
+            context.Canvas.Translate(centerX, baselineCenterY);
+            context.Canvas.Scale(fit, fit);
+            context.Legibility.DrawLegibleText(context.Canvas, text, 0f, baselineOffset, SKTextAlign.Center, font, LyricFontId.Jost, color, opacity, includeStrokeHalo: false, fonts: context.Fonts);
+        }
+        finally
+        {
+            context.Canvas.RestoreToCount(save);
+        }
+    }
+
+    private static (float LeftX, float ColWidth, float CenterY) ResolveLyricsColumnGeometry(FrameRenderPacket packet)
     {
         var w = packet.ViewportWidthDip;
         var h = packet.ViewportHeightDip;
@@ -1031,27 +1211,34 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
         if (packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay)
         {
             var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet, 0.50f, 0.50f);
-            return (Math.Clamp(anchorX + (w * 0.08f), w * 0.44f, w - 120f), anchorY);
+            var colW = Math.Clamp(w * 0.44f, 180f, 640f);
+            var leftX = Math.Clamp(anchorX - (colW * 0.25f), w * 0.36f, w - colW - 24f);
+            return (leftX, colW, anchorY);
         }
 
-        return (packet.IsCompactCard ? w * 0.68f : w * 0.67f, h * 0.50f);
+        var stageLeftX = w * (packet.IsCompactCard ? 0.44f : 0.475f);
+        var stageColW = Math.Max(100f, w - stageLeftX - (w * 0.055f));
+        return (stageLeftX, stageColW, h * 0.48f);
     }
-
-    private static float ResolveLyricsColumnWidth(FrameRenderPacket packet) =>
-        packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay
-            ? Math.Clamp(packet.ViewportWidthDip * 0.44f, 180f, 640f)
-            : Math.Clamp(packet.ViewportWidthDip * (packet.IsCompactCard ? 0.40f : 0.44f), 140f, 700f);
 
     private static float ResolveGlassStageFontSize(FrameRenderPacket packet)
     {
-        var baseScaled = StyleLayoutHelper.ResolveStyleFontSize(packet, styleMultiplier: packet.IsCompactCard ? 0.66f : 0.62f);
+        var baseScaled = StyleLayoutHelper.ResolveStyleFontSize(packet, styleMultiplier: packet.IsCompactCard ? 0.56f : 0.54f);
         if (packet.IsCompactCard || packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay)
         {
             return baseScaled;
         }
 
-        var viewportCap = Math.Max(22f, packet.ViewportHeightDip * 0.115f);
+        var viewportCap = Math.Clamp(packet.ViewportHeightDip * 0.078f, 20f, 44f);
         return Math.Min(baseScaled, viewportCap);
+    }
+
+    private static string FormatClock(TimeSpan ts)
+    {
+        var total = Math.Max(0, (int)Math.Floor(ts.TotalSeconds));
+        var mins = total / 60;
+        var secs = total % 60;
+        return string.Create(CultureInfo.InvariantCulture, $"{mins}:{secs:D2}");
     }
 
     private readonly record struct AlbumCycleTheme(

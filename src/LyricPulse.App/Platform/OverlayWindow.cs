@@ -116,6 +116,7 @@ public sealed class OverlayWindow : Window, IDisposable
     {
         base.OnOpened(e);
         ApplyWin32ClickThrough();
+        _canvas.RequestWake();
     }
 
     protected override void OnClosed(EventArgs e)

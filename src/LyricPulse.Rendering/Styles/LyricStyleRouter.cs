@@ -160,6 +160,7 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
     private static bool IsNeonRushStage(in FrameRenderPacket packet) =>
         packet.ShouldDrawStageBackdrop
         && packet.SurfaceMode == StageRenderSurfaceMode.StageCanvas
+        && packet.StageBackdrop != StageBackdropMode.AlbumArtBlur
         && packet.EffectiveStyle != OverlayStyleId.VinylGroove
         && (packet.PlaybackSnapshot?.Settings.EdgeGlowMode ?? AppSettings.Default.EdgeGlowMode) == EdgeGlowMode.NeonRush;
 

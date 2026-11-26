@@ -8,20 +8,30 @@ namespace LyricPulse.Rendering.Styles;
 
 /// <summary>
 /// Renders full-viewport Stage Canvas and Gallery Card backdrops (<c>AmbientPartyMesh</c> via SkSL
-/// with beat-reactive energy pulses, <c>PureBlack</c> OLED concert obsidian, or static gradient fallback
-/// under Reduced Motion / software rendering). Includes curated Verci-caliber style mood palettes
-/// when album covers are monochrome or grayscale so stages always glow luminously.
+/// with beat-reactive energy pulses, <c>AlbumArtBlur</c> lightly-blurred full-bleed album cover,
+/// <c>PureBlack</c> OLED concert obsidian, or static gradient fallback under Reduced Motion / software rendering).
+/// Includes curated Verci-caliber style mood palettes when album covers are monochrome or grayscale.
 /// </summary>
 public sealed class StageBackdropRenderer : IDisposable
 {
-    public static readonly SKColor PureBlackStageColor = SKColors.Black; // #000000 true OLED pitch black
-    public static readonly SKColor ObsidianMeshBase = new(0x09, 0x0A, 0x10, 0xFF); // #090A10
+    public static readonly SKColor PureBlackStageColor = SKColors.Black;
+    public static readonly SKColor ObsidianMeshBase = new(0x09, 0x0A, 0x10, 0xFF);
+    private static readonly SKSamplingOptions LinearSampling = new(SKFilterMode.Linear, SKMipmapMode.None);
 
     private readonly SKPaint _fillPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _imagePaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKImageFilter _backdropLightBlur = SKImageFilter.CreateBlur(11f, 11f);
+    private readonly SKColor[] _linear2Colors = new SKColor[2];
+    private readonly float[] _linear2Stops = [0f, 1f];
     private readonly SKColor[] _radialColors = new SKColor[3];
     private readonly float[] _radialStops = [0.0f, 0.55f, 1.0f];
     private readonly SKColor[] _fadeColors = [SKColors.Transparent, new SKColor(0, 0, 0, 255)];
     private readonly float[] _fadeStops = [0f, 1f];
+
+    private string? _cachedArtHash;
+    private int _cachedArtLength;
+    private SKImage? _cachedCoverArt;
+    private SKImage? _cachedLightBlur;
 
     private float _meshTimeSec;
     private float _beatPulse;
@@ -44,7 +54,6 @@ public sealed class StageBackdropRenderer : IDisposable
             return albumPalette;
         }
 
-        // Rich Verci-grade dual-tone atmospheric palettes when album cover is grayscale/absent
         return styleId switch
         {
             OverlayStyleId.Fisheye => new AlbumAccentPalette(new RgbColor(0xEC, 0x48, 0x99), new RgbColor(0xFB, 0x71, 0x85), new RgbColor(0xA8, 0x55, 0xF7), new RgbColor(0x16, 0x0B, 0x1A), false, albumPalette.SourceAlbumHash),
@@ -70,7 +79,8 @@ public sealed class StageBackdropRenderer : IDisposable
 
     public bool Advance(in FrameRenderPacket packet)
     {
-        if (!packet.ShouldDrawStageBackdrop || packet.StageBackdrop != StageBackdropMode.AmbientPartyMesh)
+        if (!packet.ShouldDrawStageBackdrop ||
+            packet.StageBackdrop is not (StageBackdropMode.AmbientPartyMesh or StageBackdropMode.AlbumArtBlur))
         {
             _beatPulse = 0f;
             return false;
@@ -126,6 +136,13 @@ public sealed class StageBackdropRenderer : IDisposable
             return;
         }
 
+        if (packet.StageBackdrop == StageBackdropMode.AlbumArtBlur)
+        {
+            EnsureAlbumTexturesCached(packet.PlaybackSnapshot?.AlbumArt);
+            DrawAlbumArtBlurBackdrop(context.Canvas, rect, packet, resolvedPalette);
+            return;
+        }
+
         var audio = packet.EffectiveAudioMetrics;
         var bass = Math.Clamp(audio.BassEnergy + (audio.BeatPulse * 0.45f), 0f, 1f);
         var totalEnergy = Math.Clamp(packet.SafePartyEnergy + _beatPulse + (bass * 0.28f), 0.5f, 2.0f);
@@ -157,7 +174,149 @@ public sealed class StageBackdropRenderer : IDisposable
         }
 
         _disposed = true;
+        DisposeCachedTextures();
         _fillPaint.Dispose();
+        _imagePaint.Dispose();
+        _backdropLightBlur.Dispose();
+    }
+
+    private void DisposeCachedTextures()
+    {
+        _cachedCoverArt?.Dispose();
+        _cachedCoverArt = null;
+        _cachedLightBlur?.Dispose();
+        _cachedLightBlur = null;
+        _cachedArtHash = null;
+        _cachedArtLength = 0;
+    }
+
+    private void EnsureAlbumTexturesCached(AlbumArtPayload? art)
+    {
+        if (art is null || art.ImageBytes.IsEmpty)
+        {
+            if (_cachedCoverArt is not null || _cachedLightBlur is not null)
+            {
+                DisposeCachedTextures();
+            }
+
+            return;
+        }
+
+        if (string.Equals(_cachedArtHash, art.Sha256Hash, StringComparison.Ordinal) &&
+            _cachedArtLength == art.ImageBytes.Length)
+        {
+            return;
+        }
+
+        DisposeCachedTextures();
+        _cachedArtHash = art.Sha256Hash;
+        _cachedArtLength = art.ImageBytes.Length;
+
+        try
+        {
+            var (cover, blur) = SkiaAlbumColorExtractor.DecodeGlassStageTextures(
+                art.ImageBytes.Span,
+                coverDimension: 320,
+                backdropDimension: 320);
+            _cachedCoverArt = cover;
+            _cachedLightBlur = blur;
+        }
+        catch
+        {
+            DisposeCachedTextures();
+        }
+    }
+
+    private void DrawAlbumArtBlurBackdrop(
+        SKCanvas canvas,
+        SKRect rect,
+        FrameRenderPacket packet,
+        AlbumAccentPalette palette)
+    {
+        var w = rect.Width;
+        var h = rect.Height;
+        var isPlaying = packet.PlaybackSnapshot?.IsPlaying ?? true;
+        var t = packet.ReducedMotion || !isPlaying ? 0f : _meshTimeSec;
+        var audio = packet.EffectiveAudioMetrics;
+        var bass = Math.Clamp(audio.BassEnergy, 0f, 1.5f);
+
+        var deepTone = StyleLayoutHelper.BlendSrgb(new RgbColor(12, 10, 16), palette.AccentColor1, 0.38f);
+        var warmTone = StyleLayoutHelper.BlendSrgb(new RgbColor(10, 9, 14), palette.AccentColor2, 0.34f);
+
+        _linear2Colors[0] = deepTone.ToSkColor();
+        _linear2Colors[1] = warmTone.ToSkColor();
+        using (var baseGrad = SKShader.CreateLinearGradient(new SKPoint(0f, 0f), new SKPoint(w, h), _linear2Colors, _linear2Stops, SKShaderTileMode.Clamp))
+        {
+            _fillPaint.Shader = baseGrad;
+            _fillPaint.Color = SKColors.White;
+            canvas.DrawRect(rect, _fillPaint);
+            _fillPaint.Shader = null;
+        }
+
+        var coverSource = _cachedLightBlur ?? _cachedCoverArt;
+        if (coverSource is not null)
+        {
+            var breathe = packet.ReducedMotion || !isPlaying ? 1.10f : 1.10f + (bass * 0.03f) + (0.018f * MathF.Sin(t * 0.28f));
+            var scale = MathF.Max(w / Math.Max(1f, coverSource.Width), h / Math.Max(1f, coverSource.Height)) * breathe;
+            var drawW = coverSource.Width * scale;
+            var drawH = coverSource.Height * scale;
+            var driftX = packet.ReducedMotion || !isPlaying ? 0f : MathF.Sin(t * 0.22f) * (w * 0.024f);
+            var driftY = packet.ReducedMotion || !isPlaying ? 0f : MathF.Cos(t * 0.19f) * (h * 0.022f);
+            var dest = new SKRect(
+                ((w - drawW) * 0.5f) + driftX,
+                ((h - drawH) * 0.5f) + driftY,
+                ((w + drawW) * 0.5f) + driftX,
+                ((h + drawH) * 0.5f) + driftY);
+
+            var alpha = (byte)Math.Clamp(MathF.Round((0.82f + (bass * 0.10f)) * 255f), 0f, 246f);
+            _imagePaint.Color = SKColors.White.WithAlpha(alpha);
+            _imagePaint.ImageFilter = _backdropLightBlur;
+            try
+            {
+                canvas.DrawImage(coverSource, dest, LinearSampling, _imagePaint);
+            }
+            finally
+            {
+                _imagePaint.ImageFilter = null;
+            }
+        }
+        else
+        {
+            DrawSoftOrb(canvas, rect, new SKPoint(w * 0.28f, h * 0.42f), MathF.Max(w, h) * 0.72f, palette.AccentColor1, 0.52f);
+            DrawSoftOrb(canvas, rect, new SKPoint(w * 0.75f, h * 0.56f), MathF.Max(w, h) * 0.64f, palette.AccentColor2, 0.44f);
+        }
+
+        _radialColors[0] = deepTone.ToSkColorWithAlpha(0.24f);
+        _radialColors[1] = new SKColor(0, 0, 0, 82);
+        _radialColors[2] = warmTone.ToSkColorWithAlpha(0.38f);
+        using (var scrim = SKShader.CreateLinearGradient(new SKPoint(0f, 0f), new SKPoint(w, h), _radialColors, _radialStops, SKShaderTileMode.Clamp))
+        {
+            _fillPaint.Shader = scrim;
+            _fillPaint.Color = SKColors.White;
+            canvas.DrawRect(rect, _fillPaint);
+            _fillPaint.Shader = null;
+        }
+
+        if (packet.BottomFadeToBlack)
+        {
+            var fadeTop = rect.Height * 0.72f;
+            using var fade = SKShader.CreateLinearGradient(
+                new SKPoint(rect.MidX, fadeTop),
+                new SKPoint(rect.MidX, rect.Bottom),
+                _fadeColors,
+                _fadeStops,
+                SKShaderTileMode.Clamp);
+            _fillPaint.Shader = fade;
+            _fillPaint.Color = SKColors.White;
+            try
+            {
+                canvas.DrawRect(new SKRect(rect.Left, fadeTop, rect.Right, rect.Bottom), _fillPaint);
+            }
+            finally
+            {
+                _fillPaint.Shader = null;
+            }
+        }
     }
 
     private void DrawPureBlackBackdrop(SKCanvas canvas, SKRect rect, AlbumAccentPalette palette)

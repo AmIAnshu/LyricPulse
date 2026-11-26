@@ -715,6 +715,267 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
         (p.SafeZoneDip.TopDip + p.SafeZoneDip.HeightDip).Should().BeLessThanOrEqualTo(1032.0 - 32.0 + 0.01, "lyric SafeZone remains inside WorkingArea above taskbar");
     }
 
+    [Fact]
+    public void EdgeGlowRenderer_NeonRush_VisiblyRevolvesPerimeterAcrossFramesWhileCenterStaysClear()
+    {
+        var doc = new DemoSongProvider(new LyricsParser(), new TitleNormalizer()).GetDemoDocument();
+        using var fonts = new FontAssetRegistry();
+        using var shaders = new ShaderLibrary();
+        using var pool = new OffscreenSurfacePool();
+        using var legibility = new LegibilityPipeline();
+        using var edgeGlow = new EdgeGlowRenderer();
+
+        var settings = AppSettings.Default with
+        {
+            EdgeGlowMode = EdgeGlowMode.NeonRush,
+            EdgeGlowDesktopEnabled = true,
+            EdgeGlowAnimation = EdgeGlowAnimationMode.AmbientDrift,
+            EdgeGlowSpeed = 1.4f,
+            EdgeGlowThickness = 1.35f,
+            EdgeGlowSpill = 1.2f,
+            EdgeGlowOverrideAlbumColors = true,
+            EdgeGlowPrimaryColor = new RgbColor(0x00, 0xE5, 0xFF),
+            EdgeGlowSecondaryColor = new RgbColor(0xFF, 0x2E, 0x93)
+        };
+
+        var pos = TimeSpan.FromSeconds(4.0);
+        var snap = new OverlayPlaybackSnapshot(
+            Track: doc.Track,
+            Document: doc,
+            LyricsStatus: LyricsStatus.Synced,
+            PlaybackState: MediaPlaybackState.Playing,
+            PlayerKind: MediaPlayerKind.Unknown,
+            SourceAppUserModelId: "Demo",
+            RawPosition: pos,
+            EffectivePosition: pos,
+            ActiveSlice: ActiveLyricSlice.Resolve(doc, pos),
+            ActivePalette: AlbumAccentPalette.DemoNeonHorizon,
+            TargetPalette: AlbumAccentPalette.DemoNeonHorizon,
+            TimingOffset: new TimingOffsetState(null, TimeSpan.Zero, false),
+            Settings: settings,
+            IsPlaying: true,
+            IsDemoMode: true,
+            IsFullscreenHidden: false,
+            PausedSinceUtc: null,
+            LastOffsetNudgeUtc: null,
+            TrackGeneration: 1,
+            SeekGeneration: 0,
+            AudioMetrics: CreateAudio());
+
+        var info = new SKImageInfo(640, 360, SKColorType.Bgra8888, SKAlphaType.Premul);
+
+        static long ComputePerimeterSampleHash(SKBitmap bmp)
+        {
+            long hash = 17;
+            for (var x = 20; x < bmp.Width - 20; x += 24)
+            {
+                var top = bmp.GetPixel(x, 3);
+                var bottom = bmp.GetPixel(x, bmp.Height - 4);
+                hash = unchecked((hash * 31) + top.Red + (top.Green * 3) + (top.Blue * 7) + top.Alpha);
+                hash = unchecked((hash * 31) + bottom.Red + (bottom.Green * 3) + (bottom.Blue * 7) + bottom.Alpha);
+            }
+            for (var y = 20; y < bmp.Height - 20; y += 24)
+            {
+                var left = bmp.GetPixel(3, y);
+                var right = bmp.GetPixel(bmp.Width - 4, y);
+                hash = unchecked((hash * 31) + left.Red + (left.Green * 3) + (left.Blue * 7) + left.Alpha);
+                hash = unchecked((hash * 31) + right.Red + (right.Green * 3) + (right.Blue * 7) + right.Alpha);
+            }
+            return hash;
+        }
+
+        // Frame A (t = 0.05s)
+        using var sA = SKSurface.Create(info);
+        sA.Canvas.Clear(SKColors.Transparent);
+        var pktA = OverlayFrameAdapter.FromPlaybackSnapshot(snap, 640f, 360f, 1.0f, 0.05, 1f / 60f, surfaceMode: StageRenderSurfaceMode.DesktopOverlay, allowDesktopEdgeGlow: true, renderDesktopLyrics: false);
+        var ctxA = new StyleRenderContext(sA.Canvas, null, fonts, shaders, pool, legibility, pktA, false, false);
+        edgeGlow.Render(in ctxA);
+        using var bmpA = SKBitmap.FromImage(sA.Snapshot());
+        var hashA = ComputePerimeterSampleHash(bmpA);
+
+        // Advance phase ~0.72s across 36 frames so the dual beams travel visibly around edges
+        for (var i = 1; i <= 36; i++)
+        {
+            using var sStep = SKSurface.Create(info);
+            sStep.Canvas.Clear(SKColors.Transparent);
+            var pktStep = OverlayFrameAdapter.FromPlaybackSnapshot(snap, 640f, 360f, 1.0f, 0.05 + (i * 0.02), 0.02f, surfaceMode: StageRenderSurfaceMode.DesktopOverlay, allowDesktopEdgeGlow: true, renderDesktopLyrics: false);
+            var ctxStep = new StyleRenderContext(sStep.Canvas, null, fonts, shaders, pool, legibility, pktStep, false, false);
+            edgeGlow.Render(in ctxStep);
+        }
+
+        // Frame B (t = 0.77s)
+        using var sB = SKSurface.Create(info);
+        sB.Canvas.Clear(SKColors.Transparent);
+        var pktB = OverlayFrameAdapter.FromPlaybackSnapshot(snap, 640f, 360f, 1.0f, 0.79, 0.02f, surfaceMode: StageRenderSurfaceMode.DesktopOverlay, allowDesktopEdgeGlow: true, renderDesktopLyrics: false);
+        var ctxB = new StyleRenderContext(sB.Canvas, null, fonts, shaders, pool, legibility, pktB, false, false);
+        edgeGlow.Render(in ctxB);
+        using var bmpB = SKBitmap.FromImage(sB.Snapshot());
+        var hashB = ComputePerimeterSampleHash(bmpB);
+
+        hashB.Should().NotBe(hashA, "Neon Rush perimeter beams must visibly revolve around the screen edges across time");
+        bmpB.GetPixel(320, 180).Alpha.Should().Be(0, "center desktop must remain unobstructed during Neon Rush revolution");
+    }
+
+    [Fact]
+    public void StageBackdropRenderer_AlbumArtBlur_WorksAcrossAllStylesAndDoesNotBlackOutUnderNeonRush()
+    {
+        var doc = new DemoSongProvider(new LyricsParser(), new TitleNormalizer()).GetDemoDocument();
+        using var fonts = new FontAssetRegistry();
+        using var shaders = new ShaderLibrary();
+        using var pool = new OffscreenSurfacePool();
+        using var legibility = new LegibilityPipeline();
+        using var backdrop = new StageBackdropRenderer();
+
+        using var artBmp = new SKBitmap(48, 48);
+        artBmp.Erase(new SKColor(0xE0, 0x24, 0x24, 0xFF));
+        using var artImg = SKImage.FromBitmap(artBmp);
+        using var artData = artImg.Encode(SKEncodedImageFormat.Png, 100);
+        var pngBytes = artData.ToArray();
+
+        var artPayload = new AlbumArtPayload("test-red-art", pngBytes);
+
+        var settings = AppSettings.Default with
+        {
+            ActiveStyle = OverlayStyleId.Fisheye,
+            StageBackdropMode = StageBackdropMode.AlbumArtBlur,
+            EdgeGlowMode = EdgeGlowMode.NeonRush
+        };
+
+        var pos = TimeSpan.FromSeconds(5.0);
+        var snap = new OverlayPlaybackSnapshot(
+            Track: doc.Track,
+            Document: doc,
+            LyricsStatus: LyricsStatus.Synced,
+            PlaybackState: MediaPlaybackState.Playing,
+            PlayerKind: MediaPlayerKind.Unknown,
+            SourceAppUserModelId: "Demo",
+            RawPosition: pos,
+            EffectivePosition: pos,
+            ActiveSlice: ActiveLyricSlice.Resolve(doc, pos),
+            ActivePalette: AlbumAccentPalette.DemoNeonHorizon,
+            TargetPalette: AlbumAccentPalette.DemoNeonHorizon,
+            TimingOffset: new TimingOffsetState(null, TimeSpan.Zero, false),
+            Settings: settings,
+            IsPlaying: true,
+            IsDemoMode: true,
+            IsFullscreenHidden: false,
+            PausedSinceUtc: null,
+            LastOffsetNudgeUtc: null,
+            TrackGeneration: 1,
+            SeekGeneration: 0,
+            AlbumArt: artPayload,
+            AudioMetrics: CreateAudio());
+
+        var pkt = OverlayFrameAdapter.FromPlaybackSnapshot(snap, 640f, 360f, 1.0f, 1.2, 1f / 60f, surfaceMode: StageRenderSurfaceMode.StageCanvas);
+        pkt.StageBackdrop.Should().Be(StageBackdropMode.AlbumArtBlur);
+        pkt.Palette.ScrimTint.Should().Be(AlbumAccentPalette.DemoNeonHorizon.ScrimTint, "AlbumArtBlur mode must preserve palette and artwork backdrop even when NeonRush is selected");
+
+        var info = new SKImageInfo(640, 360, SKColorType.Bgra8888, SKAlphaType.Premul);
+        using var surface = SKSurface.Create(info);
+        surface.Canvas.Clear(SKColors.Transparent);
+        var ctx = new StyleRenderContext(surface.Canvas, null, fonts, shaders, pool, legibility, pkt, false, false);
+        backdrop.Render(in ctx);
+        using var bmp = SKBitmap.FromImage(surface.Snapshot());
+
+        var p1 = bmp.GetPixel(160, 90);
+        var p2 = bmp.GetPixel(500, 250);
+        ((int)p1.Red).Should().BeGreaterThan(p1.Green + 35, "blurred red album cover must color non-Glass stages");
+        ((int)p2.Red).Should().BeGreaterThan(p2.Green + 35, "full-bleed album blur must extend across the entire stage");
+    }
+
+    [Fact]
+    public void VinylGrooveStyleRenderer_AppleMusicSplitStage_RendersLeftCoverScrubberAndRightContextLyrics()
+    {
+        var doc = new DemoSongProvider(new LyricsParser(), new TitleNormalizer()).GetDemoDocument();
+        using var fonts = new FontAssetRegistry();
+        using var shaders = new ShaderLibrary();
+        using var pool = new OffscreenSurfacePool();
+        using var legibility = new LegibilityPipeline();
+        using var router = new LyricStyleRouter();
+
+        using var artBmp = new SKBitmap(64, 64);
+        artBmp.Erase(new SKColor(0xD9, 0x38, 0x1E, 0xFF));
+        using var artImg = SKImage.FromBitmap(artBmp);
+        using var artData = artImg.Encode(SKEncodedImageFormat.Png, 100);
+        var pngBytes = artData.ToArray();
+
+        var artPayload = new AlbumArtPayload("test-coral-art", pngBytes);
+
+        var settings = AppSettings.Default with
+        {
+            ActiveStyle = OverlayStyleId.VinylGroove,
+            StageBackdropMode = StageBackdropMode.PureBlack
+        };
+
+        var pos = TimeSpan.FromSeconds(5.2);
+        var snap = new OverlayPlaybackSnapshot(
+            Track: doc.Track,
+            Document: doc,
+            LyricsStatus: LyricsStatus.Synced,
+            PlaybackState: MediaPlaybackState.Playing,
+            PlayerKind: MediaPlayerKind.Unknown,
+            SourceAppUserModelId: "Demo",
+            RawPosition: pos,
+            EffectivePosition: pos,
+            ActiveSlice: ActiveLyricSlice.Resolve(doc, pos),
+            ActivePalette: AlbumAccentPalette.DemoNeonHorizon,
+            TargetPalette: AlbumAccentPalette.DemoNeonHorizon,
+            TimingOffset: new TimingOffsetState(null, TimeSpan.Zero, false),
+            Settings: settings,
+            IsPlaying: true,
+            IsDemoMode: true,
+            IsFullscreenHidden: false,
+            PausedSinceUtc: null,
+            LastOffsetNudgeUtc: null,
+            TrackGeneration: 1,
+            SeekGeneration: 0,
+            AlbumArt: artPayload,
+            AudioMetrics: CreateAudio());
+
+        var pkt = OverlayFrameAdapter.FromPlaybackSnapshot(snap, 1280f, 720f, 1.0f, 2.0, 1f / 60f, surfaceMode: StageRenderSurfaceMode.StageCanvas);
+        for (var step = 0; step < 12; step++)
+        {
+            var stepPkt = OverlayFrameAdapter.FromPlaybackSnapshot(snap, 1280f, 720f, 1.0f, 1.6 + (step * 0.04), 0.04f, surfaceMode: StageRenderSurfaceMode.StageCanvas);
+            router.AdvancePhysics(in stepPkt);
+            pkt = stepPkt;
+        }
+
+        var cardRect = VinylGrooveStyleRenderer.ResolveCoverCardBounds(1280f, 720f, StageRenderSurfaceMode.StageCanvas);
+        cardRect.MidX.Should().BeLessThan(400f, "cover card sits on left column like Apple Music layout");
+        Math.Abs(cardRect.Width - cardRect.Height).Should().BeLessThan(1.0f, "cover card is square rounded art");
+
+        var info = new SKImageInfo(1280, 720, SKColorType.Bgra8888, SKAlphaType.Premul);
+        using var surface = SKSurface.Create(info);
+        surface.Canvas.Clear(SKColors.Black);
+        var ctx = new StyleRenderContext(surface.Canvas, null, fonts, shaders, pool, legibility, pkt, false, false);
+        router.Render(in ctx);
+        using var bmp = SKBitmap.FromImage(surface.Snapshot());
+
+        // Scrubber / metadata pixels under left cover card
+        var metaLitPixels = 0;
+        for (var y = (int)cardRect.Bottom + 8; y < Math.Min(710, (int)cardRect.Bottom + 90); y += 2)
+        {
+            for (var x = (int)cardRect.Left; x < (int)cardRect.Right; x += 4)
+            {
+                var px = bmp.GetPixel(x, y);
+                if (px.Red > 90 && px.Green > 90 && px.Blue > 90) metaLitPixels++;
+            }
+        }
+        metaLitPixels.Should().BeGreaterThan(20, "left column under cover card must render scrubber track, timestamps, and metadata");
+
+        // Right column scrolling context lyrics
+        var lyricLitPixels = 0;
+        for (var y = 120; y < 600; y += 3)
+        {
+            for (var x = 620; x < 1180; x += 4)
+            {
+                var px = bmp.GetPixel(x, y);
+                if (px.Red > 160 && px.Green > 160 && px.Blue > 160) lyricLitPixels++;
+            }
+        }
+        lyricLitPixels.Should().BeGreaterThan(120, "right column must render crisp white active and contextual 3D lyrics");
+    }
+
     private sealed class FakeSlowArtMediaProvider : IMediaSessionProvider
     {
         private readonly TaskCompletionSource<AlbumArtPayload?> _artTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);

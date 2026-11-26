@@ -1068,3 +1068,14 @@ button:focus-visible, input:focus-visible, a:focus-visible {
   background: transparent;
   cursor: pointer;
 }
+
+.hero-stage.is-glass-stage .hero-caption {
+  top: 16px;
+  left: 18px;
+  bottom: auto;
+  max-width: 280px;
+}
+
+.hero-stage.is-glass-stage .hero-desc {
+  display: none;
+}

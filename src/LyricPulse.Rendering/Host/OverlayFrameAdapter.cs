@@ -51,6 +51,7 @@ public static class OverlayFrameAdapter
         var activeEffectiveStyle = styleOverride ?? settings.ActiveStyle;
         var effectivePalette = surfaceMode == StageRenderSurfaceMode.StageCanvas &&
                                settings.EdgeGlowMode == EdgeGlowMode.NeonRush &&
+                               effectiveBackdrop != StageBackdropMode.AlbumArtBlur &&
                                activeEffectiveStyle != OverlayStyleId.VinylGroove
             ? snapshot.ActivePalette with { ScrimTint = new RgbColor(0, 0, 0) }
             : snapshot.ActivePalette;

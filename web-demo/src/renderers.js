@@ -190,11 +190,21 @@ export class StudioRenderer {
     const slice = resolveSlice(doc, songTimeSec);
     if (!slice.line) return;
 
-    const isNeonRush = settings.edgeGlowMode === 'NeonRush' && !isCompact && style.id !== 'VinylGroove';
+    const isNeonRushBlack = settings.edgeGlowMode === 'NeonRush'
+      && !isCompact
+      && style.id !== 'VinylGroove'
+      && settings.backdropMode !== 'AlbumArtBlur';
 
-    // 1. Backdrop (transparent in Overlay Sim unless pitch black Neon Rush; VinylGroove draws its own big blurred album room!)
+    const theme = this._computeHarmoniousVinylTheme(palette, realTimeSec, metrics.beatPulse, settings.reducedMotion);
+    if (coverCanvas) {
+      this._ensureGlassCoverTextures(coverCanvas);
+    }
+
+    // 1. Backdrop (Ambient Mesh, selectable Album Art Blur for ALL 11 styles, or Pure Black)
     if (style.id !== 'VinylGroove' && (!settings.overlaySim || isCompact)) {
-      if (isNeonRush) {
+      if (settings.backdropMode === 'AlbumArtBlur' && (this._lightBlurBgCanvas || this._glassCoverCanvas)) {
+        this.drawAlbumArtBackdrop(ctx, width, height, realTimeSec, metrics, settings, theme, isCompact);
+      } else if (settings.backdropMode === 'PureBlack' || isNeonRushBlack) {
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, width, height);
       } else {
@@ -224,7 +234,12 @@ export class StudioRenderer {
     ctx.save();
     const baseSize = clamp(Math.min(width * 0.056, height * 0.115) * (isCompact ? 1.15 : settings.lyricScale), 13, 64);
     const fontFamily = settings.fontFamily || 'Jost';
-    const rCtx = { ctx, width, height, realTimeSec, songTimeSec, slice, palette, metrics, settings, coverCanvas, isCompact, baseSize, fontFamily };
+    const rCtx = {
+      ctx, width, height, realTimeSec, songTimeSec, doc, slice, palette, metrics, settings, coverCanvas,
+      trackTitle: settings.trackTitle || 'Neon Horizon',
+      trackArtist: settings.trackArtist || 'LyricPulse · Demo Synth',
+      isCompact, baseSize, fontFamily, theme,
+    };
 
     switch (style.id) {
       case 'Fisheye': this.drawFisheye(rCtx, false); break;
@@ -334,8 +349,8 @@ export class StudioRenderer {
       : cPrimary;
 
     if (animMode !== 'Still') {
-      const musicDrive = animMode === 'MusicSync' ? (0.55 + metrics.bass * 0.85 + metrics.beatPulse * 0.55) : 0.36;
-      this.rushPhase = (this.rushPhase + dt * 0.19 * speed * musicDrive) % 1;
+      const musicDrive = animMode === 'MusicSync' ? (0.85 + metrics.bass * 1.15 + metrics.beatPulse * 0.70) : 0.62;
+      this.rushPhase = (this.rushPhase + dt * 0.42 * speed * musicDrive) % 1;
     }
 
     const pulseScale = animMode === 'MusicSync'
@@ -350,20 +365,37 @@ export class StudioRenderer {
     const isRush = mode === 'NeonRush';
     const isRim = mode === 'NeonRim';
 
+    const buildRevolvingBeamGradient = (lowAlpha, peakAlpha, withWhiteCrest) => {
+      const grad = ctx.createConicGradient(this.rushPhase * Math.PI * 2, w * 0.5, h * 0.5);
+      if (isRush && animMode !== 'Still') {
+        grad.addColorStop(0.00, hexToRgba(cPrimary, peakAlpha));
+        grad.addColorStop(0.08, withWhiteCrest ? 'rgba(255, 255, 255, 0.98)' : hexToRgba(cPrimary, peakAlpha));
+        grad.addColorStop(0.18, hexToRgba(cSecondary, peakAlpha * 0.78));
+        grad.addColorStop(0.32, hexToRgba(cPrimary, lowAlpha));
+        grad.addColorStop(0.46, hexToRgba(cSecondary, lowAlpha * 1.15));
+        grad.addColorStop(0.54, hexToRgba(cSecondary, peakAlpha * 0.92));
+        grad.addColorStop(0.62, withWhiteCrest ? 'rgba(255, 255, 255, 0.92)' : hexToRgba(cSecondary, peakAlpha));
+        grad.addColorStop(0.72, hexToRgba(cPrimary, peakAlpha * 0.72));
+        grad.addColorStop(0.86, hexToRgba(cSecondary, lowAlpha));
+        grad.addColorStop(1.00, hexToRgba(cPrimary, peakAlpha));
+      } else {
+        grad.addColorStop(0.00, hexToRgba(cPrimary, peakAlpha));
+        grad.addColorStop(0.32, hexToRgba(cPrimary, peakAlpha * 0.92));
+        grad.addColorStop(0.58, hexToRgba(cSecondary, peakAlpha * 0.92));
+        grad.addColorStop(0.84, hexToRgba(cSecondary, peakAlpha * 0.88));
+        grad.addColorStop(1.00, hexToRgba(cPrimary, peakAlpha));
+      }
+      return grad;
+    };
+
     ctx.save();
     ctx.beginPath();
     ctx.roundRect(0, 0, w, h, radius);
     ctx.clip();
 
-    // Pass 1: Wide inward Lumn Gaussian glow wash hugging rounded edges
+    // Pass 1: Wide inward Lumn Gaussian glow wash hugging rounded edges (revolving orbital hotspots in NeonRush)
     const spillReach = clamp(minSide * 0.08 * spill * pulseScale, 16, minSide * 0.22);
-    const spillAlpha = isRush ? 0.62 : isRim ? 0.50 : 0.40;
-    const baseGrad = ctx.createConicGradient(this.rushPhase * Math.PI * 2, w * 0.5, h * 0.5);
-    baseGrad.addColorStop(0.00, hexToRgba(cPrimary, spillAlpha));
-    baseGrad.addColorStop(0.32, hexToRgba(cPrimary, spillAlpha * 0.92));
-    baseGrad.addColorStop(0.58, hexToRgba(cSecondary, spillAlpha * 0.92));
-    baseGrad.addColorStop(0.84, hexToRgba(cSecondary, spillAlpha * 0.88));
-    baseGrad.addColorStop(1.00, hexToRgba(cPrimary, spillAlpha));
+    const baseGrad = buildRevolvingBeamGradient(isRush ? 0.12 : 0.36, isRush ? 0.78 : isRim ? 0.56 : 0.44, false);
 
     ctx.strokeStyle = baseGrad;
     ctx.lineWidth = clamp(12 * thick * spill * pulseScale, 6, 48);
@@ -373,28 +405,27 @@ export class StudioRenderer {
     ctx.roundRect(2, 2, w - 4, h - 4, Math.max(6, radius - 2));
     ctx.stroke();
 
-    // Pass 2: Luminous bezel tube + Neon Rush moving spotlight
+    // Pass 2: Luminous bezel tube + Revolving Neon Rush comet tails
     if (isRush || isRim) {
-      const tubeGrad = ctx.createConicGradient(this.rushPhase * Math.PI * 2, w * 0.5, h * 0.5);
-      if (isRush && animMode !== 'Still') {
-        tubeGrad.addColorStop(0.00, hexToRgba(cPrimary, 0.30));
-        tubeGrad.addColorStop(0.42, hexToRgba(cSecondary, 0.35));
-        tubeGrad.addColorStop(0.68, hexToRgba(cPrimary, 0.88));
-        tubeGrad.addColorStop(0.82, 'rgba(255, 255, 255, 0.96)');
-        tubeGrad.addColorStop(0.92, hexToRgba(cSecondary, 0.72));
-        tubeGrad.addColorStop(1.00, hexToRgba(cPrimary, 0.30));
-      } else {
-        tubeGrad.addColorStop(0.00, hexToRgba(cPrimary, 0.78));
-        tubeGrad.addColorStop(0.55, hexToRgba(cSecondary, 0.76));
-        tubeGrad.addColorStop(1.00, hexToRgba(cPrimary, 0.78));
-      }
-
+      const tubeGrad = buildRevolvingBeamGradient(isRush ? 0.09 : 0.72, 0.96, isRush);
       ctx.shadowBlur = clamp(minSide * 0.025 * thick, 6, 22);
       ctx.shadowColor = cSecondary;
       ctx.strokeStyle = tubeGrad;
-      ctx.lineWidth = clamp(3.2 * thick * (0.95 + metrics.beatPulse * 0.25), 2, 12);
+      ctx.lineWidth = clamp(3.4 * thick * (0.95 + metrics.beatPulse * 0.28), 2, 12);
       ctx.beginPath();
       ctx.roundRect(3, 3, w - 6, h - 6, Math.max(4, radius - 3));
+      ctx.stroke();
+    }
+
+    // Pass 3: Razor-sharp Neon Rush orbital rim filament
+    if (isRush) {
+      const coreGrad = buildRevolvingBeamGradient(0.05, 1.0, true);
+      ctx.shadowBlur = 4;
+      ctx.shadowColor = '#FFFFFF';
+      ctx.strokeStyle = coreGrad;
+      ctx.lineWidth = clamp(1.5 * thick, 1.2, 4.2);
+      ctx.beginPath();
+      ctx.roundRect(2, 2, w - 4, h - 4, Math.max(4, radius - 2));
       ctx.stroke();
     }
     ctx.restore();
@@ -761,84 +792,94 @@ export class StudioRenderer {
     });
   }
 
-  // Style 11: Glass Stage v4.0 — Lightly-Blurred Full Album Cover Room + Medium Apple GlassOS Cover Card + 3D Depth Lyrics!
-  drawVinylGroove({ ctx, width, height, realTimeSec, slice, palette, metrics, settings, coverCanvas, baseSize, fontFamily, isCompact }) {
-    this._ensureGlassCoverTextures(coverCanvas);
-    const theme = this._computeHarmoniousVinylTheme(palette, realTimeSec, metrics.beatPulse, settings.reducedMotion);
+  drawAlbumArtBackdrop(ctx, width, height, realTimeSec, metrics, settings, theme, isCompact) {
+    const bgGrad = ctx.createLinearGradient(0, 0, width, height);
+    bgGrad.addColorStop(0, theme.deepAmbient);
+    bgGrad.addColorStop(1, '#08090F');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, width, height);
 
-    const cardSide = clamp(Math.min(width * (isCompact ? 0.26 : 0.23), height * (isCompact ? 0.48 : 0.44)), isCompact ? 48 : 112, isCompact ? 116 : 232);
-    const cardCx = width * (isCompact ? 0.28 : 0.29);
-    const cardCy = height * 0.50;
+    const coverBg = this._lightBlurBgCanvas || this._glassCoverCanvas;
+    if (coverBg) {
+      ctx.save();
+      const breathe = settings.reducedMotion ? 1.10 : 1.10 + metrics.bass * 0.03 + Math.sin(realTimeSec * 0.28) * 0.016;
+      const fillScale = Math.max(width / coverBg.width, height / coverBg.height) * breathe;
+      const drawW = coverBg.width * fillScale;
+      const drawH = coverBg.height * fillScale;
+      const dx = settings.reducedMotion ? 0 : Math.sin(realTimeSec * 0.22) * width * 0.022;
+      const dy = settings.reducedMotion ? 0 : Math.cos(realTimeSec * 0.19) * height * 0.020;
+      ctx.globalAlpha = 0.80 + metrics.bass * 0.10;
+      ctx.filter = isCompact ? 'blur(5px)' : 'blur(12px)';
+      ctx.drawImage(coverBg, (width - drawW) * 0.5 + dx, (height - drawH) * 0.5 + dy, drawW, drawH);
+      ctx.filter = 'none';
+      ctx.restore();
+    }
+
+    // Soft luminance + directional contrast scrim keeping artwork color vibe while ensuring crisp legibility
+    const scrim = ctx.createLinearGradient(0, 0, width, height);
+    scrim.addColorStop(0.0, theme.deepAlpha(0.18));
+    scrim.addColorStop(0.45, 'rgba(6, 7, 14, 0.26)');
+    scrim.addColorStop(1.0, theme.deepAlpha(0.48));
+    ctx.fillStyle = scrim;
+    ctx.fillRect(0, 0, width, height);
+  }
+
+  _wrapWordRows(ctx, words, maxWidth, fontStr) {
+    ctx.save();
+    ctx.font = fontStr;
+    const rows = [];
+    let current = [];
+    let curW = 0;
+    const spaceW = ctx.measureText(' ').width;
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i];
+      const tokenW = ctx.measureText(w.text).width;
+      const needed = current.length === 0 ? tokenW : curW + spaceW + tokenW;
+      if (current.length > 0 && needed > maxWidth) {
+        rows.push(current);
+        current = [{ text: w.text, wordIdx: i, width: tokenW }];
+        curW = tokenW;
+      } else {
+        current.push({ text: w.text, wordIdx: i, width: tokenW });
+        curW = needed;
+      }
+    }
+    if (current.length > 0) rows.push(current);
+    ctx.restore();
+    return rows;
+  }
+
+  _formatClock(sec) {
+    const s = Math.max(0, Math.floor(sec || 0));
+    const m = Math.floor(s / 60);
+    const rem = s % 60;
+    return `${m}:${String(rem).padStart(2, '0')}`;
+  }
+
+  // Style 11: Glass Stage v4.1 — Apple-Music-Inspired Split Stage + Left Scrubber Card + Right Scrolling 3D Lyrics
+  drawVinylGroove({ ctx, width, height, realTimeSec, songTimeSec, doc, slice, palette, metrics, settings, coverCanvas, trackTitle, trackArtist, baseSize, fontFamily, isCompact, theme }) {
+    this._ensureGlassCoverTextures(coverCanvas);
+
+    const cardSide = isCompact
+      ? clamp(Math.min(width * 0.275, height * 0.48), 46, 108)
+      : clamp(Math.min(width * 0.275, height * 0.48), 112, 256);
+    const cardCx = width * 0.26;
+    const cardCy = height * 0.43;
     const cardX = cardCx - cardSide * 0.5;
     const cardY = cardCy - cardSide * 0.5;
-    const cardRadius = clamp(cardSide * 0.115, 8, 22);
+    const cardRadius = clamp(cardSide * 0.068, 5, 16);
 
-    const words = slice.line.words;
-    const activeWord = words[slice.wordIdx].text;
-    const yawDeg = settings.reducedMotion ? 0 : Math.sin(realTimeSec * 0.75) * 9.0;
-    const pitchDeg = settings.reducedMotion ? 0 : 5.5;
-    const rollDeg = settings.reducedMotion ? 0 : Math.cos(realTimeSec * 0.55) * 1.4;
-    const focal = 1080;
-
-    // Pass 0: Full-bleed lightly-blurred playing album cover background
+    // Pass 0: Lightly-blurred playing album cover background
     if (!settings.overlaySim || isCompact) {
-      const bgGrad = ctx.createLinearGradient(0, 0, width, height);
-      bgGrad.addColorStop(0, theme.deepAmbient);
-      bgGrad.addColorStop(1, '#090910');
-      ctx.fillStyle = bgGrad;
-      ctx.fillRect(0, 0, width, height);
-
-      const coverBg = this._lightBlurBgCanvas || this._glassCoverCanvas;
-      if (coverBg) {
-        ctx.save();
-        const breathe = settings.reducedMotion ? 1.10 : 1.10 + metrics.bass * 0.03 + Math.sin(realTimeSec * 0.28) * 0.016;
-        const fillScale = Math.max(width / coverBg.width, height / coverBg.height) * breathe;
-        const drawW = coverBg.width * fillScale;
-        const drawH = coverBg.height * fillScale;
-        const dx = settings.reducedMotion ? 0 : Math.sin(realTimeSec * 0.22) * width * 0.022;
-        const dy = settings.reducedMotion ? 0 : Math.cos(realTimeSec * 0.19) * height * 0.020;
-        ctx.globalAlpha = 0.80 + metrics.bass * 0.10;
-        ctx.filter = isCompact ? 'blur(5px)' : 'blur(12px)';
-        ctx.drawImage(coverBg, (width - drawW) * 0.5 + dx, (height - drawH) * 0.5 + dy, drawW, drawH);
-        ctx.filter = 'none';
-        ctx.restore();
+      if (settings.backdropMode === 'PureBlack') {
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(0, 0, width, height);
+      } else {
+        this.drawAlbumArtBackdrop(ctx, width, height, realTimeSec, metrics, settings, theme, isCompact);
       }
-
-      // Soft GlassOS luminance wash preserving artwork vibe & guaranteeing readable lyric contrast
-      const scrim = ctx.createLinearGradient(0, 0, width, height);
-      scrim.addColorStop(0, theme.deepAlpha(0.20));
-      scrim.addColorStop(0.5, 'rgba(6, 7, 14, 0.28)');
-      scrim.addColorStop(1, theme.deepAlpha(0.42));
-      ctx.fillStyle = scrim;
-      ctx.fillRect(0, 0, width, height);
     }
 
-    // Pass 1: Back-plane 3D words behind focal plane
-    const heroAnchorX = isCompact ? width * 0.68 : width * 0.67;
-    const orbitAngle = settings.reducedMotion ? 0.5 : realTimeSec * 0.65;
-    const wordOrbitItems = words.map((w, i) => {
-      const ang = orbitAngle + (i / Math.max(1, words.length)) * Math.PI * 2;
-      const rx = cardSide * 0.95;
-      const rz = 120;
-      const x = heroAnchorX + Math.cos(ang) * rx;
-      const z = Math.sin(ang) * rz;
-      const y = cardCy + ((i % 3) - 1) * baseSize * 0.95;
-      return { text: w.text, x, y, z, active: i === slice.wordIdx };
-    });
-
-    const backWords = wordOrbitItems.filter((w) => !w.active && w.z >= 10).sort((a, b) => b.z - a.z);
-    const frontWords = wordOrbitItems.filter((w) => !w.active && w.z < 10).sort((a, b) => b.z - a.z);
-
-    if (!isCompact) {
-      for (const bw of backWords) {
-        const p = project3D(bw.x, bw.y, bw.z, pitchDeg, yawDeg, rollDeg, focal, heroAnchorX, cardCy);
-        const fs = Math.round(baseSize * 0.62 * p.scale);
-        drawLegibleWord(ctx, bw.text, p.x, p.y, `700 ${fs}px '${fontFamily}', sans-serif`, theme.tertiary, 0.45);
-      }
-      drawLegibleWord(ctx, slice.prev.text, heroAnchorX, cardCy - baseSize * 1.85, `600 ${Math.round(baseSize * 0.46)}px '${fontFamily}', sans-serif`, theme.secondaryAlpha(0.60), 0.42);
-    }
-
-    // Pass 2: Medium Apple GlassOS Album Cover Card (clean rounded square art, NO vinyl platter/tonearm)
+    // Pass 1: Sleek Square Rounded Album Cover Card (with subtle beat glow & GlassOS rim)
     ctx.save();
     ctx.shadowColor = 'rgba(0, 0, 0, 0.58)';
     ctx.shadowBlur = isCompact ? 14 : 34;
@@ -856,7 +897,6 @@ export class StudioRenderer {
       ctx.clip();
       ctx.drawImage(this._glassCoverCanvas, cardX, cardY, cardSide, cardSide);
 
-      // Apple Liquid Glass top sheen overlay
       const glaze = ctx.createLinearGradient(cardX, cardY, cardX + cardSide * 0.45, cardY + cardSide);
       glaze.addColorStop(0, 'rgba(255, 255, 255, 0.22)');
       glaze.addColorStop(0.32, 'rgba(255, 255, 255, 0.04)');
@@ -866,33 +906,185 @@ export class StudioRenderer {
       ctx.restore();
     }
 
-    // Specular Glass rim outline
     const rimGrad = ctx.createLinearGradient(cardX, cardY, cardX + cardSide, cardY + cardSide);
-    rimGrad.addColorStop(0, 'rgba(255, 255, 255, 0.62)');
-    rimGrad.addColorStop(1, theme.primaryAlpha(0.32));
+    rimGrad.addColorStop(0, 'rgba(255, 255, 255, 0.58)');
+    rimGrad.addColorStop(1, theme.primaryAlpha(0.34));
     ctx.strokeStyle = rimGrad;
-    ctx.lineWidth = isCompact ? 1.1 : 1.5;
+    ctx.lineWidth = isCompact ? 1.0 : 1.4;
     ctx.beginPath();
     ctx.roundRect(cardX, cardY, cardSide, cardSide, cardRadius);
     ctx.stroke();
 
-    // Pass 3: Front-plane orbiting words & extruded active hero word
+    // Pass 2: Left Column Scrubber Bar, Timestamps & Track Metadata directly under cover card
     if (!isCompact) {
-      for (const fw of frontWords) {
-        const p = project3D(fw.x, fw.y, fw.z, pitchDeg, yawDeg, rollDeg, focal, heroAnchorX, cardCy);
-        const fs = Math.round(baseSize * 0.68 * p.scale);
-        drawLegibleWord(ctx, fw.text, p.x, p.y, `700 ${fs}px '${fontFamily}', sans-serif`, theme.secondary, 0.72);
-      }
+      const durationSec = Math.max(1, doc?.durationSec || 36);
+      const pct = clamp((songTimeSec || 0) / durationSec, 0, 1);
+      const barY = cardY + cardSide + clamp(height * 0.040, 12, 24);
+      const barH = 4;
+
+      ctx.save();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
+      ctx.beginPath();
+      ctx.roundRect(cardX, barY, cardSide, barH, 2);
+      ctx.fill();
+
+      const fillW = Math.max(4, cardSide * pct);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+      ctx.beginPath();
+      ctx.roundRect(cardX, barY, fillW, barH, 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#FFFFFF';
+      ctx.shadowColor = theme.primary;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(cardX + fillW, barY + barH * 0.5, 4.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      const timeFs = clamp(Math.round(cardSide * 0.056), 10, 13);
+      ctx.save();
+      ctx.font = `600 ${timeFs}px 'JetBrains Mono', monospace`;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
+      ctx.textBaseline = 'top';
+      ctx.textAlign = 'left';
+      ctx.fillText(this._formatClock(songTimeSec), cardX, barY + 10);
+      ctx.textAlign = 'right';
+      ctx.fillText(this._formatClock(durationSec), cardX + cardSide, barY + 10);
+
+      const metaCenterX = cardCx;
+      const titleFs = clamp(Math.round(cardSide * 0.088), 14, 21);
+      const artistFs = clamp(Math.round(cardSide * 0.068), 11, 16);
+      ctx.textAlign = 'center';
+      ctx.font = `700 ${titleFs}px '${fontFamily}', sans-serif`;
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillText(trackTitle, metaCenterX, barY + 29, cardSide * 1.18);
+
+      ctx.font = `500 ${artistFs}px '${fontFamily}', sans-serif`;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.74)';
+      ctx.fillText(trackArtist, metaCenterX, barY + 29 + titleFs * 1.28, cardSide * 1.18);
+      ctx.restore();
+    } else {
+      // Compact scrubber hint for Style Gallery card
+      const barY = cardY + cardSide + 7;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+      ctx.fillRect(cardX, barY, cardSide, 2);
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(cardX, barY, cardSide * 0.56, 2);
     }
 
-    const heroProj = project3D(heroAnchorX, cardCy - baseSize * 0.12, -78, pitchDeg, yawDeg, rollDeg, focal, heroAnchorX, cardCy);
-    const heroSize = Math.round(baseSize * (isCompact ? 1.05 : 1.38) * heroProj.scale);
-    drawLegibleWord(ctx, activeWord, heroProj.x + 6, heroProj.y + 6, `900 ${heroSize}px '${fontFamily}', sans-serif`, theme.secondaryAlpha(0.38), 0);
-    drawLegibleWord(ctx, activeWord, heroProj.x + 3, heroProj.y + 3, `900 ${heroSize}px '${fontFamily}', sans-serif`, theme.primaryAlpha(0.56), 0);
-    drawLegibleWord(ctx, activeWord, heroProj.x, heroProj.y, `900 ${heroSize}px '${fontFamily}', sans-serif`, '#FFFFFF', 0.88);
+    // Pass 3: Right Column — Apple-Music-style Left-Aligned Vertical Scrolling 3D Lyrics
+    const lines = doc?.lines || [];
+    const activeIdx = slice.lineIndex ?? 0;
+    const colX = isCompact ? width * 0.48 : width * 0.475;
+    const colMaxW = Math.max(90, width * 0.465);
+    const activeFontSize = isCompact
+      ? clamp(baseSize * 0.76, 11, 18)
+      : clamp(baseSize * 0.62 * (settings.lyricScale || 1), 17, 32);
+    const ctxFontActive = `800 ${Math.round(activeFontSize)}px '${fontFamily}', sans-serif`;
+    const ctxFontPassive = `700 ${Math.round(activeFontSize * 0.90)}px '${fontFamily}', sans-serif`;
+    const rowStep = activeFontSize * 1.24;
+    const lineGap = activeFontSize * (isCompact ? 0.42 : 0.62);
 
-    if (!isCompact) {
-      drawLegibleWord(ctx, slice.line.text, heroAnchorX, cardCy + baseSize * 1.48, `600 ${Math.round(baseSize * 0.46)}px '${fontFamily}', sans-serif`, theme.tertiary, 0.68);
+    const offsets = isCompact ? [-1, 0, 1] : [-2, -1, 0, 1, 2, 3];
+    const blocks = [];
+    for (const rel of offsets) {
+      const idx = activeIdx + rel;
+      if (idx < 0 || idx >= lines.length) continue;
+      const lineObj = lines[idx];
+      const fnt = rel === 0 ? ctxFontActive : ctxFontPassive;
+      const rows = this._wrapWordRows(ctx, lineObj.words, colMaxW, fnt);
+      blocks.push({ rel, rows, font: fnt, height: rows.length * rowStep });
+    }
+
+    const activeBlock = blocks.find((b) => b.rel === 0);
+    const activeAnchorY = height * (isCompact ? 0.50 : 0.45);
+    const activeTopY = activeAnchorY - (activeBlock ? activeBlock.height * 0.5 : 0);
+
+    // Position blocks above and below the vertically centered active lyric line
+    const positioned = [];
+    if (activeBlock) positioned.push({ ...activeBlock, topY: activeTopY });
+
+    let cursorUp = activeTopY - lineGap;
+    for (const b of blocks.filter((x) => x.rel < 0).sort((a, b2) => b2.rel - a.rel)) {
+      const topY = cursorUp - b.height;
+      positioned.push({ ...b, topY });
+      cursorUp = topY - lineGap;
+    }
+
+    let cursorDown = activeTopY + (activeBlock ? activeBlock.height : rowStep) + lineGap;
+    for (const b of blocks.filter((x) => x.rel > 0).sort((a, b2) => a.rel - b2.rel)) {
+      positioned.push({ ...b, topY: cursorDown });
+      cursorDown += b.height + lineGap;
+    }
+
+    const yawDeg = settings.reducedMotion ? 0 : Math.sin(realTimeSec * 0.68) * 3.8;
+    const focal = 1120;
+
+    for (const block of positioned) {
+      const dist = Math.abs(block.rel);
+      const isAct = block.rel === 0;
+      const zBase = isAct ? -14 : dist === 1 ? 65 : dist === 2 ? 135 : 200;
+      const baseAlpha = isAct ? 1.0 : dist === 1 ? 0.40 : dist === 2 ? 0.24 : 0.12;
+
+      block.rows.forEach((rowTokens, rIdx) => {
+        const yRaw = block.topY + rIdx * rowStep + rowStep * 0.5;
+        if (yRaw < -rowStep || yRaw > height + rowStep) return;
+
+        const proj = project3D(colX, yRaw, zBase, 0, yawDeg, 0, focal, width * 0.70, activeAnchorY);
+        const yDraw = proj.y;
+        const scale = isAct ? 1.0 : proj.scale;
+
+        ctx.save();
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        let cursorX = colX;
+
+        if (!isAct) {
+          const fs = Math.max(9, Math.round(activeFontSize * 0.90 * scale));
+          ctx.font = `700 ${fs}px '${fontFamily}', sans-serif`;
+          const textLine = rowTokens.map((t) => t.text).join(' ');
+          ctx.fillStyle = `rgba(255, 255, 255, ${baseAlpha.toFixed(3)})`;
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
+          ctx.shadowBlur = 10;
+          ctx.fillText(textLine, cursorX, yDraw);
+        } else {
+          // Active Line: bright crisp white with word-level 3D Z-depth extrusion + chromatic bloom
+          const baseFs = Math.round(activeFontSize);
+          ctx.font = `800 ${baseFs}px '${fontFamily}', sans-serif`;
+          const spaceW = ctx.measureText(' ').width;
+
+          for (const tok of rowTokens) {
+            const isWordActive = tok.wordIdx === slice.wordIdx;
+            const isWordSung = tok.wordIdx <= slice.wordIdx;
+            const popScale = isWordActive && !isCompact
+              ? (1.07 + (settings.reducedMotion ? 0 : metrics.beatPulse * 0.045))
+              : 1.0;
+            const wordFs = Math.round(baseFs * popScale);
+            const yShift = isWordActive && !isCompact ? -1.5 : 0;
+
+            ctx.font = `800 ${wordFs}px '${fontFamily}', sans-serif`;
+            const wWidth = ctx.measureText(tok.text).width;
+
+            if (isWordActive && !isCompact && !settings.reducedMotion) {
+              // 3D layered chromatic depth shadows behind popping word
+              ctx.fillStyle = theme.secondaryAlpha(0.32);
+              ctx.fillText(tok.text, cursorX + 3.2, yDraw + yShift + 3.2);
+              ctx.fillStyle = theme.primaryAlpha(0.42);
+              ctx.fillText(tok.text, cursorX + 1.6, yDraw + yShift + 1.6);
+            }
+
+            ctx.shadowColor = isWordActive ? theme.primaryAlpha(0.75) : 'rgba(255, 255, 255, 0.25)';
+            ctx.shadowBlur = isWordActive ? 16 : 6;
+            ctx.fillStyle = isWordSung ? '#FFFFFF' : 'rgba(255, 255, 255, 0.62)';
+            ctx.fillText(tok.text, cursorX, yDraw + yShift);
+
+            ctx.font = `800 ${baseFs}px '${fontFamily}', sans-serif`;
+            cursorX += (tok.width || wWidth) + spaceW;
+          }
+        }
+        ctx.restore();
+      });
     }
   }
 }

@@ -38,7 +38,8 @@ public enum StageBackdropMode
 {
     AmbientPartyMesh = 0,
     PureBlack = 1,
-    TransparentOverlay = 2
+    TransparentOverlay = 2,
+    AlbumArtBlur = 3
 }
 
 public enum EdgeGlowMode
@@ -256,6 +257,12 @@ public sealed record AppSettings
         var normalizedEdgeGlowSpill = !float.IsFinite(EdgeGlowSpill) || EdgeGlowSpill <= 0f
             ? DefaultEdgeGlowSpill
             : Math.Clamp(EdgeGlowSpill, MinEdgeGlowSpill, MaxEdgeGlowSpill);
+        var normalizedEdgePrimary = EdgeGlowPrimaryColor == default
+            ? Default.EdgeGlowPrimaryColor
+            : EdgeGlowPrimaryColor;
+        var normalizedEdgeSecondary = EdgeGlowSecondaryColor == default
+            ? Default.EdgeGlowSecondaryColor
+            : EdgeGlowSecondaryColor;
         var normalizedVisualizerMode = Enum.IsDefined(AudioVisualizerMode)
             ? AudioVisualizerMode
             : AudioVisualizerMode.RadialHalo;
@@ -292,6 +299,8 @@ public sealed record AppSettings
             EdgeGlowThickness = normalizedEdgeGlowThickness,
             EdgeGlowAnimation = normalizedEdgeGlowAnimation,
             EdgeGlowSpill = normalizedEdgeGlowSpill,
+            EdgeGlowPrimaryColor = normalizedEdgePrimary,
+            EdgeGlowSecondaryColor = normalizedEdgeSecondary,
             AudioVisualizerMode = normalizedVisualizerMode,
             AudioVisualizerIntensity = normalizedVisualizerIntensity,
             PerDisplayBounds = bounds,

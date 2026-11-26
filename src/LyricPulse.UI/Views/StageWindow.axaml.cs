@@ -609,7 +609,7 @@ public partial class StageWindow : Window, IDisposable
         var w = (float)Math.Max(HeroStageContainer.Bounds.Width > 1.0 ? HeroStageContainer.Bounds.Width : Bounds.Width, 320.0);
         var h = (float)Math.Max(HeroStageContainer.Bounds.Height > 1.0 ? HeroStageContainer.Bounds.Height : HeroStageContainer.Height, 240.0);
         var rect = VinylGrooveStyleRenderer.ResolveCoverCardBounds(w, h, StageRenderSurfaceMode.StageCanvas);
-        var radius = Math.Clamp(Math.Min(rect.Width, rect.Height) * 0.115f, 10f, 24f);
+        var radius = Math.Clamp(Math.Min(rect.Width, rect.Height) * 0.068f, 6f, 16f);
 
         Canvas.SetLeft(GlassCoverHoverZone, rect.Left);
         Canvas.SetTop(GlassCoverHoverZone, rect.Top);

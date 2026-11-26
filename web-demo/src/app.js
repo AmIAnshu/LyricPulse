@@ -23,6 +23,7 @@ const state = {
   filter: 'All',
   previewsPaused: false,
   settings: {
+    backdropMode: 'AmbientPartyMesh',
     fontFamily: 'Jost',
     lyricScale: 1.0,
     edgeGlowMode: 'NeonRush',
@@ -223,15 +224,16 @@ function syncPlayUI() {
 function syncGlassCoverZone() {
   if (!el.glassCoverZone || !el.heroStage) return;
   const isGlass = activeStyle().id === 'VinylGroove';
-  el.glassCoverZone.hidden = !isGlass;
+  el.heroStage.classList.toggle('is-glass-stage', isGlass);
+  setElHidden(el.glassCoverZone, !isGlass);
   if (!isGlass) return;
   const rect = el.heroStage.getBoundingClientRect();
   const w = Math.max(320, rect.width);
   const h = Math.max(240, rect.height);
-  const cardSide = Math.max(112, Math.min(232, Math.min(w * 0.23, h * 0.44)));
-  const cardCx = w * 0.29;
-  const cardCy = h * 0.50;
-  const radius = Math.max(8, Math.min(22, cardSide * 0.115));
+  const cardSide = Math.max(112, Math.min(256, Math.min(w * 0.275, h * 0.48)));
+  const cardCx = w * 0.26;
+  const cardCy = h * 0.43;
+  const radius = Math.max(6, Math.min(16, cardSide * 0.068));
   el.glassCoverZone.style.left = `${cardCx - cardSide * 0.5}px`;
   el.glassCoverZone.style.top = `${cardCy - cardSide * 0.5}px`;
   el.glassCoverZone.style.width = `${cardSide}px`;
@@ -318,6 +320,14 @@ document.querySelectorAll('.filter-chips .chip').forEach((btn) => {
 });
 
 // Settings bindings
+document.querySelectorAll('#backdropModeRow .seg').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#backdropModeRow .seg').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.settings.backdropMode = btn.dataset.backdrop;
+  });
+});
+
 document.querySelectorAll('#fontSelector .seg').forEach((btn) => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('#fontSelector .seg').forEach((b) => b.classList.remove('active'));
@@ -525,7 +535,11 @@ function tick(nowMs) {
       style: activeStyle(),
       palette: resolvePalette(),
       metrics,
-      settings: state.settings,
+      settings: {
+        ...state.settings,
+        trackTitle: el.trackTitle?.textContent || 'Neon Horizon',
+        trackArtist: el.trackArtist?.textContent || 'LyricPulse · Demo Synth',
+      },
       coverCanvas: state.coverCanvas,
       isCompact: false,
     });

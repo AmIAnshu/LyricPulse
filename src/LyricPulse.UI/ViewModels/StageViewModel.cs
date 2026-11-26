@@ -705,6 +705,7 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
     public Color ActivePaletteColor3 => ToAvaloniaColor(_snapshot.ActivePalette.AccentColor3);
 
     public bool IsAmbientPartyMesh => _snapshot.Settings.StageBackdropMode == StageBackdropMode.AmbientPartyMesh;
+    public bool IsAlbumArtBackdrop => _snapshot.Settings.StageBackdropMode == StageBackdropMode.AlbumArtBlur;
     public bool IsPureBlackBackdrop => _snapshot.Settings.StageBackdropMode == StageBackdropMode.PureBlack;
 
     public bool ShowFollowingDot
@@ -1185,6 +1186,7 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(ManualHex2));
             OnPropertyChanged(nameof(ManualHex3));
             OnPropertyChanged(nameof(IsAmbientPartyMesh));
+            OnPropertyChanged(nameof(IsAlbumArtBackdrop));
             OnPropertyChanged(nameof(IsPureBlackBackdrop));
             OnPropertyChanged(nameof(ShowFollowingDot));
             OnPropertyChanged(nameof(ShowColorSweepLayer));
