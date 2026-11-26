@@ -9,12 +9,31 @@
 </p>
 
 <p align="center">
+  <a href="https://lyricpulse.vercel.app"><img src="https://img.shields.io/badge/Live%20Demo-lyricpulse.vercel.app-5B54EC?style=for-the-badge&logo=vercel&logoColor=white" alt="Live Demo on Vercel"></a>
+  <a href="https://github.com/AmIAnshu/LyricPulse/releases/tag/v2.10"><img src="https://img.shields.io/badge/Download-v2.10%20(.EXE)-22C55E?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows v2.10 EXE"></a>
+</p>
+
+<p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/.NET-10.0-purple.svg" alt=".NET 10">
   <img src="https://img.shields.io/badge/Platform-Windows%2010%2B-0078D6.svg" alt="Windows 10+">
   <img src="https://img.shields.io/badge/Rendering-SkiaSharp%20GPU-orange.svg" alt="SkiaSharp">
   <img src="https://img.shields.io/badge/UI-Avalonia%20UI-green.svg" alt="Avalonia">
 </p>
+
+---
+
+## 🌐 Live Interactive Web Demo
+
+Try **LyricPulse Studio** directly in your browser without installing anything:
+
+👉 **[Launch Live Web Demo — lyricpulse.vercel.app](https://lyricpulse.vercel.app)**
+
+What you can test right on the web demo:
+- Switch live across all **11 kinetic visualization styles** (including the **3D Vinyl Groove Listening Room** and **Kinetic Wall**)
+- Enable the built-in **Web Audio Synth Soundtrack** or upload your own **`.mp3` / album cover / `.lrc`** files locally in your browser
+- Trigger **⚡ Drop Surge** Beat Drop explosions, spotlights & shockwaves
+- Adjust **Neon Rush** pitch-black edge glow speed & thickness, **Typography**, **Audio Visualizers**, **Overlay Simulation**, and **Reduced Motion**
 
 ---
 
@@ -53,7 +72,7 @@ LyricPulse is a **transparent desktop overlay** that syncs real-time lyrics with
 - ♿ **ReducedMotion Support** — Respects system accessibility settings for motion-sensitive users
 - 🖼️ **Album Art on Vinyl** — Vinyl Groove style shows your song's album cover photo cropped onto the spinning record
 - 🎭 **4 Color Themes** — Pure Studio, Vinyl Warm, Mint Pulse, and Monochrome
-- 🔄 **Demo Mode** — Built-in demo song for previewing all styles without music playing
+- 🔄 **Demo Mode & Web Studio** — Built-in demo song for previewing all styles offline or live in the browser at **[lyricpulse.vercel.app](https://lyricpulse.vercel.app)**
 
 ## 📸 Inspiration
 
@@ -61,7 +80,14 @@ LyricPulse is inspired by apps like [Verci](https://www.instagram.com/verci), br
 
 ## 🚀 Quick Start
 
-### Prerequisites
+### Option 1 — Download Ready-to-Run Windows Executable (No Setup Required)
+
+1. Download **`LyricPulse.App.exe`** from **[GitHub Releases (v2.10)](https://github.com/AmIAnshu/LyricPulse/releases/tag/v2.10)**.
+2. Double-click `LyricPulse.App.exe` on Windows 10 (1903+) / Windows 11 (x64) — self-contained single-file binary, no `.NET` install needed.
+
+### Option 2 — Build from Source
+
+#### Prerequisites
 
 - **Windows 10** version 1903 (19041) or later
 - **.NET 10 SDK** — [Download](https://dotnet.microsoft.com/download/dotnet/10.0)
@@ -129,6 +155,11 @@ LyricPulse.sln
 │       ├── Assets/                # App icon
 │       ├── Platform/              # Win32 interop, transparency, overlay window
 │       └── Tray/                  # System tray menu, style switcher
+│
+├── web-demo/                      # Interactive LyricPulse Studio browser demo (Vercel)
+│   ├── index.html
+│   ├── styles.css
+│   └── src/                       # Web Audio synth, FFT + Beat Drop & 11 Canvas renderers
 │
 └── tests/
     └── LyricPulse.Tests/          # xUnit + FluentAssertions test suite

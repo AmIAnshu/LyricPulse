@@ -5,7 +5,7 @@
 See: [.planning/PROJECT.md](PROJECT.md) · [.planning/ROADMAP.md](ROADMAP.md) · [.planning/REQUIREMENTS.md](REQUIREMENTS.md)
 
 **Core value:** Zero-friction, butter-smooth (60+ FPS) real-time synced kinetic lyrics rendered in an ambient party fullscreen stage (or optional click-through desktop overlay / OBS broadcast window) without DRM or cloud lock-in.
-**Current focus:** **v2.9 Vinyl Picture-Disc Album Cover, 3D Extruded Typography Stage & Arena Concert Beat Drop Overhaul Complete & Packaged** — Fixed JPEG/WebP `SKCodec` scaling via shared `SkiaAlbumColorExtractor.DecodeBoundedCoverImage`, expanded rotating center song album cover to `0.50R` (plus rich procedural sleeve cover in Demo/fallback), added 3D pinhole perspective tilt (`KineticWallStyleRenderer.Create3DPerspectiveMatrix`), 3-layer physical 3D word extrusion + chromatic beat split + background watermark beside the turntable, mastered LUFS sub-bass ratio drop detection, sweeping volumetric stadium light cones, dual-layer shockwaves, 110 swirl-curled sparks, and elastic bass tremor slam.
+**Current focus:** **v2.10 Kinetic Wall GPU 3D Text Corruption Fix, Vinyl Groove 3D Listening Room + Front/Back Orbiting 3D Text & Cropped Album Cutout, GitHub Release v2.10 & Live Vercel Web Studio Demo** — Eliminated Skia GPU glyph-atlas corruption in `KineticWallStyleRenderer` by moving 3D perspective projection to C# (`Project3DPoint`) and keeping `SKCanvas` matrices strictly affine; upgraded `VinylGrooveStyleRenderer` into a 4-pass 3D studio listening room with painter's-order Z-depth text orbiting behind and in front of the turntable, enlarged `0.54R` circularly-cropped album art with foil collar & punched center spindle hole, published MIT-licensed GitHub repo & v2.10 `.exe` Release, and added an interactive browser Web Studio demo deployed on Vercel.
 
 ## Progress Snapshot
 
@@ -27,7 +27,8 @@ See: [.planning/PROJECT.md](PROJECT.md) · [.planning/ROADMAP.md](ROADMAP.md) ·
 | **v2.6** | Single-Line SweepGradient Neon Rush, Monument Stage Kinetic Wall Overhaul & Deep Lyrics Sync Accuracy Upgrade | **DONE** | `b0d466a` | **305/305 tests pass · 0 warnings · Published `win-x64-latest` verified** |
 | **v2.7** | Node Line Botanical Vine, Spider's Web Silk Constellation & Environmental Album Chrome | **DONE** | `60cd182` | **310/310 tests pass · 0 warnings · Published `win-x64` verified** |
 | **v2.8** | Style #11 (`Vinyl Groove`) & Multi-Timescale Beat Drop Climax Engine + Concert Drop Suite | **DONE** | `b4cfbe0` | **314/314 tests pass · 0 warnings · Published `win-x64` verified** |
-| **v2.9** | Vinyl `0.50R` Picture-Disc Album Cover, 3D Extruded Typography Stage & Arena Concert Beat Drop Overhaul | **DONE** | *v2.9 release commit* | **314/314 tests pass · 0 warnings · Published `win-x64-v29` verified** |
+| **v2.9** | Vinyl `0.50R` Picture-Disc Album Cover, 3D Extruded Typography Stage & Arena Concert Beat Drop Overhaul | **DONE** | `7aa3ca5` | **314/314 tests pass · 0 warnings · Published `win-x64-v29` verified** |
+| **v2.10** | Kinetic Wall Affine 3D Fix, Vinyl Groove 3D Room (Front/Back Orbiting Words + Cropped Center), GitHub Release + Vercel Web Demo | **DONE** | `c5ff06f`, *release* | **MIT License · GitHub `AmIAnshu/LyricPulse` v2.10 `.exe` · Vercel Web Studio** |
 
 ## Verified v2.9 Release Metrics
 

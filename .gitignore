@@ -8,6 +8,7 @@ TestResults/
 coverage/
 artifacts/
 publish/
+.vercel/
 .DS_Store
 Thumbs.db
 

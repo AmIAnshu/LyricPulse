@@ -280,11 +280,13 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
         CountLitPixels(artBmp).Should().BeGreaterThan(700);
         var artHash = Convert.ToHexString(SHA256.HashData(artBmp.GetPixelSpan()));
 
-        // Verify platter center region actually displays bright pixels from decoded cover art
-        var platterCenterX = (int)(640 * 0.28f);
+        // Verify platter center region (0.30f) displays bright decoded album cover pixels with a punched center spindle hole
+        var platterCenterX = (int)(640 * 0.30f);
         var platterCenterY = (int)(360 * 0.50f);
-        var sampleAboveSpindle = artBmp.GetPixel(platterCenterX, platterCenterY - 22);
+        var sampleAboveSpindle = artBmp.GetPixel(platterCenterX, platterCenterY - 26);
         (sampleAboveSpindle.Red + sampleAboveSpindle.Green + sampleAboveSpindle.Blue).Should().BeGreaterThan(90);
+        var sampleSpindleHole = artBmp.GetPixel(platterCenterX, platterCenterY);
+        Math.Max(sampleSpindleHole.Red, Math.Max(sampleSpindleHole.Green, sampleSpindleHole.Blue)).Should().BeLessThan(35);
 
         // 2. Without AlbumArt -> procedural sleeve cover + TrackMoodVisual emblem
         var fallbackPkt = BuildPacket(demoDoc, settings, StageRenderSurfaceMode.StageCanvas, TimeSpan.FromSeconds(25.7), CreateAudio(), albumArt: null, moodVisual, renderTime: 1.25);
@@ -378,5 +380,58 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
         {
             Directory.Delete(tempDir, recursive: true);
         }
+    }
+
+    [Fact]
+    public void KineticWallStyleRenderer_Project3DPoint_And_Render_KeepCanvasStrictlyAffineAndNonDegenerate()
+    {
+        var (frontPt, frontScale) = KineticWallStyleRenderer.Project3DPoint(
+            420f, 180f, -32f,
+            KineticWallStyleRenderer.RestingPitchDegrees, -4f, 1f,
+            KineticWallStyleRenderer.PerspectiveFocalLength, 320f, 180f);
+        var (backPt, backScale) = KineticWallStyleRenderer.Project3DPoint(
+            420f, 180f, 85f,
+            KineticWallStyleRenderer.RestingPitchDegrees, -4f, 1f,
+            KineticWallStyleRenderer.PerspectiveFocalLength, 320f, 180f);
+
+        float.IsFinite(frontPt.X).Should().BeTrue();
+        float.IsFinite(frontPt.Y).Should().BeTrue();
+        float.IsFinite(backPt.X).Should().BeTrue();
+        float.IsFinite(backPt.Y).Should().BeTrue();
+        frontScale.Should().BeGreaterThan(backScale);
+
+        var doc = new DemoSongProvider(new LyricsParser(), new TitleNormalizer()).GetDemoDocument();
+        using var fonts = new FontAssetRegistry();
+        using var shaders = new ShaderLibrary();
+        using var pool = new OffscreenSurfacePool();
+        using var legibility = new LegibilityPipeline();
+        using var router = new LyricStyleRouter();
+
+        var info = new SKImageInfo(640, 360, SKColorType.Bgra8888, SKAlphaType.Premul);
+        var settings = AppSettings.Default with { ActiveStyle = OverlayStyleId.KineticWall, EdgeGlowMode = EdgeGlowMode.Off, AudioVisualizerMode = AudioVisualizerMode.None };
+
+        var stagePkt = BuildPacket(doc, settings, StageRenderSurfaceMode.StageCanvas, TimeSpan.FromSeconds(28.6), CreateAudio(), albumArt: null, moodVisual: null, renderTime: 1.5);
+        router.AdvancePhysics(in stagePkt);
+        using var stageSurf = SKSurface.Create(info);
+        var stageCtx = new StyleRenderContext(stageSurf.Canvas, null, fonts, shaders, pool, legibility, stagePkt, false, false);
+        router.Render(in stageCtx);
+        stageSurf.Canvas.TotalMatrix.Persp0.Should().Be(0f);
+        stageSurf.Canvas.TotalMatrix.Persp1.Should().Be(0f);
+        using var stageBmp = SKBitmap.FromImage(stageSurf.Snapshot());
+        CountLitPixels(stageBmp).Should().BeGreaterThan(500);
+
+        var deskPkt = BuildPacket(doc, settings, StageRenderSurfaceMode.DesktopOverlay, TimeSpan.FromSeconds(28.6), CreateAudio(), albumArt: null, moodVisual: null, renderTime: 2.0);
+        router.AdvancePhysics(in deskPkt);
+        using var deskSurf = SKSurface.Create(info);
+        deskSurf.Canvas.Clear(SKColors.Transparent);
+        var deskCtx = new StyleRenderContext(deskSurf.Canvas, null, fonts, shaders, pool, legibility, deskPkt, false, false);
+        router.Render(in deskCtx);
+        deskSurf.Canvas.TotalMatrix.Persp0.Should().Be(0f);
+        deskSurf.Canvas.TotalMatrix.Persp1.Should().Be(0f);
+        using var deskBmp = SKBitmap.FromImage(deskSurf.Snapshot());
+        deskBmp.GetPixel(0, 0).Alpha.Should().Be(0);
+        deskBmp.GetPixel(639, 0).Alpha.Should().Be(0);
+        deskBmp.GetPixel(0, 359).Alpha.Should().Be(0);
+        deskBmp.GetPixel(639, 359).Alpha.Should().Be(0);
     }
 }
