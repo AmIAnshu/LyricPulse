@@ -5,12 +5,12 @@
 <h1 align="center">LyricPulse</h1>
 
 <p align="center">
-  <b>Real-time desktop lyric visualizer with 11 cinematic styles, beat-drop detection, and GPU-accelerated rendering</b>
+  <b>Real-time desktop lyric visualizer with 11 cinematic styles, harmonious album color theming, and GPU-accelerated rendering</b>
 </p>
 
 <p align="center">
   <a href="https://lyricpulse.vercel.app"><img src="https://img.shields.io/badge/Live%20Demo-lyricpulse.vercel.app-5B54EC?style=for-the-badge&logo=vercel&logoColor=white" alt="Live Demo on Vercel"></a>
-  <a href="https://github.com/AmIAnshu/LyricPulse/releases/tag/v2.10"><img src="https://img.shields.io/badge/Download-v2.10%20(.EXE)-22C55E?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows v2.10 EXE"></a>
+  <a href="https://github.com/AmIAnshu/LyricPulse/releases/tag/v3.0"><img src="https://img.shields.io/badge/Download-v3.0%20(.EXE)-22C55E?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows v3.0 EXE"></a>
 </p>
 
 <p align="center">
@@ -32,7 +32,7 @@ Try **LyricPulse Studio** directly in your browser without installing anything:
 What you can test right on the web demo:
 - Switch live across all **11 kinetic visualization styles** (including the **3D Vinyl Groove Listening Room** and **Kinetic Wall**)
 - Enable the built-in **Web Audio Synth Soundtrack** or upload your own **`.mp3` / album cover / `.lrc`** files locally in your browser
-- Trigger **⚡ Drop Surge** Beat Drop explosions, spotlights & shockwaves
+- Watch **Vinyl Groove** bathe the entire 3D room in a **blurred album-color atmosphere** with harmonious accent cycling and a **strictly circular spinning vinyl center cover**
 - Adjust **Neon Rush** pitch-black edge glow speed & thickness, **Typography**, **Audio Visualizers**, **Overlay Simulation**, and **Reduced Motion**
 
 ---
@@ -41,7 +41,7 @@ What you can test right on the web demo:
 
 LyricPulse is a **transparent desktop overlay** that syncs real-time lyrics with whatever music is playing on your system (Spotify, Apple Music, YouTube Music, any app). It detects the currently playing song via **Windows GSMTC** (Global System Media Transport Controls), fetches time-synced lyrics, and renders them as stunning visual animations directly on your desktop — like a live music video for every song.
 
-> Think of it as **Verci / Moodsync / Musixmatch desktop lyrics, but with 11 cinematic visualization styles and beat-drop effects.**
+> Think of it as **Verci / Moodsync / Musixmatch desktop lyrics, but with 11 cinematic visualization styles and album-synced 3D visual atmospheres.**
 
 ## 🎨 11 Visualization Styles
 
@@ -63,14 +63,13 @@ LyricPulse is a **transparent desktop overlay** that syncs real-time lyrics with
 
 - 🎧 **Universal Music Detection** — Works with Spotify, Apple Music, YouTube Music, Tidal, or any media app via Windows GSMTC
 - 📝 **Real-Time Lyric Sync** — Fetches time-synced LRC lyrics and renders word-by-word with sub-200ms accuracy
-- 🎨 **Album Color Extraction** — Automatically extracts dominant colors from album art and themes the entire visualization
-- 💥 **Beat Drop Detection** — Detects climax/drop moments in songs and triggers explosive visual effects
+- 🎨 **Album Color Extraction & Cycling** — Extracts dominant OKLCH hues from album art, renders a blurred ambient room glow, and cycles matching accent tones harmoniously across player and lyrics
 - 🔊 **WASAPI Audio FFT** — Real-time loopback audio capture with FFT spectrum analysis for reactive visuals
 - 🖥️ **Transparent Desktop Overlay** — Click-through glass overlay sits on top of everything, no window borders
-- ⚡ **GPU-Accelerated** — SkiaSharp hardware-accelerated rendering at 60 FPS via ANGLE/D3D11
+- ⚡ **GPU-Accelerated** — SkiaSharp hardware-accelerated rendering at 60+ FPS via ANGLE/D3D11 with lock-free song switching
 - 🎛️ **Neon Rush Edge Glow** — Adjustable speed and thickness animated edge lighting synced to music energy
 - ♿ **ReducedMotion Support** — Respects system accessibility settings for motion-sensitive users
-- 🖼️ **Album Art on Vinyl** — Vinyl Groove style shows your song's album cover photo cropped onto the spinning record
+- 🖼️ **Circular Album Art on Vinyl** — Vinyl Groove style masks your album cover cleanly into a spinning circular LP center with 3D front/back orbiting lyrics
 - 🎭 **4 Color Themes** — Pure Studio, Vinyl Warm, Mint Pulse, and Monochrome
 - 🔄 **Demo Mode & Web Studio** — Built-in demo song for previewing all styles offline or live in the browser at **[lyricpulse.vercel.app](https://lyricpulse.vercel.app)**
 
@@ -82,7 +81,7 @@ LyricPulse is inspired by apps like [Verci](https://www.instagram.com/verci), br
 
 ### Option 1 — Download Ready-to-Run Windows Executable (No Setup Required)
 
-1. Download **`LyricPulse.App.exe`** from **[GitHub Releases (v2.10)](https://github.com/AmIAnshu/LyricPulse/releases/tag/v2.10)**.
+1. Download **`LyricPulse.App.exe`** from **[GitHub Releases (v3.0)](https://github.com/AmIAnshu/LyricPulse/releases/tag/v3.0)**.
 2. Double-click `LyricPulse.App.exe` on Windows 10 (1903+) / Windows 11 (x64) — self-contained single-file binary, no `.NET` install needed.
 
 ### Option 2 — Build from Source
@@ -159,7 +158,7 @@ LyricPulse.sln
 ├── web-demo/                      # Interactive LyricPulse Studio browser demo (Vercel)
 │   ├── index.html
 │   ├── styles.css
-│   └── src/                       # Web Audio synth, FFT + Beat Drop & 11 Canvas renderers
+│   └── src/                       # Web Audio synth, FFT & 11 Canvas renderers
 │
 └── tests/
     └── LyricPulse.Tests/          # xUnit + FluentAssertions test suite
@@ -188,16 +187,14 @@ LyricPulse.sln
 1. **Launch LyricPulse** — the app starts in the system tray
 2. **Play music** in any media player (Spotify, YouTube Music, Apple Music, etc.)
 3. **LyricPulse auto-detects** the song and fetches synced lyrics
-4. **Switch styles** via the tray icon right-click menu
-5. **Toggle Beat Drop effects** for extra intensity during song climaxes
-6. **Enable Demo Mode** to preview styles without music
+4. **Switch styles** via the tray icon right-click menu or stage gallery
+5. **Enable Demo Mode** to preview styles offline without active music
 
 ### System Tray Controls
 
 - **Right-click tray icon** → Switch between 11 styles
-- **Beat Drop toggle** → Enable/disable climax visual effects
 - **Demo Mode** → Preview with built-in demo song
-- **Settings** → Adjust Neon Rush speed/thickness, beat sensitivity
+- **Settings** → Adjust Neon Rush speed/thickness, typography, visualizer mode, and colors
 - **Exit** → Close the overlay
 
 ## 🤝 Contributing

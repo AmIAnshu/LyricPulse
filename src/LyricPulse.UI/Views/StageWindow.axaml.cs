@@ -157,6 +157,41 @@ public partial class StageWindow : Window, IDisposable
         UpdateVisibleStripCards();
     }
 
+    public void WakeStageCanvas()
+    {
+        if (_disposed || !IsVisible || WindowState == WindowState.Minimized)
+        {
+            return;
+        }
+
+        if (_heroHost is not null)
+        {
+            _heroHost.IsCardPaused = false;
+            _heroHost.RequestWake();
+        }
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (_disposed)
+        {
+            return;
+        }
+
+        if ((change.Property == WindowStateProperty && WindowState != WindowState.Minimized) ||
+            (change.Property == IsVisibleProperty && IsVisible))
+        {
+            if (_heroHost is not null)
+            {
+                _heroHost.IsCardPaused = false;
+                _heroHost.RequestWake();
+            }
+
+            UpdateVisibleStripCards();
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed)
@@ -446,7 +481,18 @@ public partial class StageWindow : Window, IDisposable
         }
         else if (e.PropertyName is nameof(StageViewModel.EffectivePreviewsPaused) or nameof(StageViewModel.ActiveStyle))
         {
+            _heroHost?.RequestWake();
             UpdateVisibleStripCards();
+        }
+        else if (e.PropertyName is nameof(StageViewModel.IsLoadingLyrics)
+                 or nameof(StageViewModel.LyricsVisible)
+                 or nameof(StageViewModel.MediaHealth))
+        {
+            if (_heroHost is not null && IsVisible && WindowState != WindowState.Minimized)
+            {
+                _heroHost.IsCardPaused = false;
+                _heroHost.RequestWake();
+            }
         }
         else if (e.PropertyName is nameof(StageViewModel.AudioVisualizerMode)
                  or nameof(StageViewModel.EdgeGlowMode)
@@ -454,6 +500,12 @@ public partial class StageWindow : Window, IDisposable
                  or nameof(StageViewModel.AlbumArtBitmap)
                  or nameof(StageViewModel.MediaTrackTitle))
         {
+            if (_heroHost is not null && IsVisible && WindowState != WindowState.Minimized)
+            {
+                _heroHost.IsCardPaused = false;
+                _heroHost.RequestWake();
+            }
+
             RefreshPausedCardThumbnails();
         }
         else if (e.PropertyName == nameof(StageViewModel.IsSettingsDrawerOpen) && !vm.IsSettingsDrawerOpen)

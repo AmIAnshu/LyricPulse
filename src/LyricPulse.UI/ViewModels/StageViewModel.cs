@@ -47,6 +47,12 @@ public enum ObsChromaKeyMode
 /// </summary>
 public sealed class StageViewModel : ViewModelBase, IDisposable
 {
+    private static readonly IBrush HealthGreenBrush = new SolidColorBrush(Color.Parse("#22C55E"));
+    private static readonly IBrush HealthAmberBrush = new SolidColorBrush(Color.Parse("#F59E0B"));
+    private static readonly IBrush HealthRedBrush = new SolidColorBrush(Color.Parse("#DC2626"));
+    private static readonly IBrush HealthIndigoBrush = new SolidColorBrush(Color.Parse("#818CF8"));
+    private static readonly IBrush HealthMutedBrush = new SolidColorBrush(Color.Parse("#8490A7"));
+
     private readonly OverlayRuntimeController _runtime;
     private readonly Func<HotkeyAction, string, (bool Ok, string? Error)>? _hotkeyValidator;
     private readonly Action<bool>? _onObsWindowRequested;
@@ -67,6 +73,7 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
     private HotkeyAction? _recordingHotkey;
     private Bitmap? _albumArtBitmap;
     private string? _albumArtHash;
+    private bool _cardsInitialized;
     private bool _disposed;
 
     private OverlayPlaybackSnapshot _snapshot;
@@ -266,7 +273,6 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
                 _ = SafeRunAsync(() => _runtime.SetAudioVisualizerModeAsync(parsed));
             }
         });
-        PreviewBeatDropCommand = new RelayCommand(() => _runtime.TriggerBeatDropPreview());
         SelectStyleByIndexCommand = new RelayCommand(p =>
         {
             if (p is int idx && idx >= 0 && idx < StyleCatalog.All.Length)
@@ -372,7 +378,6 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
     public ICommand SelectSecondaryLineCommand { get; }
     public ICommand SelectEdgeGlowModeCommand { get; }
     public ICommand SelectAudioVisualizerModeCommand { get; }
-    public ICommand PreviewBeatDropCommand { get; }
     public ICommand SelectStyleByIndexCommand { get; }
     public ICommand ApplyColorPresetCommand { get; }
     public ICommand SetStyleFilterCommand { get; }
@@ -862,52 +867,6 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public bool BeatDropEffectEnabled
-    {
-        get => _snapshot.Settings.BeatDropEffectEnabled;
-        set
-        {
-            if (_snapshot.Settings.BeatDropEffectEnabled != value)
-            {
-                _ = SafeRunAsync(() => _runtime.SetBeatDropEffectEnabledAsync(value));
-            }
-        }
-    }
-
-    public int BeatDropIntensityPercent
-    {
-        get => (int)Math.Round(_snapshot.Settings.BeatDropIntensity * 100f);
-        set
-        {
-            var clamped = Math.Clamp(value, 30, 150) / 100f;
-            if (Math.Abs(_snapshot.Settings.BeatDropIntensity - clamped) > 0.01f)
-            {
-                _ = SafeRunAsync(() => _runtime.SetBeatDropIntensityAsync(clamped));
-            }
-        }
-    }
-
-    public int BeatDropSensitivityPercent
-    {
-        get => (int)Math.Round(_snapshot.Settings.BeatDropSensitivity * 100f);
-        set
-        {
-            var clamped = Math.Clamp(value, 50, 160) / 100f;
-            if (Math.Abs(_snapshot.Settings.BeatDropSensitivity - clamped) > 0.01f)
-            {
-                _ = SafeRunAsync(() => _runtime.SetBeatDropSensitivityAsync(clamped));
-            }
-        }
-    }
-
-    public bool IsDropClimaxActive =>
-        BeatDropEffectEnabled && !_snapshot.IsEffectiveReducedMotion && _snapshot.EffectiveAudioMetrics.IsClimaxActive;
-
-    public string DropStatusLabel =>
-        !BeatDropEffectEnabled ? "Off" :
-        _snapshot.IsEffectiveReducedMotion ? "Reduced" :
-        _snapshot.EffectiveAudioMetrics.IsClimaxActive ? "DROP SURGE" : "Monitoring";
-
     public bool IsLiveSystemAudioActive => _snapshot.EffectiveAudioMetrics.IsLiveAudioActive;
     public string AudioStatusLabel => IsLiveSystemAudioActive ? "System Audio Live" : "Beat Sync";
     public string DiagnosticAudioLine => IsLiveSystemAudioActive
@@ -920,11 +879,11 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
     public bool IsReducedMotionToggleEnabled => !_snapshot.IsOsReducedMotion;
     public IBrush MediaHealthDotBrush => MediaHealth switch
     {
-        MediaHealthKind.PlayingSynced => new SolidColorBrush(Color.Parse("#22C55E")),
-        MediaHealthKind.Warning => new SolidColorBrush(Color.Parse("#F59E0B")),
-        MediaHealthKind.Error => new SolidColorBrush(Color.Parse("#DC2626")),
-        MediaHealthKind.Loading => new SolidColorBrush(Color.Parse("#818CF8")),
-        _ => new SolidColorBrush(Color.Parse("#8490A7"))
+        MediaHealthKind.PlayingSynced => HealthGreenBrush,
+        MediaHealthKind.Warning => HealthAmberBrush,
+        MediaHealthKind.Error => HealthRedBrush,
+        MediaHealthKind.Loading => HealthIndigoBrush,
+        _ => HealthMutedBrush
     };
 
     public bool IsDemoMode => _snapshot.IsDemoMode;
@@ -1064,139 +1023,195 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
     public void ApplySnapshot(OverlayPlaybackSnapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        var prevSettings = _snapshot.Settings;
+        var prev = _snapshot;
+        var prevSettings = prev.Settings;
         _snapshot = snapshot;
 
         var settings = snapshot.Settings;
-        foreach (var card in StyleCards)
+        var activeStyleChanged = prevSettings.ActiveStyle != settings.ActiveStyle;
+        var pinnedChanged = !prevSettings.PinnedStyles.SequenceEqual(settings.PinnedStyles);
+        if (!_cardsInitialized || activeStyleChanged || pinnedChanged)
         {
-            card.IsActive = card.StyleId == settings.ActiveStyle;
-            card.IsPinned = !settings.PinnedStyles.IsDefault && settings.PinnedStyles.Contains(card.StyleId);
-        }
-
-        if (StyleFilter == "Pinned" && !prevSettings.PinnedStyles.SequenceEqual(settings.PinnedStyles))
-        {
-            RebuildFilteredStyleCards();
-        }
-        else if (FilteredStyleCards.Count == 0 && StyleFilter == "All")
-        {
-            RebuildFilteredStyleCards();
-        }
-
-        foreach (var row in HotkeyRows)
-        {
-            if (settings.GlobalHotkeys.TryGetValue(row.Action, out var gesture))
+            _cardsInitialized = true;
+            foreach (var card in StyleCards)
             {
-                row.GestureText = gesture;
+                card.IsActive = card.StyleId == settings.ActiveStyle;
+                card.IsPinned = !settings.PinnedStyles.IsDefault && settings.PinnedStyles.Contains(card.StyleId);
             }
         }
 
-        OnPropertyChanged(nameof(SelectedStyleInfo));
-        OnPropertyChanged(nameof(ActiveStyle));
-        OnPropertyChanged(nameof(ActiveStyleIndex));
-        OnPropertyChanged(nameof(StyleCounterText));
-        OnPropertyChanged(nameof(IsActiveStylePinned));
-        OnPropertyChanged(nameof(ActivePinTooltip));
-        OnPropertyChanged(nameof(PinnedCount));
-        OnPropertyChanged(nameof(GalleryCountCaption));
-        OnPropertyChanged(nameof(FontFamily));
-        OnPropertyChanged(nameof(IsJostSelected));
-        OnPropertyChanged(nameof(IsBodoniSelected));
-        OnPropertyChanged(nameof(IsMulishSelected));
-        OnPropertyChanged(nameof(IsNunitoSelected));
-        OnPropertyChanged(nameof(FontScalePercent));
-        OnPropertyChanged(nameof(FullscreenStageScalePercent));
-        OnPropertyChanged(nameof(PartyEnergyPercent));
-        OnPropertyChanged(nameof(OverlayOpacityPercent));
-        OnPropertyChanged(nameof(SafeMarginPx));
-        OnPropertyChanged(nameof(AutoSyncColors));
-        OnPropertyChanged(nameof(ManualColor1));
-        OnPropertyChanged(nameof(ManualColor2));
-        OnPropertyChanged(nameof(ManualColor3));
-        OnPropertyChanged(nameof(ManualHex1));
-        OnPropertyChanged(nameof(ManualHex2));
-        OnPropertyChanged(nameof(ManualHex3));
-        OnPropertyChanged(nameof(ActivePaletteColor1));
-        OnPropertyChanged(nameof(ActivePaletteColor2));
-        OnPropertyChanged(nameof(ActivePaletteColor3));
-        OnPropertyChanged(nameof(IsAmbientPartyMesh));
-        OnPropertyChanged(nameof(IsPureBlackBackdrop));
-        OnPropertyChanged(nameof(ShowFollowingDot));
-        OnPropertyChanged(nameof(ShowColorSweepLayer));
-        OnPropertyChanged(nameof(DesktopOverlayEnabled));
-        OnPropertyChanged(nameof(LyricsVisible));
-        OnPropertyChanged(nameof(ReducedMotion));
-        OnPropertyChanged(nameof(IsOsReducedMotion));
-        OnPropertyChanged(nameof(EffectivePreviewsPaused));
-        OnPropertyChanged(nameof(IsPreviewsToggleEnabled));
-        OnPropertyChanged(nameof(PausePreviewsLabel));
-        OnPropertyChanged(nameof(HighContrastScrim));
-        OnPropertyChanged(nameof(UniversalPlayerMode));
-        OnPropertyChanged(nameof(HideDuringFullscreen));
-        OnPropertyChanged(nameof(AnchorZone));
-        OnPropertyChanged(nameof(IsAnchorTopCenter));
-        OnPropertyChanged(nameof(IsAnchorMiddleCenter));
-        OnPropertyChanged(nameof(IsAnchorBottomThird));
-        OnPropertyChanged(nameof(IsAnchorBottomLeft));
-        OnPropertyChanged(nameof(IsAnchorBottomRight));
-        OnPropertyChanged(nameof(ScrimIntensity));
-        OnPropertyChanged(nameof(IsScrimOff));
-        OnPropertyChanged(nameof(IsScrimSubtle));
-        OnPropertyChanged(nameof(IsScrimBalanced));
-        OnPropertyChanged(nameof(IsScrimStrong));
-        OnPropertyChanged(nameof(ThemeVariantMode));
-        OnPropertyChanged(nameof(IsThemeSystem));
-        OnPropertyChanged(nameof(IsThemeDark));
-        OnPropertyChanged(nameof(IsThemeLight));
-        OnPropertyChanged(nameof(SecondaryLineMode));
-        OnPropertyChanged(nameof(IsSecondaryOff));
-        OnPropertyChanged(nameof(IsSecondaryTranslation));
-        OnPropertyChanged(nameof(IsSecondaryRomanization));
-        OnPropertyChanged(nameof(EdgeGlowMode));
-        OnPropertyChanged(nameof(IsEdgeGlowOff));
-        OnPropertyChanged(nameof(IsEdgeGlowSoftAmbient));
-        OnPropertyChanged(nameof(IsEdgeGlowBeatPulse));
-        OnPropertyChanged(nameof(IsEdgeGlowNeonRim));
-        OnPropertyChanged(nameof(IsEdgeGlowNeonRush));
-        OnPropertyChanged(nameof(IsEdgeGlowActive));
-        OnPropertyChanged(nameof(EdgeGlowIntensityPercent));
-        OnPropertyChanged(nameof(EdgeGlowSpeedPercent));
-        OnPropertyChanged(nameof(EdgeGlowThicknessPercent));
-        OnPropertyChanged(nameof(AudioVisualizerMode));
-        OnPropertyChanged(nameof(IsVisNone));
-        OnPropertyChanged(nameof(IsVisSpectrumBars));
-        OnPropertyChanged(nameof(IsVisRadialHalo));
-        OnPropertyChanged(nameof(IsVisFluidWave));
-        OnPropertyChanged(nameof(IsVisParticleField));
-        OnPropertyChanged(nameof(IsVisBassHorizon));
-        OnPropertyChanged(nameof(AudioVisualizerIntensityPercent));
-        OnPropertyChanged(nameof(BeatDropEffectEnabled));
-        OnPropertyChanged(nameof(BeatDropIntensityPercent));
-        OnPropertyChanged(nameof(BeatDropSensitivityPercent));
-        OnPropertyChanged(nameof(IsDropClimaxActive));
-        OnPropertyChanged(nameof(DropStatusLabel));
-        OnPropertyChanged(nameof(IsLiveSystemAudioActive));
-        OnPropertyChanged(nameof(AudioStatusLabel));
-        OnPropertyChanged(nameof(DiagnosticAudioLine));
-        OnPropertyChanged(nameof(IsReducedMotionToggleEnabled));
-        OnPropertyChanged(nameof(IsDemoMode));
-        OnPropertyChanged(nameof(IsLoadingLyrics));
-        OnPropertyChanged(nameof(MediaTrackTitle));
-        OnPropertyChanged(nameof(MediaStatusLabel));
-        OnPropertyChanged(nameof(MediaHealth));
-        OnPropertyChanged(nameof(MediaHealthDotBrush));
-        OnPropertyChanged(nameof(ShowTroubleshootingPill));
-        OnPropertyChanged(nameof(CanAdjustOffset));
-        OnPropertyChanged(nameof(HasNonZeroOffset));
-        OnPropertyChanged(nameof(TimingOffsetDisplay));
-        OnPropertyChanged(nameof(DiagnosticGsmtcLine));
-        OnPropertyChanged(nameof(DiagnosticLyricsLine));
-        OnPropertyChanged(nameof(DiagnosticDisplaysLine));
+        if ((StyleFilter == "Pinned" && pinnedChanged) || (FilteredStyleCards.Count == 0 && StyleFilter == "All"))
+        {
+            RebuildFilteredStyleCards();
+        }
+
+        if (!ReferenceEquals(prevSettings.GlobalHotkeys, settings.GlobalHotkeys))
+        {
+            foreach (var row in HotkeyRows)
+            {
+                if (settings.GlobalHotkeys.TryGetValue(row.Action, out var gesture))
+                {
+                    row.GestureText = gesture;
+                }
+            }
+        }
+
+        if (activeStyleChanged)
+        {
+            OnPropertyChanged(nameof(SelectedStyleInfo));
+            OnPropertyChanged(nameof(ActiveStyle));
+            OnPropertyChanged(nameof(ActiveStyleIndex));
+            OnPropertyChanged(nameof(StyleCounterText));
+            OnPropertyChanged(nameof(IsActiveStylePinned));
+            OnPropertyChanged(nameof(ActivePinTooltip));
+        }
+        else if (pinnedChanged)
+        {
+            OnPropertyChanged(nameof(IsActiveStylePinned));
+            OnPropertyChanged(nameof(ActivePinTooltip));
+        }
+
+        if (pinnedChanged)
+        {
+            OnPropertyChanged(nameof(PinnedCount));
+            OnPropertyChanged(nameof(GalleryCountCaption));
+        }
+
+        var settingsChanged = !Equals(prevSettings, settings);
+        if (settingsChanged)
+        {
+            OnPropertyChanged(nameof(FontFamily));
+            OnPropertyChanged(nameof(IsJostSelected));
+            OnPropertyChanged(nameof(IsBodoniSelected));
+            OnPropertyChanged(nameof(IsMulishSelected));
+            OnPropertyChanged(nameof(IsNunitoSelected));
+            OnPropertyChanged(nameof(FontScalePercent));
+            OnPropertyChanged(nameof(FullscreenStageScalePercent));
+            OnPropertyChanged(nameof(PartyEnergyPercent));
+            OnPropertyChanged(nameof(OverlayOpacityPercent));
+            OnPropertyChanged(nameof(SafeMarginPx));
+            OnPropertyChanged(nameof(AutoSyncColors));
+            OnPropertyChanged(nameof(ManualColor1));
+            OnPropertyChanged(nameof(ManualColor2));
+            OnPropertyChanged(nameof(ManualColor3));
+            OnPropertyChanged(nameof(ManualHex1));
+            OnPropertyChanged(nameof(ManualHex2));
+            OnPropertyChanged(nameof(ManualHex3));
+            OnPropertyChanged(nameof(IsAmbientPartyMesh));
+            OnPropertyChanged(nameof(IsPureBlackBackdrop));
+            OnPropertyChanged(nameof(ShowFollowingDot));
+            OnPropertyChanged(nameof(ShowColorSweepLayer));
+            OnPropertyChanged(nameof(DesktopOverlayEnabled));
+            OnPropertyChanged(nameof(LyricsVisible));
+            OnPropertyChanged(nameof(ReducedMotion));
+            OnPropertyChanged(nameof(HighContrastScrim));
+            OnPropertyChanged(nameof(UniversalPlayerMode));
+            OnPropertyChanged(nameof(HideDuringFullscreen));
+            OnPropertyChanged(nameof(AnchorZone));
+            OnPropertyChanged(nameof(IsAnchorTopCenter));
+            OnPropertyChanged(nameof(IsAnchorMiddleCenter));
+            OnPropertyChanged(nameof(IsAnchorBottomThird));
+            OnPropertyChanged(nameof(IsAnchorBottomLeft));
+            OnPropertyChanged(nameof(IsAnchorBottomRight));
+            OnPropertyChanged(nameof(ScrimIntensity));
+            OnPropertyChanged(nameof(IsScrimOff));
+            OnPropertyChanged(nameof(IsScrimSubtle));
+            OnPropertyChanged(nameof(IsScrimBalanced));
+            OnPropertyChanged(nameof(IsScrimStrong));
+            OnPropertyChanged(nameof(ThemeVariantMode));
+            OnPropertyChanged(nameof(IsThemeSystem));
+            OnPropertyChanged(nameof(IsThemeDark));
+            OnPropertyChanged(nameof(IsThemeLight));
+            OnPropertyChanged(nameof(SecondaryLineMode));
+            OnPropertyChanged(nameof(IsSecondaryOff));
+            OnPropertyChanged(nameof(IsSecondaryTranslation));
+            OnPropertyChanged(nameof(IsSecondaryRomanization));
+            OnPropertyChanged(nameof(EdgeGlowMode));
+            OnPropertyChanged(nameof(IsEdgeGlowOff));
+            OnPropertyChanged(nameof(IsEdgeGlowSoftAmbient));
+            OnPropertyChanged(nameof(IsEdgeGlowBeatPulse));
+            OnPropertyChanged(nameof(IsEdgeGlowNeonRim));
+            OnPropertyChanged(nameof(IsEdgeGlowNeonRush));
+            OnPropertyChanged(nameof(IsEdgeGlowActive));
+            OnPropertyChanged(nameof(EdgeGlowIntensityPercent));
+            OnPropertyChanged(nameof(EdgeGlowSpeedPercent));
+            OnPropertyChanged(nameof(EdgeGlowThicknessPercent));
+            OnPropertyChanged(nameof(AudioVisualizerMode));
+            OnPropertyChanged(nameof(IsVisNone));
+            OnPropertyChanged(nameof(IsVisSpectrumBars));
+            OnPropertyChanged(nameof(IsVisRadialHalo));
+            OnPropertyChanged(nameof(IsVisFluidWave));
+            OnPropertyChanged(nameof(IsVisParticleField));
+            OnPropertyChanged(nameof(IsVisBassHorizon));
+            OnPropertyChanged(nameof(AudioVisualizerIntensityPercent));
+            OnPropertyChanged(nameof(DiagnosticDisplaysLine));
+        }
+
+        if (!Equals(prev.ActivePalette, snapshot.ActivePalette))
+        {
+            OnPropertyChanged(nameof(ActivePaletteColor1));
+            OnPropertyChanged(nameof(ActivePaletteColor2));
+            OnPropertyChanged(nameof(ActivePaletteColor3));
+        }
+
+        if (prev.IsOsReducedMotion != snapshot.IsOsReducedMotion ||
+            prev.IsEffectiveReducedMotion != snapshot.IsEffectiveReducedMotion ||
+            prevSettings.ReducedMotion != settings.ReducedMotion)
+        {
+            OnPropertyChanged(nameof(IsOsReducedMotion));
+            OnPropertyChanged(nameof(EffectivePreviewsPaused));
+            OnPropertyChanged(nameof(IsPreviewsToggleEnabled));
+            OnPropertyChanged(nameof(PausePreviewsLabel));
+            OnPropertyChanged(nameof(IsReducedMotionToggleEnabled));
+        }
+
+        var prevLevelPct = (int)Math.Round(prev.EffectiveAudioMetrics.OverallLevel * 100f);
+        var nextLevelPct = (int)Math.Round(snapshot.EffectiveAudioMetrics.OverallLevel * 100f);
+        if (prev.EffectiveAudioMetrics.IsLiveAudioActive != snapshot.EffectiveAudioMetrics.IsLiveAudioActive ||
+            (snapshot.EffectiveAudioMetrics.IsLiveAudioActive && prevLevelPct != nextLevelPct))
+        {
+            OnPropertyChanged(nameof(IsLiveSystemAudioActive));
+            OnPropertyChanged(nameof(AudioStatusLabel));
+            OnPropertyChanged(nameof(DiagnosticAudioLine));
+        }
+
+        var statusChanged =
+            prev.IsDemoMode != snapshot.IsDemoMode ||
+            prev.LyricsStatus != snapshot.LyricsStatus ||
+            prev.PlaybackState != snapshot.PlaybackState ||
+            prev.PlayerKind != snapshot.PlayerKind ||
+            !string.Equals(prev.SourceAppUserModelId, snapshot.SourceAppUserModelId, StringComparison.Ordinal) ||
+            !Equals(prev.Track, snapshot.Track) ||
+            !ReferenceEquals(prev.Document, snapshot.Document);
+
+        if (statusChanged)
+        {
+            OnPropertyChanged(nameof(IsDemoMode));
+            OnPropertyChanged(nameof(IsLoadingLyrics));
+            OnPropertyChanged(nameof(MediaTrackTitle));
+            OnPropertyChanged(nameof(MediaStatusLabel));
+            OnPropertyChanged(nameof(MediaHealth));
+            OnPropertyChanged(nameof(MediaHealthDotBrush));
+            OnPropertyChanged(nameof(ShowTroubleshootingPill));
+            OnPropertyChanged(nameof(CanAdjustOffset));
+            OnPropertyChanged(nameof(DiagnosticGsmtcLine));
+            OnPropertyChanged(nameof(DiagnosticLyricsLine));
+        }
+
+        var offsetChanged = !Equals(prev.TimingOffset, snapshot.TimingOffset);
+        if (offsetChanged)
+        {
+            OnPropertyChanged(nameof(HasNonZeroOffset));
+            OnPropertyChanged(nameof(TimingOffsetDisplay));
+        }
 
         UpdateAlbumArtBitmap(snapshot.AlbumArt);
 
-        NudgeOffsetCommand.RaiseCanExecuteChanged();
-        ResetOffsetCommand.RaiseCanExecuteChanged();
+        if (statusChanged || offsetChanged)
+        {
+            NudgeOffsetCommand.RaiseCanExecuteChanged();
+            ResetOffsetCommand.RaiseCanExecuteChanged();
+        }
     }
 
     public void Dispose()

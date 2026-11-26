@@ -182,6 +182,81 @@ public sealed class SkiaAlbumColorExtractor : IAlbumColorExtractor
         }
     }
 
+    public static (SKImage? CircularCover, SKImage? AmbientBlur) DecodeVinylAlbumTextures(
+        ReadOnlySpan<byte> imageBytes,
+        int coverDimension = 288,
+        int ambientDimension = 40)
+    {
+        using var squareCover = DecodeBoundedCoverImage(imageBytes, coverDimension);
+        if (squareCover is null)
+        {
+            return (null, null);
+        }
+
+        SKImage? circularCover = null;
+        SKImage? ambientBlur = null;
+        var side = Math.Clamp(Math.Min(squareCover.Width, squareCover.Height), 48, coverDimension);
+        var half = side * 0.5f;
+
+        // 1. Pre-bake a pixel-true circular alpha cutout + punched spindle cutout so GPU rotation NEVER shows a square box
+        var circleInfo = new SKImageInfo(side, side, SKColorType.Bgra8888, SKAlphaType.Premul);
+        using (var circleSurface = SKSurface.Create(circleInfo))
+        {
+            if (circleSurface is not null)
+            {
+                var canvas = circleSurface.Canvas;
+                canvas.Clear(SKColors.Transparent);
+
+                using var imgShader = squareCover.ToShader(
+                    SKShaderTileMode.Clamp,
+                    SKShaderTileMode.Clamp,
+                    new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear),
+                    SKMatrix.CreateScale(side / (float)squareCover.Width, side / (float)squareCover.Height));
+                using var fillPaint = new SKPaint
+                {
+                    IsAntialias = true,
+                    Style = SKPaintStyle.Fill,
+                    Shader = imgShader
+                };
+                canvas.DrawCircle(half, half, half - 1.5f, fillPaint);
+
+                using var holeClearPaint = new SKPaint
+                {
+                    IsAntialias = true,
+                    Style = SKPaintStyle.Fill,
+                    BlendMode = SKBlendMode.Clear
+                };
+                canvas.DrawCircle(half, half, Math.Max(3f, side * 0.082f), holeClearPaint);
+
+                circularCover = circleSurface.Snapshot();
+            }
+        }
+
+        // 2. Bake a velvety 40x40 blurred ambient backdrop texture ONCE on track switch (O(1) cost per render frame)
+        var blurSide = Math.Clamp(ambientDimension, 24, 64);
+        var blurInfo = new SKImageInfo(blurSide, blurSide, SKColorType.Bgra8888, SKAlphaType.Premul);
+        using (var blurSurface = SKSurface.Create(blurInfo))
+        {
+            if (blurSurface is not null)
+            {
+                var canvas = blurSurface.Canvas;
+                canvas.Clear(SKColors.Black);
+                using var blurFilter = SKImageFilter.CreateBlur(3.4f, 3.4f);
+                using var blurPaint = new SKPaint
+                {
+                    IsAntialias = true,
+                    ImageFilter = blurFilter
+                };
+                var bleed = blurSide * 0.14f;
+                var dst = new SKRect(-bleed, -bleed, blurSide + bleed, blurSide + bleed);
+                canvas.DrawImage(squareCover, new SKRect(0, 0, squareCover.Width, squareCover.Height), dst, LinearSampling, blurPaint);
+                ambientBlur = blurSurface.Snapshot();
+            }
+        }
+
+        return (circularCover, ambientBlur);
+    }
+
     private static SKBitmap? DecodeSafeBitmap(SKCodec codec, SKImageInfo codecInfo)
     {
         // Request decoder-level downscaling for large covers (e.g. 4000x4000 JPEG) to avoid giant allocations.

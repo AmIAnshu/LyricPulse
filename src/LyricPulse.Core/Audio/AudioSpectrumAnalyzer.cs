@@ -33,17 +33,6 @@ public sealed class AudioSpectrumAnalyzer
     private float _beatPulse;
     private float _prevBassFluxRef;
 
-    // Multi-timescale Beat Drop / Chorus Climax detector state
-    private float _dropSensitivity = AppSettings.DefaultBeatDropSensitivity;
-    private float _fastSubBass;
-    private float _slowRawSubBass = 0.012f;
-    private float _medEnergy;
-    private float _slowBaseline = 0.22f;
-    private float _buildupTension;
-    private float _dropTrigger;
-    private float _climaxIntensity;
-    private float _dropCooldownSec;
-
     private long _lastNonSilentTicks;
     private long _lastComputeTicks;
     private long _lastCacheTicks;
@@ -72,43 +61,6 @@ public sealed class AudioSpectrumAnalyzer
             {
                 _sampleRateHz = Math.Clamp(value, 8_000, 192_000);
             }
-        }
-    }
-
-    public float DropSensitivity
-    {
-        get
-        {
-            lock (_sync)
-            {
-                return _dropSensitivity;
-            }
-        }
-        set
-        {
-            lock (_sync)
-            {
-                _dropSensitivity = float.IsFinite(value)
-                    ? Math.Clamp(value, AppSettings.MinBeatDropSensitivity, AppSettings.MaxBeatDropSensitivity)
-                    : AppSettings.DefaultBeatDropSensitivity;
-                _hasCachedMetrics = false;
-            }
-        }
-    }
-
-    public void ResetBeatDropState()
-    {
-        lock (_sync)
-        {
-            _fastSubBass = 0f;
-            _slowRawSubBass = 0.012f;
-            _medEnergy = 0f;
-            _slowBaseline = 0.22f;
-            _buildupTension = 0f;
-            _dropTrigger = 0f;
-            _climaxIntensity = 0f;
-            _dropCooldownSec = 0f;
-            _hasCachedMetrics = false;
         }
     }
 
@@ -221,11 +173,9 @@ public sealed class AudioSpectrumAnalyzer
         var nowTicks = Stopwatch.GetTimestamp();
         bool useLive;
         float dtSec;
-        float sens;
 
         lock (_sync)
         {
-            sens = _dropSensitivity;
             if (!dtSecondsOverride.HasValue &&
                 _hasCachedMetrics &&
                 _cachedMetrics is not null &&
@@ -257,12 +207,6 @@ public sealed class AudioSpectrumAnalyzer
                 _smoothedMid *= MathF.Max(0f, 1f - (dtSec * 6f));
                 _smoothedTreble *= MathF.Max(0f, 1f - (dtSec * 6f));
                 _beatPulse = MathF.Max(0f, _beatPulse - (dtSec * 3.5f));
-                _fastSubBass *= MathF.Max(0f, 1f - (dtSec * 6f));
-                _medEnergy *= MathF.Max(0f, 1f - (dtSec * 1.5f));
-                _buildupTension = MathF.Max(0f, _buildupTension - (dtSec * 0.45f));
-                _dropTrigger = MathF.Max(0f, _dropTrigger - (dtSec / 0.48f));
-                _climaxIntensity = MathF.Max(0f, _climaxIntensity - (dtSec / 3.60f));
-                _dropCooldownSec = MathF.Max(0f, _dropCooldownSec - dtSec);
             }
             else
             {
@@ -275,17 +219,10 @@ public sealed class AudioSpectrumAnalyzer
             }
         }
 
-        return ComputeSyntheticPulse(timeSeconds, isPlaying, partyEnergy, sens);
+        return ComputeSyntheticPulse(timeSeconds, isPlaying, partyEnergy);
     }
 
-    public static AudioFrameMetrics ComputeSyntheticPulse(double timeSec, bool isPlaying, float partyEnergy) =>
-        ComputeSyntheticPulse(timeSec, isPlaying, partyEnergy, AppSettings.DefaultBeatDropSensitivity);
-
-    public static AudioFrameMetrics ComputeSyntheticPulse(
-        double timeSec,
-        bool isPlaying,
-        float partyEnergy,
-        float dropSensitivity)
+    public static AudioFrameMetrics ComputeSyntheticPulse(double timeSec, bool isPlaying, float partyEnergy)
     {
         if (!isPlaying)
         {
@@ -295,37 +232,15 @@ public sealed class AudioSpectrumAnalyzer
         var energy = float.IsFinite(partyEnergy)
             ? Math.Clamp(partyEnergy, AppSettings.MinPartyEnergyLevel, AppSettings.MaxPartyEnergyLevel)
             : 1.0f;
-        var sens = float.IsFinite(dropSensitivity)
-            ? Math.Clamp(dropSensitivity, AppSettings.MinBeatDropSensitivity, AppSettings.MaxBeatDropSensitivity)
-            : AppSettings.DefaultBeatDropSensitivity;
 
         var t = double.IsFinite(timeSec) ? timeSec : 0.0;
         var beatPhase = (t * 2.05) % 1.0; // ~123 BPM crisp groove
         var kick = MathF.Pow(MathF.Max(0f, 1f - (float)(beatPhase * 2.4)), 2.2f);
         var subWave = 0.24f + (0.28f * (0.5f + (0.5f * MathF.Sin((float)(t * 3.1)))));
 
-        // Choreographed demo climax surges synced cleanly to phrase peaks
-        var periodSec = sens >= 1.25f ? 8.0 : sens < 0.75f ? 18.0 : 12.0;
-        var dropTrigger = 0f;
-        var climaxIntensity = 0f;
-        if (t >= 1.5)
-        {
-            var dropPhase = (t + (periodSec * 0.5)) % periodSec;
-            if (dropPhase < 0.48)
-            {
-                dropTrigger = 1f - (float)(dropPhase / 0.48);
-            }
-
-            if (dropPhase < 3.40)
-            {
-                climaxIntensity = MathF.Pow(1f - (float)(dropPhase / 3.40), 1.35f);
-            }
-        }
-
-        var climaxLift = climaxIntensity * 0.22f;
-        var bass = Math.Clamp(((subWave + (kick * 0.52f)) * (0.75f + (0.25f * energy))) + climaxLift, 0.08f, 0.99f);
-        var mid = Math.Clamp((0.22f + (0.22f * MathF.Sin((float)(t * 4.7 + 0.8))) + (kick * 0.18f)) * energy * 0.8f + (climaxLift * 0.6f), 0.08f, 0.90f);
-        var treble = Math.Clamp((0.16f + (0.18f * MathF.Sin((float)(t * 8.9 + 2.1)))) * energy * 0.78f + (climaxLift * 0.5f), 0.05f, 0.85f);
+        var bass = Math.Clamp((subWave + (kick * 0.52f)) * (0.75f + (0.25f * energy)), 0.08f, 0.99f);
+        var mid = Math.Clamp((0.22f + (0.22f * MathF.Sin((float)(t * 4.7 + 0.8))) + (kick * 0.18f)) * energy * 0.8f, 0.08f, 0.90f);
+        var treble = Math.Clamp((0.16f + (0.18f * MathF.Sin((float)(t * 8.9 + 2.1)))) * energy * 0.78f, 0.05f, 0.85f);
 
         var bands = ImmutableArray.CreateBuilder<float>(BandCount);
         for (var i = 0; i < BandCount; i++)
@@ -344,12 +259,9 @@ public sealed class AudioSpectrumAnalyzer
             MidEnergy: mid,
             TrebleEnergy: treble,
             OverallLevel: Math.Clamp(overall, 0f, 1f),
-            BeatPulse: Math.Clamp((kick * (0.75f + (0.25f * energy))) + (dropTrigger * 0.35f), 0f, 1f),
+            BeatPulse: Math.Clamp(kick * (0.75f + (0.25f * energy)), 0f, 1f),
             IsLiveAudioActive: false,
-            SpectrumBands: bands.MoveToImmutable(),
-            DropTrigger: Math.Clamp(dropTrigger, 0f, 1f),
-            ClimaxIntensity: Math.Clamp(climaxIntensity, 0f, 1f),
-            IsClimaxActive: climaxIntensity >= 0.15f);
+            SpectrumBands: bands.MoveToImmutable());
     }
 
     private AudioFrameMetrics RunLiveFftLocked(float dtSec, float partyEnergy)
@@ -408,15 +320,8 @@ public sealed class AudioSpectrumAnalyzer
         var ratio = MathF.Pow(maxFreq / minFreq, 1f / BandCount);
 
         var framePeak = 0.001f;
-        var subBassRaw = 0f;
-        var subBassBins = 0;
-        var bassRaw = 0f;
-        var midRaw = 0f;
-        var trebleRaw = 0f;
-        var bassBins = 0;
-        var midBins = 0;
-        var trebleBins = 0;
-
+        float bassRaw = 0f, midRaw = 0f, trebleRaw = 0f;
+        int bassBins = 0, midBins = 0, trebleBins = 0;
         for (var b = 0; b < halfBins; b++)
         {
             var mag = MathF.Sqrt((_real[b] * _real[b]) + (_imag[b] * _imag[b])) * normFactor;
@@ -427,12 +332,6 @@ public sealed class AudioSpectrumAnalyzer
             }
 
             var freq = b * hzPerBin;
-            if (freq is >= 20f and <= 115f)
-            {
-                subBassRaw += mag;
-                subBassBins++;
-            }
-
             if (freq is >= 20f and <= 170f)
             {
                 bassRaw += mag;
@@ -450,7 +349,7 @@ public sealed class AudioSpectrumAnalyzer
             }
         }
 
-        // Smooth AGC peak so soft vocals and EDM drops both normalize cleanly into 0..1
+        // Smooth AGC peak so soft vocals and energetic bass normalize cleanly into 0..1
         var decayRate = MathF.Exp(-dtSec * 0.85f);
         _rollingPeak = MathF.Max(0.025f, Math.Max(framePeak, _rollingPeak * decayRate));
         var scale = 1f / _rollingPeak;
@@ -484,7 +383,6 @@ public sealed class AudioSpectrumAnalyzer
             bandBuilder.Add(_smoothedBands[i]);
         }
 
-        var targetSubBass = subBassBins > 0 ? Math.Clamp(MathF.Pow((subBassRaw / subBassBins) * scale * 2.1f, 0.72f), 0f, 1f) : 0f;
         var targetBass = bassBins > 0 ? Math.Clamp(MathF.Pow((bassRaw / bassBins) * scale * 2.2f, 0.72f), 0f, 1f) : 0f;
         var targetMid = midBins > 0 ? Math.Clamp(MathF.Pow((midRaw / midBins) * scale * 2.6f, 0.75f), 0f, 1f) : 0f;
         var targetTreble = trebleBins > 0 ? Math.Clamp(MathF.Pow((trebleRaw / trebleBins) * scale * 3.1f, 0.75f), 0f, 1f) : 0f;
@@ -505,73 +403,15 @@ public sealed class AudioSpectrumAnalyzer
             _beatPulse = MathF.Max(0f, _beatPulse - (dtSec * 3.4f));
         }
 
-        // Multi-timescale Beat Drop / Song Climax detector (buildup scoop + mastered sub-bass ratio + energy-wall surge)
-        var instantOverall = Math.Clamp((targetBass * 0.48f) + (targetMid * 0.32f) + (targetTreble * 0.20f), 0f, 1f);
-        var rawSubBassAvg = subBassBins > 0 ? (subBassRaw / subBassBins) : 0f;
-        var rawSubBassRatio = rawSubBassAvg / MathF.Max(0.002f, _slowRawSubBass);
-        var subBassDelta = targetSubBass - _fastSubBass;
-        _fastSubBass += subBassDelta * Math.Clamp(dtSec * 16f, 0.18f, 0.78f);
-        _medEnergy += (instantOverall - _medEnergy) * Math.Clamp(dtSec * 1.15f, 0.01f, 0.22f);
-        _slowBaseline = Math.Clamp(
-            _slowBaseline + ((instantOverall - _slowBaseline) * Math.Clamp(dtSec * 0.14f, 0.002f, 0.04f)),
-            0.12f,
-            0.72f);
-
-        var isPreDropScoop = targetSubBass < (_medEnergy * 0.82f) && targetSubBass < 0.42f;
-        var isRiserBuild = targetTreble > (_slowBaseline * 1.05f) && targetTreble >= targetSubBass;
-        if (isPreDropScoop || isRiserBuild)
-        {
-            _buildupTension = Math.Min(1f, _buildupTension + (dtSec * 0.48f));
-        }
-        else
-        {
-            _buildupTension = Math.Max(0f, _buildupTension - (dtSec * 0.22f));
-        }
-
-        _dropCooldownSec = MathF.Max(0f, _dropCooldownSec - dtSec);
-        _dropTrigger = MathF.Max(0f, _dropTrigger - (dtSec / 0.50f));
-        _climaxIntensity = MathF.Max(0f, _climaxIntensity - (dtSec / 3.80f));
-
-        var sens = _dropSensitivity;
-        var surgeThreshold = 0.14f / MathF.Sqrt(sens);
-        var wallRatioThreshold = 1.40f - ((sens - 1.0f) * 0.24f);
-        var minImpactFloor = Math.Clamp(0.44f / MathF.Pow(sens, 0.35f), 0.28f, 0.62f);
-
-        var buildupDrop = _buildupTension >= 0.14f &&
-                          subBassDelta >= (surgeThreshold * 0.85f) &&
-                          targetSubBass >= (minImpactFloor * 0.90f);
-        var energyWallDrop = subBassDelta >= (surgeThreshold * 1.08f) &&
-                             targetSubBass >= Math.Max(minImpactFloor, _slowBaseline * wallRatioThreshold) &&
-                             instantOverall >= (_slowBaseline * 1.20f);
-        var masteredSubDrop = rawSubBassRatio >= (1.58f / MathF.Sqrt(sens)) &&
-                              subBassDelta >= (surgeThreshold * 0.72f) &&
-                              targetSubBass >= (minImpactFloor * 0.85f);
-
-        _slowRawSubBass = Math.Clamp(
-            _slowRawSubBass + ((rawSubBassAvg - _slowRawSubBass) * Math.Clamp(dtSec * 0.16f, 0.003f, 0.05f)),
-            0.004f,
-            0.45f);
-
-        if (_dropCooldownSec <= 0f && (buildupDrop || energyWallDrop || masteredSubDrop))
-        {
-            _dropTrigger = 1.0f;
-            _climaxIntensity = 1.0f;
-            _buildupTension = 0f;
-            _dropCooldownSec = Math.Clamp(11.0f - (sens * 3.4f), 5.0f, 12.5f);
-        }
-
         var overall = Math.Clamp((_smoothedBass * 0.45f) + (_smoothedMid * 0.35f) + (_smoothedTreble * 0.20f), 0f, 1f);
         return new AudioFrameMetrics(
             BassEnergy: _smoothedBass,
             MidEnergy: _smoothedMid,
             TrebleEnergy: _smoothedTreble,
             OverallLevel: overall,
-            BeatPulse: Math.Clamp(_beatPulse + (_dropTrigger * 0.25f), 0f, 1f),
+            BeatPulse: Math.Clamp(_beatPulse, 0f, 1f),
             IsLiveAudioActive: true,
-            SpectrumBands: bandBuilder.MoveToImmutable(),
-            DropTrigger: _dropTrigger,
-            ClimaxIntensity: _climaxIntensity,
-            IsClimaxActive: _climaxIntensity >= 0.15f);
+            SpectrumBands: bandBuilder.MoveToImmutable());
     }
 
     private static float[] BuildHannWindow(int n)

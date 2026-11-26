@@ -46,7 +46,10 @@ public static class OverlayFrameAdapter
             : ComputeRecommendedHeroScale(surfaceMode, settings, safeW, safeH);
 
         var effectiveBackdrop = ResolveBackdropMode(surfaceMode, settings, stageBackdropOverride);
-        var effectivePalette = surfaceMode == StageRenderSurfaceMode.StageCanvas && settings.EdgeGlowMode == EdgeGlowMode.NeonRush
+        var activeEffectiveStyle = styleOverride ?? settings.ActiveStyle;
+        var effectivePalette = surfaceMode == StageRenderSurfaceMode.StageCanvas &&
+                               settings.EdgeGlowMode == EdgeGlowMode.NeonRush &&
+                               activeEffectiveStyle != OverlayStyleId.VinylGroove
             ? snapshot.ActivePalette with { ScrimTint = new RgbColor(0, 0, 0) }
             : snapshot.ActivePalette;
         var effectiveOpacity = surfaceMode is StageRenderSurfaceMode.StageCanvas or StageRenderSurfaceMode.GalleryCard

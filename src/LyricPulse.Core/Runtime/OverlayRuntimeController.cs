@@ -93,7 +93,6 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
 
         UpdateState(s => s with { Settings = loadedSettings });
         ApplyMediaPolicy(loadedSettings);
-        _audioSpectrumProvider?.ConfigureBeatDropSensitivity(loadedSettings.BeatDropSensitivity);
 
         _mediaProvider.SessionChanged += OnMediaSessionChanged;
         _mediaProvider.TrackChanged += OnMediaTrackChanged;
@@ -195,27 +194,6 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
 
     public Task SetAudioVisualizerIntensityAsync(float intensity, CancellationToken cancellationToken = default) =>
         UpdateSettingsAsync(s => s with { AudioVisualizerIntensity = intensity }, cancellationToken);
-
-    public Task SetBeatDropEffectEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
-        UpdateSettingsAsync(s => s with { BeatDropEffectEnabled = enabled }, cancellationToken);
-
-    public Task SetBeatDropIntensityAsync(float intensity, CancellationToken cancellationToken = default) =>
-        UpdateSettingsAsync(s => s with { BeatDropIntensity = intensity }, cancellationToken);
-
-    public Task SetBeatDropSensitivityAsync(float sensitivity, CancellationToken cancellationToken = default) =>
-        UpdateSettingsAsync(s => s with { BeatDropSensitivity = sensitivity }, cancellationToken);
-
-    public void TriggerBeatDropPreview()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        var nowTicks = _timestampProvider();
-        var updated = UpdateState(s => s with { ManualDropPreviewStartTimestamp = nowTicks });
-        NotifyStateChanged(updated);
-    }
 
     public void SetStageWindowOpen(bool isOpen)
     {
@@ -439,7 +417,6 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         AppSettings normalized;
         RuntimeStateBox nextState;
         bool policyChanged;
-        bool dropSensitivityChanged;
 
         await _settingsWriteLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -447,7 +424,6 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
             var previous = Volatile.Read(ref _state).Settings;
             normalized = updater(previous).ValidateAndNormalize();
             policyChanged = HasMediaPolicyChanged(previous, normalized);
-            dropSensitivityChanged = Math.Abs(previous.BeatDropSensitivity - normalized.BeatDropSensitivity) > 0.001f;
             var visualPrefChanged = previous.VisualPreference != normalized.VisualPreference;
 
             await _settingsStore.SaveAsync(normalized, cancellationToken).ConfigureAwait(false);
@@ -461,11 +437,6 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         if (policyChanged)
         {
             ApplyMediaPolicy(normalized);
-        }
-
-        if (dropSensitivityChanged)
-        {
-            _audioSpectrumProvider?.ConfigureBeatDropSensitivity(normalized.BeatDropSensitivity);
         }
 
         SettingsChanged?.Invoke(this, normalized);
@@ -608,7 +579,6 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
             };
         });
 
-        _audioSpectrumProvider?.ResetTrackClimaxState();
         NotifyStateChanged(updated);
         BeginTrackLoad(track, updated.TrackGeneration, forceRefresh: false);
     }
@@ -651,63 +621,13 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         {
             var settings = Volatile.Read(ref _state).Settings;
 
-            // Hydrate per-track saved offset immediately without waiting on remote HTTP fetches.
+            // Execute and publish offset, lyrics, and album art independently so slow GSMTC thumbnail streams
+            // or network artwork delays never hold back cached/fetched lyrics from appearing immediately!
             var offsetTask = HydrateTrackOffsetAsync(track.CacheKey, generation, settings.EnablePerTrackSavedOffsets, ct);
-            var lyricsTask = FetchAndAnnotateLyricsAsync(track, settings.VisualPreference, forceRefresh, ct);
-            var artTask = FetchAlbumArtAndPaletteAsync(ct);
+            var lyricsTask = LoadAndPublishLyricsAsync(track, generation, settings.VisualPreference, forceRefresh, ct);
+            var artTask = LoadAndPublishAlbumArtAsync(track, generation, ct);
 
             await Task.WhenAll(offsetTask, lyricsTask, artTask).ConfigureAwait(false);
-            if (ct.IsCancellationRequested)
-            {
-                return;
-            }
-
-            var (status, document, moodVisual) = await lyricsTask.ConfigureAwait(false);
-            var (albumArt, extractedPalette) = await artTask.ConfigureAwait(false);
-            var nowTicks = _timestampProvider();
-
-            RuntimeStateBox? published = null;
-            lock (_stateSync)
-            {
-                if (_state.TrackGeneration != generation)
-                {
-                    return;
-                }
-
-                var targetPalette = extractedPalette ?? AlbumAccentPalette.Default;
-                var morph = _state.IsDemoMode
-                    ? _state.PaletteMorph
-                    : OverlaySnapshotBuilder.CreatePaletteMorph(_state, targetPalette, nowTicks, _timestampFrequency);
-
-                _state = _state with
-                {
-                    LiveLyricsStatus = status,
-                    LiveDocument = document,
-                    LiveMoodVisual = moodVisual,
-                    LiveTargetPalette = targetPalette,
-                    LiveAlbumArt = albumArt,
-                    PaletteMorph = morph
-                };
-                published = _state;
-            }
-
-            if (published is not null && !_disposed)
-            {
-                NotifyStateChanged(published);
-            }
-
-            // Spotify / browsers sometimes delay thumbnail stream availability by 300-2000ms after MediaPropertiesChanged
-            if (albumArt is null && !ct.IsCancellationRequested && !_disposed)
-            {
-                await TryRetryDeferredAlbumArtAsync(generation, delayMs: 650, ct).ConfigureAwait(false);
-                if (Volatile.Read(ref _state).TrackGeneration == generation &&
-                    Volatile.Read(ref _state).LiveAlbumArt is null &&
-                    !ct.IsCancellationRequested &&
-                    !_disposed)
-                {
-                    await TryRetryDeferredAlbumArtAsync(generation, delayMs: 1400, ct).ConfigureAwait(false);
-                }
-            }
         }
         catch (OperationCanceledException)
         {
@@ -716,6 +636,104 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         catch (Exception ex)
         {
             _logger.LogRuntimeTrackLoadFailed(ex, track.RawTitle);
+        }
+    }
+
+    private async Task LoadAndPublishLyricsAsync(
+        TrackIdentity track,
+        long generation,
+        VisualPreference preference,
+        bool forceRefresh,
+        CancellationToken ct)
+    {
+        var (status, document, moodVisual) = await FetchAndAnnotateLyricsAsync(track, preference, forceRefresh, ct)
+            .ConfigureAwait(false);
+        if (ct.IsCancellationRequested || _disposed)
+        {
+            return;
+        }
+
+        RuntimeStateBox? published = null;
+        lock (_stateSync)
+        {
+            if (_state.TrackGeneration != generation)
+            {
+                return;
+            }
+
+            _state = _state with
+            {
+                LiveLyricsStatus = status,
+                LiveDocument = document,
+                LiveMoodVisual = moodVisual
+            };
+            published = _state;
+        }
+
+        if (published is not null && !_disposed)
+        {
+            NotifyStateChanged(published);
+        }
+    }
+
+    private async Task LoadAndPublishAlbumArtAsync(
+        TrackIdentity track,
+        long generation,
+        CancellationToken ct)
+    {
+        var (albumArt, extractedPalette) = await FetchAlbumArtAndPaletteAsync(ct).ConfigureAwait(false);
+        if (ct.IsCancellationRequested || _disposed)
+        {
+            return;
+        }
+
+        PublishAlbumArtState(generation, albumArt, extractedPalette);
+
+        // Spotify / browsers sometimes delay thumbnail stream availability by 300-1200ms after MediaPropertiesChanged
+        if (albumArt is null && !ct.IsCancellationRequested && !_disposed)
+        {
+            await TryRetryDeferredAlbumArtAsync(generation, delayMs: 320, ct).ConfigureAwait(false);
+            if (Volatile.Read(ref _state).TrackGeneration == generation &&
+                Volatile.Read(ref _state).LiveAlbumArt is null &&
+                !ct.IsCancellationRequested &&
+                !_disposed)
+            {
+                await TryRetryDeferredAlbumArtAsync(generation, delayMs: 850, ct).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private void PublishAlbumArtState(
+        long generation,
+        AlbumArtPayload? albumArt,
+        AlbumAccentPalette? extractedPalette)
+    {
+        RuntimeStateBox? published = null;
+        var nowTicks = _timestampProvider();
+        lock (_stateSync)
+        {
+            if (_state.TrackGeneration != generation)
+            {
+                return;
+            }
+
+            var targetPalette = extractedPalette ?? AlbumAccentPalette.Default;
+            var morph = _state.IsDemoMode
+                ? _state.PaletteMorph
+                : OverlaySnapshotBuilder.CreatePaletteMorph(_state, targetPalette, nowTicks, _timestampFrequency);
+
+            _state = _state with
+            {
+                LiveTargetPalette = targetPalette,
+                LiveAlbumArt = albumArt,
+                PaletteMorph = morph
+            };
+            published = _state;
+        }
+
+        if (published is not null && !_disposed)
+        {
+            NotifyStateChanged(published);
         }
     }
 
@@ -728,33 +746,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
             return;
         }
 
-        RuntimeStateBox? artPublished = null;
-        var retryTicks = _timestampProvider();
-        lock (_stateSync)
-        {
-            if (_state.TrackGeneration != generation)
-            {
-                return;
-            }
-
-            var nextTargetPalette = retryPalette ?? _state.LiveTargetPalette;
-            var nextMorph = _state.IsDemoMode
-                ? _state.PaletteMorph
-                : OverlaySnapshotBuilder.CreatePaletteMorph(_state, nextTargetPalette, retryTicks, _timestampFrequency);
-
-            _state = _state with
-            {
-                LiveTargetPalette = nextTargetPalette,
-                LiveAlbumArt = retryArt,
-                PaletteMorph = nextMorph
-            };
-            artPublished = _state;
-        }
-
-        if (artPublished is not null && !_disposed)
-        {
-            NotifyStateChanged(artPublished);
-        }
+        PublishAlbumArtState(generation, retryArt, retryPalette ?? Volatile.Read(ref _state).LiveTargetPalette);
     }
 
     private async Task HydrateTrackOffsetAsync(

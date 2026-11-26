@@ -128,10 +128,7 @@ public sealed class StageBackdropRenderer : IDisposable
 
         var audio = packet.EffectiveAudioMetrics;
         var bass = Math.Clamp(audio.BassEnergy + (audio.BeatPulse * 0.45f), 0f, 1f);
-        var climaxBoost = (!packet.ReducedMotion && audio.IsClimaxActive && BeatDropEffectRenderer.IsEnabled(in packet))
-            ? audio.ClimaxIntensity * 0.42f * BeatDropEffectRenderer.ResolveDropIntensity(in packet)
-            : 0f;
-        var totalEnergy = Math.Clamp(packet.SafePartyEnergy + _beatPulse + (bass * 0.28f) + climaxBoost, 0.5f, 2.25f);
+        var totalEnergy = Math.Clamp(packet.SafePartyEnergy + _beatPulse + (bass * 0.28f), 0.5f, 2.0f);
 
         var renderedShader = context.Shaders.DrawAmbientPartyMesh(
             context.Canvas,

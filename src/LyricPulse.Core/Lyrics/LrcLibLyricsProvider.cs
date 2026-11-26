@@ -78,10 +78,10 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
             Name,
             new TokenBucketRateLimiterOptions
             {
-                TokenLimit = 4,
-                TokensPerPeriod = 2,
+                TokenLimit = 8,
+                TokensPerPeriod = 4,
                 ReplenishmentPeriod = TimeSpan.FromSeconds(1),
-                QueueLimit = 8,
+                QueueLimit = 12,
                 QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
                 AutoReplenishment = true
             },

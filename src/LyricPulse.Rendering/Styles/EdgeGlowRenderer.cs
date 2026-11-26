@@ -66,13 +66,6 @@ public sealed class EdgeGlowRenderer : IDisposable
             : AppSettings.DefaultEdgeGlowThickness;
 
         var audio = packet.EffectiveAudioMetrics;
-        if (audio.IsClimaxActive && BeatDropEffectRenderer.IsEnabled(in packet))
-        {
-            var dropScale = BeatDropEffectRenderer.ResolveDropIntensity(in packet);
-            var climaxSurge = audio.ClimaxIntensity * dropScale;
-            intensity = Math.Clamp(intensity * (1f + (climaxSurge * 0.38f)), AppSettings.MinGlowIntensity, AppSettings.MaxGlowIntensity * 1.45f);
-            thicknessSetting = Math.Clamp(thicknessSetting * (1f + (climaxSurge * 0.18f)), AppSettings.MinEdgeGlowThickness, AppSettings.MaxEdgeGlowThickness * 1.15f);
-        }
 
         UpdateSmoothedMotionState(packet.RenderTimeSeconds, speedSetting, packet.SafePartyEnergy, audio.BassEnergy, audio.BeatPulse, packet.ReducedMotion);
 

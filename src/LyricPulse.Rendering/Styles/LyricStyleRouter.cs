@@ -7,7 +7,7 @@ namespace LyricPulse.Rendering.Styles;
 
 /// <summary>
 /// Authoritative <see cref="ILyricSceneRenderer"/> coordinating <see cref="StageBackdropRenderer"/>,
-/// <see cref="PlaybackLifecycleChoreographer"/>, <see cref="BeatDropEffectRenderer"/>, and all 11 registered kinetic lyric styles
+/// <see cref="PlaybackLifecycleChoreographer"/>, and all 11 registered kinetic lyric styles
 /// (<c>Fisheye</c>, <c>FisheyeVisual</c>, <c>Codestyle</c>, <c>CodestyleVisual</c>, <c>VisualStack</c>,
 /// <c>Constellation</c>, <c>SpidersWeb</c>, <c>NodeLine</c>, <c>KineticWall</c>, <c>Messages</c>, <c>VinylGroove</c>).
 /// Synchronizes cross-thread Advance/Render/Dispose, honors per-frame <c>StyleOverride</c> for
@@ -21,13 +21,13 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
     private readonly StageBackdropRenderer _backdrop;
     private readonly AudioVisualizerRenderer _visualizer;
     private readonly EdgeGlowRenderer _edgeGlow;
-    private readonly BeatDropEffectRenderer _beatDrop = new();
     private readonly Lock _sync = new();
 
     private OverlayStyleId _lastRoutedStyle = OverlayStyleId.Fisheye;
     private long _lastTrackGeneration = -1;
     private long _lastSeekGeneration = -1;
     private long _lastOffsetGeneration = -1;
+    private TimeSpan _lastEffectivePos = TimeSpan.Zero;
     private LifecycleFrameState _lastLifecycle;
     private bool _disposed;
 
@@ -114,14 +114,17 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
 
             var trackChanged = trackGen != _lastTrackGeneration;
             var offsetNudged = _lastOffsetGeneration >= 0 && offsetGen > _lastOffsetGeneration;
-            var hardSeek = _lastSeekGeneration >= 0 && seekGen != _lastSeekGeneration && !offsetNudged;
+            var hardSeek = _lastSeekGeneration >= 0 &&
+                           seekGen != _lastSeekGeneration &&
+                           !offsetNudged;
 
             _lastRoutedStyle = effectiveStyle;
             _lastTrackGeneration = trackGen;
             _lastSeekGeneration = seekGen;
             _lastOffsetGeneration = offsetGen;
+            _lastEffectivePos = packet.SceneSnapshot.EffectivePosition;
 
-            // Soft-retarget springs on timing offset nudges (conserving velocity); hard-reset on style/track/seek jumps
+            // Soft-retarget springs on offset nudges; hard-reset only on style/track switch or manual seek
             if (styleChanged || trackChanged || hardSeek)
             {
                 renderer.ResetState();
@@ -130,21 +133,20 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
             if (trackChanged)
             {
                 _backdrop.Reset();
-                _beatDrop.Reset();
             }
 
             var isNeonRushStage = IsNeonRushStage(in packet);
             var backdropActive = !isNeonRushStage && _backdrop.Advance(in packet);
-            var dropActive = _beatDrop.Advance(in packet);
             _lastLifecycle = _lifecycle.Advance(in packet);
             var styleActive = _lastLifecycle.ShouldRenderLyrics && renderer.Advance(in packet, in _lastLifecycle);
-            return backdropActive || dropActive || _lastLifecycle.IsAnimating || styleActive;
+            return backdropActive || _lastLifecycle.IsAnimating || styleActive;
         }
     }
 
     private static bool IsNeonRushStage(in FrameRenderPacket packet) =>
         packet.ShouldDrawStageBackdrop
         && packet.SurfaceMode == StageRenderSurfaceMode.StageCanvas
+        && packet.EffectiveStyle != OverlayStyleId.VinylGroove
         && (packet.PlaybackSnapshot?.Settings.EdgeGlowMode ?? AppSettings.Default.EdgeGlowMode) == EdgeGlowMode.NeonRush;
 
     public void Render(in StyleRenderContext context)
@@ -169,43 +171,51 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
             var lifecycle = _lastLifecycle;
 
             // Stage Canvas / Gallery Card backdrop (skipped on transparent DesktopOverlay & pitch-black Neon Rush stage)
+            var resolvedStyle = ResolveRenderer(packet.EffectiveStyle);
+            var vinylStageMode = packet.ShouldDrawStageBackdrop &&
+                                 !isNeonRushStage &&
+                                 resolvedStyle is VinylGrooveStyleRenderer;
+
             if (packet.ShouldDrawStageBackdrop && !isNeonRushStage)
             {
-                _backdrop.Render(in context);
+                if (resolvedStyle is VinylGrooveStyleRenderer vinylBackdrop)
+                {
+                    vinylBackdrop.RenderStageRoomBackdrop(in context);
+                }
+                else
+                {
+                    _backdrop.Render(in context);
+                }
             }
 
-            // Layer 0.5: Audio-reactive background visualizer, Concert Drop sparks/shockwaves & perimeter Edges Glow
+            // Layer 0.5: Audio-reactive background visualizer & perimeter Edges Glow
             _visualizer.Render(in context);
-            _beatDrop.RenderStageDrops(in context);
             _edgeGlow.Render(in context);
 
-            if (lifecycle.ShouldRenderLyrics)
+            if (vinylStageMode && resolvedStyle is VinylGrooveStyleRenderer vinylForeground)
+            {
+                var opacitySave = context.Legibility.BeginGlobalOpacityLayer(canvas, Math.Clamp(packet.GlobalOpacity, 0f, 1f));
+                try
+                {
+                    vinylForeground.RenderStageForeground(in context, in lifecycle);
+                }
+                finally
+                {
+                    LegibilityPipeline.EndGlobalOpacityLayer(canvas, opacitySave);
+                }
+            }
+            else if (lifecycle.ShouldRenderLyrics)
             {
                 var effectiveOpacity = Math.Clamp(packet.GlobalOpacity * lifecycle.ContentOpacity, 0f, 1f);
                 if (effectiveOpacity > 0.004f)
                 {
                     var opacitySave = context.Legibility.BeginGlobalOpacityLayer(canvas, effectiveOpacity);
-                    var (dropZoom, dropDx, dropDy) = _beatDrop.GetLyricMotionTransform(in packet);
-                    var hasDropTransform = dropZoom > 1.002f || MathF.Abs(dropDx) > 0.05f || MathF.Abs(dropDy) > 0.05f;
-                    var zoomSave = hasDropTransform ? canvas.Save() : -1;
                     try
                     {
-                        if (zoomSave >= 0)
-                        {
-                            canvas.Translate(dropDx, dropDy);
-                            canvas.Scale(dropZoom, dropZoom, packet.ViewportWidthDip * 0.5f, packet.ViewportHeightDip * 0.5f);
-                        }
-
-                        var renderer = ResolveRenderer(packet.EffectiveStyle);
-                        renderer.Render(in context, in lifecycle);
+                        resolvedStyle.Render(in context, in lifecycle);
                     }
                     finally
                     {
-                        if (zoomSave >= 0)
-                        {
-                            canvas.RestoreToCount(zoomSave);
-                        }
-
                         LegibilityPipeline.EndGlobalOpacityLayer(canvas, opacitySave);
                     }
                 }
@@ -239,7 +249,6 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
             }
 
             _styles.Clear();
-            _beatDrop.Dispose();
             _visualizer.Dispose();
             _edgeGlow.Dispose();
             _backdrop.Dispose();

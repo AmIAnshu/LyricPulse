@@ -597,34 +597,6 @@
               </Grid>
               <Slider Minimum="20" Maximum="250" TickFrequency="5" IsSnapToTickEnabled="True" Value="{Binding EdgeGlowSpeedPercent}"/>
             </StackPanel>
-
-            <Border Margin="0,4,0,0" Padding="10" CornerRadius="10" Background="{DynamicResource LpSurfaceElevatedBrush}" BorderBrush="{DynamicResource LpBorderDefaultBrush}" BorderThickness="1">
-              <StackPanel Spacing="8">
-                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
-                  <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <TextBlock Text="Beat Drop Climax" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource LpTextPrimaryBrush}" VerticalAlignment="Center"/>
-                    <Border Padding="6,2" CornerRadius="999" Background="{DynamicResource LpAccentSoftBgBrush}" BorderBrush="{DynamicResource LpAccentBorderBrush}" BorderThickness="1">
-                      <TextBlock Text="{Binding DropStatusLabel}" FontSize="10" FontWeight="SemiBold" Foreground="{DynamicResource LpAccentTextBrush}"/>
-                    </Border>
-                  </StackPanel>
-                  <Button Grid.Column="1" Content="Preview Drop" FontSize="11" Padding="8,4" CornerRadius="8" Cursor="Hand"
-                          Command="{Binding PreviewBeatDropCommand}" IsEnabled="{Binding BeatDropEffectEnabled}"/>
-                  <ToggleSwitch Grid.Column="2" IsChecked="{Binding BeatDropEffectEnabled}" OnContent="" OffContent=""/>
-                </Grid>
-                <StackPanel IsVisible="{Binding BeatDropEffectEnabled}" Spacing="6">
-                  <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Text="Drop Energy" FontSize="11" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
-                    <TextBlock Grid.Column="1" Text="{Binding BeatDropIntensityPercent, StringFormat='{}{0}%'}" FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="11" Foreground="{DynamicResource LpAccentTextBrush}"/>
-                  </Grid>
-                  <Slider Minimum="30" Maximum="150" TickFrequency="5" IsSnapToTickEnabled="True" Value="{Binding BeatDropIntensityPercent}"/>
-                  <Grid ColumnDefinitions="*,Auto">
-                    <TextBlock Text="Drop Sensitivity" FontSize="11" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
-                    <TextBlock Grid.Column="1" Text="{Binding BeatDropSensitivityPercent, StringFormat='{}{0}%'}" FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="11" Foreground="{DynamicResource LpAccentTextBrush}"/>
-                  </Grid>
-                  <Slider Minimum="50" Maximum="160" TickFrequency="10" IsSnapToTickEnabled="True" Value="{Binding BeatDropSensitivityPercent}"/>
-                </StackPanel>
-              </StackPanel>
-            </Border>
           </StackPanel>
 
           <!-- Diagnostics & Sync Offset Flyout -->

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LyricPulse Studio — Interactive Kinetic Lyrics Demo</title>
-  <meta name="description" content="Interactive browser demo of LyricPulse v2.10: 11 real-time kinetic lyric visualization styles, Web Audio Beat Drop detection, Neon Rush edge glow, and 3D Vinyl Groove listening room." />
+  <meta name="description" content="Interactive browser demo of LyricPulse v3.0: 11 real-time kinetic lyric visualization styles, Neon Rush edge glow, and 3D Vinyl Groove listening room with album-synced ambient aura." />
   <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -23,7 +23,7 @@
           </svg>
         </span>
         <span class="brand-name">LyricPulse</span>
-        <span class="version-pill">v2.10 Web Demo</span>
+        <span class="version-pill">v3.0 Web Demo</span>
       </div>
 
       <div class="status-group" aria-live="polite">
@@ -31,7 +31,6 @@
           <span class="pulse-dot"></span>
           <span id="playbackBadgeText">Demo · Synth Ready</span>
         </span>
-        <span class="status-pill status-drop" id="dropBadge" hidden>DROP SURGE</span>
         <span class="fps-chip" id="fpsBadge" title="Live canvas frame rate">60 FPS</span>
       </div>
 
@@ -46,7 +45,7 @@
           </svg>
           <span>Settings</span>
         </button>
-        <a class="btn btn-primary" href="https://github.com/AmIAnshu/LyricPulse/releases/tag/v2.10" target="_blank" rel="noopener noreferrer">
+        <a class="btn btn-primary" href="https://github.com/AmIAnshu/LyricPulse/releases/tag/v3.0" target="_blank" rel="noopener noreferrer">
           Download .EXE
         </a>
         <a class="btn btn-icon" href="https://github.com/AmIAnshu/LyricPulse" target="_blank" rel="noopener noreferrer" title="View source on GitHub" aria-label="GitHub repository">
@@ -65,9 +64,9 @@
           <div class="desktop-wallpaper-mock" id="desktopWallpaperMock" aria-hidden="true">
             <div class="mock-ide-window">
               <div class="mock-titlebar"><span></span><span></span><span></span><small>App.tsx — Simulated Windows Desktop</small></div>
-              <pre><code>export function renderStream(fft: Float32Array) {
-  const climax = detectSubBassSurge(fft);
-  return syncKineticWords(timeline, climax);
+              <pre><code>export function renderStream(fft: Float32Array, cover: ImageData) {
+  const palette = extractAlbumColors(cover);
+  return syncKineticWords(timeline, palette);
 }</code></pre>
             </div>
           </div>
@@ -142,10 +141,6 @@
                 </svg>
                 <span id="soundToggleLabel">Play Synth Audio</span>
               </button>
-
-              <button class="btn btn-drop" id="triggerDropBtn" type="button" title="Trigger Beat Drop shockwave & spotlights (D)">
-                <span>⚡ Drop Surge</span>
-              </button>
             </div>
 
             <div class="seek-row">
@@ -197,7 +192,7 @@
             Built &amp; open-sourced under MIT License by <a href="https://github.com/AmIAnshu" target="_blank" rel="noopener noreferrer">AmIAnshu</a>.
           </p>
           <div class="footer-links">
-            <a href="https://github.com/AmIAnshu/LyricPulse/releases/tag/v2.10" target="_blank" rel="noopener noreferrer">Download v2.10 (.exe · 127.6 MB)</a>
+            <a href="https://github.com/AmIAnshu/LyricPulse/releases/tag/v3.0" target="_blank" rel="noopener noreferrer">Download v3.0 (.exe)</a>
             <a href="https://github.com/AmIAnshu/LyricPulse" target="_blank" rel="noopener noreferrer">GitHub Source</a>
             <a href="https://github.com/AmIAnshu/LyricPulse/blob/master/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
           </div>
@@ -257,15 +252,7 @@
           </div>
 
           <div class="setting-group">
-            <h3>Beat Drop Climax Suite</h3>
-            <label class="toggle-row">
-              <span>Enable Beat Drop FX</span>
-              <input id="beatDropToggle" type="checkbox" checked />
-            </label>
-            <label class="slider-row">
-              <span>Drop Intensity <strong id="dropIntensityVal">100%</strong></span>
-              <input id="dropIntensitySlider" type="range" min="40" max="160" value="100" />
-            </label>
+            <h3>Motion Accents</h3>
             <label class="toggle-row">
               <span>Following Beat Dot</span>
               <input id="beatDotToggle" type="checkbox" checked />

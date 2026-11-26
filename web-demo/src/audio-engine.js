@@ -1,21 +1,15 @@
-// Dual-mode Web Audio API soundtrack synthesizer + AnalyserNode + local audio uploader
+// Web Audio API Synthesizer + File Upload Audio Analyser (32-band FFT + bass/mid/treble energy)
 export class StudioAudioEngine {
   constructor() {
     this.ctx = null;
     this.analyser = null;
     this.masterGain = null;
     this.freqData = null;
-    this.synthEnabled = false;
     this.mode = 'synthetic'; // 'synthetic' | 'synth' | 'file'
+    this.synthEnabled = false;
     this.audioEl = null;
     this.mediaSrcNode = null;
     this.nextStepIndex = -1;
-
-    this.subBassBaseline = 0.25;
-    this.lufsShort = 0.35;
-    this.dropCooldown = 0;
-    this.climaxIntensity = 0;
-    this.manualDropQueued = false;
   }
 
   ensureAudioContext() {
@@ -63,14 +57,6 @@ export class StudioAudioEngine {
     return this.audioEl;
   }
 
-  triggerManualDrop() {
-    this.manualDropQueued = true;
-    this.climaxIntensity = 1.0;
-    if (this.ctx && this.synthEnabled && this.mode === 'synth') {
-      this.playSubDrop(this.ctx.currentTime + 0.01);
-    }
-  }
-
   stepSynthAudio(songTimeSec, isPlaying) {
     if (!isPlaying || !this.synthEnabled || this.mode !== 'synth' || !this.ctx) return;
     const stepDur = 60 / 110 / 2; // 110 BPM eighth-notes (~0.2727s)
@@ -81,139 +67,109 @@ export class StudioAudioEngine {
     const t = this.ctx.currentTime + 0.015;
     const barStep = step % 8;
 
-    // Kick on 0, 4 (and double kick before drop)
     if (barStep === 0 || barStep === 4) {
-      this.playKick(t);
+      this._playKick(t, 1.0);
+    } else if (barStep === 7 && (Math.floor(step / 8) % 2 === 1)) {
+      this._playKick(t, 0.72);
     }
-    // Snare/clap on 2, 6
+
     if (barStep === 2 || barStep === 6) {
-      this.playSnare(t);
+      this._playSnare(t);
     }
-    // Crisp closed hat every off-beat
-    if (barStep % 2 === 1) {
-      this.playHat(t);
-    }
+    this._playHat(t, barStep % 2 === 1 ? 0.14 : 0.08);
 
-    // Bass + arp notes tuned to Neon Horizon A minor -> F -> C -> G
-    const roots = [55.0, 43.65, 65.41, 49.0]; // A1, F1, C2, G1
-    const chords = [
-      [220, 261.63, 329.63],
-      [174.61, 220, 261.63],
-      [261.63, 329.63, 392.0],
-      [196.0, 246.94, 293.66],
-    ];
-    const barIdx = Math.floor(step / 8) % roots.length;
-    this.playBass(t, roots[barIdx]);
-    const chord = chords[barIdx];
-    this.playArp(t, chord[barStep % chord.length] * (barStep === 7 ? 2 : 1));
+    const bassNotes = [55.0, 55.0, 65.41, 73.42, 48.99, 48.99, 61.74, 65.41];
+    const barIdx = Math.floor(step / 8) % bassNotes.length;
+    this._playBass(t, bassNotes[barIdx]);
 
-    // Choreographed bass drops matching Neon Horizon chorus moments
-    const dropMoments = [5.9, 17.3, 25.7, 31.3];
-    if (dropMoments.some((m) => Math.abs(songTimeSec - m) < stepDur * 0.65)) {
-      this.playSubDrop(t);
-    }
+    const arpNotes = [220, 261.63, 329.63, 392, 440, 392, 329.63, 293.66];
+    this._playArp(t, arpNotes[(step + barIdx) % arpNotes.length]);
   }
 
-  playKick(t) {
+  _playKick(t, gainAmt) {
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
     osc.type = 'sine';
     osc.frequency.setValueAtTime(145, t);
-    osc.frequency.exponentialRampToValueAtTime(42, t + 0.14);
-    g.gain.setValueAtTime(0.85, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+    osc.frequency.exponentialRampToValueAtTime(38, t + 0.16);
+    g.gain.setValueAtTime(0.65 * gainAmt, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
     osc.connect(g);
     g.connect(this.masterGain);
     osc.start(t);
-    osc.stop(t + 0.23);
+    osc.stop(t + 0.30);
   }
 
-  playSubDrop(t) {
-    const osc = this.ctx.createOscillator();
-    const g = this.ctx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(110, t);
-    osc.frequency.exponentialRampToValueAtTime(34, t + 0.65);
-    g.gain.setValueAtTime(0.95, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.72);
-    osc.connect(g);
-    g.connect(this.masterGain);
-    osc.start(t);
-    osc.stop(t + 0.74);
-  }
-
-  playSnare(t) {
-    const bufferSize = this.ctx.sampleRate * 0.11;
-    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+  _playSnare(t) {
+    const len = this.ctx.sampleRate * 0.11;
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
     const noise = this.ctx.createBufferSource();
-    noise.buffer = buffer;
+    noise.buffer = buf;
     const filter = this.ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.value = 1800;
+    filter.type = 'highpass';
+    filter.frequency.value = 1100;
     const g = this.ctx.createGain();
-    g.gain.setValueAtTime(0.32, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    g.gain.setValueAtTime(0.24, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.11);
     noise.connect(filter);
     filter.connect(g);
     g.connect(this.masterGain);
     noise.start(t);
   }
 
-  playHat(t) {
-    const bufferSize = Math.floor(this.ctx.sampleRate * 0.04);
-    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+  _playHat(t, vol) {
+    const len = this.ctx.sampleRate * 0.04;
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
     const src = this.ctx.createBufferSource();
-    src.buffer = buffer;
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = 'highpass';
-    filter.frequency.value = 6500;
+    src.buffer = buf;
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 6500;
     const g = this.ctx.createGain();
-    g.gain.setValueAtTime(0.11, t);
+    g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
-    src.connect(filter);
-    filter.connect(g);
+    src.connect(hp);
+    hp.connect(g);
     g.connect(this.masterGain);
     src.start(t);
   }
 
-  playBass(t, freq) {
+  _playBass(t, freq) {
     const osc = this.ctx.createOscillator();
-    const filter = this.ctx.createBiquadFilter();
+    const filt = this.ctx.createBiquadFilter();
     const g = this.ctx.createGain();
     osc.type = 'sawtooth';
     osc.frequency.setValueAtTime(freq, t);
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(360, t);
-    g.gain.setValueAtTime(0.24, t);
+    filt.type = 'lowpass';
+    filt.frequency.setValueAtTime(360, t);
+    filt.frequency.exponentialRampToValueAtTime(140, t + 0.22);
+    g.gain.setValueAtTime(0.22, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
-    osc.connect(filter);
-    filter.connect(g);
+    osc.connect(filt);
+    filt.connect(g);
     g.connect(this.masterGain);
     osc.start(t);
     osc.stop(t + 0.25);
   }
 
-  playArp(t, freq) {
+  _playArp(t, freq) {
     const osc = this.ctx.createOscillator();
     const g = this.ctx.createGain();
     osc.type = 'triangle';
     osc.frequency.setValueAtTime(freq, t);
-    g.gain.setValueAtTime(0.14, t);
-    g.gain.exponentialRampToValueAtTime(0.001, t + 0.21);
+    g.gain.setValueAtTime(0.11, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.20);
     osc.connect(g);
     g.connect(this.masterGain);
     osc.start(t);
     osc.stop(t + 0.22);
   }
 
-  sampleMetrics(songTimeSec, dt, isPlaying, dropSensitivity = 1.0) {
-    this.dropCooldown = Math.max(0, this.dropCooldown - dt);
-    this.climaxIntensity = Math.max(0, this.climaxIntensity - dt * 0.55);
-
+  sampleMetrics(songTimeSec, dt, isPlaying) {
     let bass = 0.22;
     let mid = 0.25;
     let treble = 0.18;
@@ -244,37 +200,7 @@ export class StudioAudioEngine {
       ({ bass, mid, treble, beatPulse } = this._syntheticEnergies(songTimeSec));
     }
 
-    // Mastered sub-bass ratio climax detection (mirrors LyricPulse AudioSpectrumAnalyzer)
-    const subRatio = bass / Math.max(0.12, mid + 0.08);
-    this.subBassBaseline = this.subBassBaseline * 0.96 + bass * 0.04;
-    this.lufsShort = this.lufsShort * 0.92 + ((bass + mid + treble) / 3) * 0.08;
-
-    let dropTrigger = 0;
-    const dropThreshold = 1.48 / Math.max(0.5, dropSensitivity);
-    const isSyntheticDrop =
-      isPlaying &&
-      !this.audioEl &&
-      [5.9, 17.3, 25.7, 31.3].some((m) => songTimeSec >= m && songTimeSec < m + 0.09);
-
-    if (this.manualDropQueued || isSyntheticDrop || (bass > 0.56 && subRatio > dropThreshold && this.dropCooldown <= 0)) {
-      if (this.dropCooldown <= 0 || this.manualDropQueued) {
-        dropTrigger = 1.0;
-        this.dropCooldown = 0.85;
-        this.climaxIntensity = 1.0;
-      }
-      this.manualDropQueued = false;
-    }
-
-    return {
-      bass,
-      mid,
-      treble,
-      beatPulse,
-      bands,
-      dropTrigger,
-      climaxIntensity: this.climaxIntensity,
-      isClimaxActive: this.climaxIntensity > 0.35,
-    };
+    return { bass, mid, treble, beatPulse, bands };
   }
 
   _syntheticEnergies(t) {
@@ -283,18 +209,19 @@ export class StudioAudioEngine {
     const wave = 0.5 + 0.5 * Math.sin(t * 1.9);
     const bass = Math.min(1, 0.28 + kick * 0.62 + wave * 0.12);
     const mid = Math.min(1, 0.32 + 0.25 * Math.sin(t * 3.1 + 1.0));
-    const treble = Math.min(1, 0.24 + 0.28 * Math.abs(Math.sin(t * 5.2)));
-    const beatPulse = Math.min(1.1, kick * 0.95 + 0.15);
+    const treble = Math.min(1, 0.26 + 0.24 * Math.cos(t * 5.2));
+    const beatPulse = Math.min(1.15, kick * 0.92 + wave * 0.14);
     return { bass, mid, treble, beatPulse };
   }
 
   _fillSyntheticBands(t, bands) {
-    const { bass, mid, treble } = this._syntheticEnergies(t);
-    for (let i = 0; i < bands.length; i++) {
+    const beatFrac = ((t * 110) / 60) % 1;
+    const kick = Math.pow(Math.max(0, 1 - beatFrac * 2.3), 2);
+    for (let i = 0; i < 32; i++) {
       const f = i / 31;
-      const base = f < 0.25 ? bass : f < 0.65 ? mid : treble;
-      const ripple = 0.5 + 0.5 * Math.sin(t * (3.2 + i * 0.35) + i * 0.6);
-      bands[i] = Math.min(0.98, Math.max(0.06, base * (0.62 + 0.42 * ripple)));
+      const bassLift = f < 0.25 ? kick * (1 - f * 3) * 0.72 : 0;
+      const wave = 0.22 + 0.30 * Math.abs(Math.sin(t * (2.4 + f * 4.5) + i * 0.42));
+      bands[i] = Math.min(1, wave + bassLift);
     }
   }
 }

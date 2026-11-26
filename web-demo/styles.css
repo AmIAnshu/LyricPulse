@@ -135,18 +135,6 @@ button:focus-visible, input:focus-visible, a:focus-visible {
   box-shadow: 0 0 8px var(--lp-green);
 }
 
-.status-drop {
-  background: var(--lp-amber-bg);
-  color: #fbbf24;
-  border: 1px solid rgba(245, 158, 11, 0.55);
-  animation: dropFlash 0.6s ease infinite alternate;
-}
-
-@keyframes dropFlash {
-  from { box-shadow: 0 0 4px rgba(245, 158, 11, 0.25); }
-  to { box-shadow: 0 0 14px rgba(245, 158, 11, 0.65); }
-}
-
 .fps-chip {
   font-family: var(--lp-font-mono);
   font-size: 11px;
@@ -586,16 +574,6 @@ button:focus-visible, input:focus-visible, a:focus-visible {
   background: var(--lp-green-bg);
   border-color: rgba(34, 197, 94, 0.55);
   color: var(--lp-green-text);
-}
-
-.btn-drop {
-  background: linear-gradient(135deg, #2b2110, #3b1c22);
-  border-color: rgba(245, 158, 11, 0.55);
-  color: #fbbf24;
-}
-
-.btn-drop:hover {
-  background: linear-gradient(135deg, #423114, #52232c);
 }
 
 .seek-row {

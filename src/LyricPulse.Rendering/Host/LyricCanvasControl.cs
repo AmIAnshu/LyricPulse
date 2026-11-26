@@ -250,6 +250,22 @@ public sealed class LyricCanvasControl : Control, IDisposable
                 _rafScheduled = false;
             }
         }
+        else if (change.Property == BoundsProperty)
+        {
+            var rect = Bounds;
+            if (rect.Width > 1.0 && rect.Height > 1.0 && IsVisible && _isAttached)
+            {
+                if (Volatile.Read(ref _isPaused))
+                {
+                    RequestSingleFrame();
+                }
+                else
+                {
+                    RequestWake();
+                    InvalidateVisual();
+                }
+            }
+        }
     }
 
     [ExcludeFromCodeCoverage]

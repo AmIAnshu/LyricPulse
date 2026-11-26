@@ -15,7 +15,7 @@ const thumbRenderer = new StudioRenderer();
 
 const state = {
   doc: parseLrc(NEON_HORIZON_LRC, 36.0),
-  styleIdx: 10, // Start showcasing flagship v2.10 Vinyl Groove!
+  styleIdx: 10, // Start showcasing flagship v3.0 Vinyl Groove!
   isPlaying: true,
   songTime: 25.7,
   coverCanvas: createDefaultCoverCanvas(),
@@ -29,8 +29,6 @@ const state = {
     rushSpeed: 1.0,
     rushThickness: 1.0,
     visualizerMode: 'SpectrumBars',
-    beatDropEnabled: true,
-    dropIntensity: 1.0,
     autoSyncColors: true,
     presetName: null,
     reducedMotion: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false,
@@ -63,7 +61,6 @@ const el = {
   soundToggleBtn: document.getElementById('soundToggleBtn'),
   soundToggleLabel: document.getElementById('soundToggleLabel'),
   playbackBadgeText: document.getElementById('playbackBadgeText'),
-  dropBadge: document.getElementById('dropBadge'),
   fpsBadge: document.getElementById('fpsBadge'),
   stylesGrid: document.getElementById('stylesGrid'),
   galleryCount: document.getElementById('galleryCountCaption'),
@@ -218,10 +215,6 @@ el.soundToggleBtn.addEventListener('click', () => {
   el.playbackBadgeText.textContent = next ? (engine.mode === 'file' ? 'Local Track · Live FFT' : 'Web Synth · Live FFT') : 'Demo · Visual Clock';
 });
 
-document.getElementById('triggerDropBtn').addEventListener('click', () => {
-  engine.triggerManualDrop();
-});
-
 el.seekSlider.addEventListener('input', (e) => {
   state.songTime = Number(e.target.value);
   if (engine.audioEl) engine.audioEl.currentTime = state.songTime;
@@ -300,14 +293,6 @@ document.querySelectorAll('#visModeRow .seg').forEach((btn) => {
   });
 });
 
-document.getElementById('beatDropToggle').addEventListener('change', (e) => {
-  state.settings.beatDropEnabled = e.target.checked;
-});
-document.getElementById('dropIntensitySlider').addEventListener('input', (e) => {
-  const val = Number(e.target.value);
-  state.settings.dropIntensity = val / 100;
-  document.getElementById('dropIntensityVal').textContent = `${val}%`;
-});
 document.getElementById('autoSyncColorsToggle').addEventListener('change', (e) => {
   state.settings.autoSyncColors = e.target.checked;
   if (e.target.checked) state.settings.presetName = null;
@@ -394,7 +379,6 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); state.isPlaying = !state.isPlaying; syncPlayUI(); }
   if (e.code === 'ArrowLeft') selectStyle(state.styleIdx - 1);
   if (e.code === 'ArrowRight') selectStyle(state.styleIdx + 1);
-  if (e.key === 'd' || e.key === 'D') engine.triggerManualDrop();
   if (e.key === 'f' || e.key === 'F') document.getElementById('fullscreenBtn').click();
 });
 
@@ -425,8 +409,7 @@ function tick(nowMs) {
   el.currentTime.textContent = fmtTime(state.songTime);
 
   const realTimeSec = nowMs / 1000;
-  const metrics = engine.sampleMetrics(state.songTime, dt, state.isPlaying, 1.0);
-  el.dropBadge.hidden = !metrics.isClimaxActive || !state.settings.beatDropEnabled;
+  const metrics = engine.sampleMetrics(state.songTime, dt, state.isPlaying);
 
   // Render hero stage
   const heroBox = resizeCanvasDpi(el.heroCanvas);

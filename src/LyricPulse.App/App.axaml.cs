@@ -409,6 +409,9 @@ public sealed class App : Application, IDisposable
         {
             _overlayCoordinator.WakeAllCanvases();
         }
+
+        _stageWindow?.WakeStageCanvas();
+        _obsWindow?.WakeCanvas();
     }
 
     private void OnWindowsSystemSettingsChanged(object? sender, EventArgs e)

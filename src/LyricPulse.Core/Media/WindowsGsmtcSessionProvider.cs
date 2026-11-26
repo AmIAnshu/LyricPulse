@@ -28,6 +28,7 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
     private readonly MediaSessionCoordinator _coordinator;
     private readonly ILogger<WindowsGsmtcSessionProvider> _logger;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
+    private readonly Lock _sessionsLock = new();
     private readonly Dictionary<string, GsmtcSessionHandle> _trackedSessions = new(StringComparer.OrdinalIgnoreCase);
     private readonly Channel<byte> _refreshChannel = Channel.CreateBounded<byte>(new BoundedChannelOptions(1)
     {
@@ -49,7 +50,29 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         _coordinator.SessionChanged += (s, e) => SessionChanged?.Invoke(this, e);
-        _coordinator.TrackChanged += (s, e) => TrackChanged?.Invoke(this, e);
+        _coordinator.TrackChanged += (s, e) =>
+        {
+            TrackChanged?.Invoke(this, e);
+            if (e is not null && !_disposed)
+            {
+                // Follow up quickly so delayed TimelineProperties reset (00:00) & delayed artwork arrive immediately
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await Task.Delay(160).ConfigureAwait(false);
+                        if (!_disposed)
+                        {
+                            SignalRefresh();
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore during teardown.
+                    }
+                });
+            }
+        };
         _coordinator.SeekDetected += (s, e) => SeekDetected?.Invoke(this, e);
     }
 
@@ -130,55 +153,56 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
             return null;
         }
 
-        await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+        GlobalSystemMediaTransportControlsSession? targetSession;
+        lock (_sessionsLock)
         {
-            if (!_trackedSessions.TryGetValue(snapshot.SourceAppUserModelId, out var handle))
-            {
-                return _coordinator.CachedAlbumArt;
-            }
-
-            var props = await TryInvokeWinRtAsync(
-                () => handle.Session.TryGetMediaPropertiesAsync().AsTask(cancellationToken),
-                "TryGetMediaPropertiesAsync").ConfigureAwait(false);
-
-            if (props?.Thumbnail is null)
-            {
-                return null;
-            }
-
-            using var winRtStream = await TryInvokeWinRtAsync(
-                () => props.Thumbnail.OpenReadAsync().AsTask(cancellationToken),
-                "Thumbnail.OpenReadAsync").ConfigureAwait(false);
-
-            if (winRtStream is null)
-            {
-                return null;
-            }
-
-            if (winRtStream.Size > (ulong)MediaSessionCoordinator.MaxThumbnailBytes)
-            {
-                _logger.LogGsmtcOversizedThumbnail(winRtStream.Size);
-                return null;
-            }
-
-            await using var managedStream = winRtStream.AsStreamForRead();
-            var payload = await _coordinator.ReadAndDeduplicateThumbnailAsync(
-                managedStream,
-                (long)winRtStream.Size,
-                cancellationToken).ConfigureAwait(false);
-
-            if (payload is null)
-            {
-                _logger.LogGsmtcAbortedThumbnail();
-            }
-
-            return payload;
+            targetSession = _trackedSessions.TryGetValue(snapshot.SourceAppUserModelId, out var handle)
+                ? handle.Session
+                : null;
         }
-        finally
+
+        if (targetSession is null)
         {
-            _refreshLock.Release();
+            return _coordinator.CachedAlbumArt;
         }
+
+        // Never hold _refreshLock across slow WinRT thumbnail streams so song switches are never stalled
+        var props = await TryInvokeWinRtAsync(
+            () => targetSession.TryGetMediaPropertiesAsync().AsTask(cancellationToken),
+            "TryGetMediaPropertiesAsync").ConfigureAwait(false);
+
+        if (props?.Thumbnail is null)
+        {
+            return null;
+        }
+
+        using var winRtStream = await TryInvokeWinRtAsync(
+            () => props.Thumbnail.OpenReadAsync().AsTask(cancellationToken),
+            "Thumbnail.OpenReadAsync").ConfigureAwait(false);
+
+        if (winRtStream is null)
+        {
+            return null;
+        }
+
+        if (winRtStream.Size > (ulong)MediaSessionCoordinator.MaxThumbnailBytes)
+        {
+            _logger.LogGsmtcOversizedThumbnail(winRtStream.Size);
+            return null;
+        }
+
+        await using var managedStream = winRtStream.AsStreamForRead();
+        var payload = await _coordinator.ReadAndDeduplicateThumbnailAsync(
+            managedStream,
+            (long)winRtStream.Size,
+            cancellationToken).ConfigureAwait(false);
+
+        if (payload is null)
+        {
+            _logger.LogGsmtcAbortedThumbnail();
+        }
+
+        return payload;
     }
 
     public async ValueTask DisposeAsync()
@@ -231,7 +255,13 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
 
             while (!ct.IsCancellationRequested)
             {
-                var pollDelayMs = _coordinator.CurrentSession?.PlaybackState == MediaPlaybackState.Playing ? 850 : 1100;
+                var current = _coordinator.CurrentSession;
+                var pollDelayMs = current is { PlaybackState: MediaPlaybackState.Changing } ||
+                                  (current?.PlaybackState == MediaPlaybackState.Playing && string.IsNullOrWhiteSpace(current.Track?.RawTitle))
+                    ? 200
+                    : current?.PlaybackState == MediaPlaybackState.Playing
+                        ? 340
+                        : 780;
                 using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 waitCts.CancelAfter(pollDelayMs);
 
@@ -276,17 +306,28 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
         await _refreshLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            SyncTrackedSessions();
-
+            var sessions = SyncTrackedSessions();
             var systemCurrentAumid = TryReadSystemCurrentAumid();
-            var candidates = ImmutableArray.CreateBuilder<SessionCandidate>(_trackedSessions.Count);
 
-            foreach (var handle in _trackedSessions.Values)
+            if (sessions.Length == 0)
             {
-                var candidate = await BuildCandidateAsync(handle.Session, systemCurrentAumid, ct).ConfigureAwait(false);
-                if (candidate is not null)
+                _coordinator.ProcessCandidates(ImmutableArray<SessionCandidate>.Empty);
+                return;
+            }
+
+            var tasks = new Task<SessionCandidate?>[sessions.Length];
+            for (var i = 0; i < sessions.Length; i++)
+            {
+                tasks[i] = BuildCandidateAsync(sessions[i], systemCurrentAumid, ct);
+            }
+
+            var resolved = await Task.WhenAll(tasks).ConfigureAwait(false);
+            var candidates = ImmutableArray.CreateBuilder<SessionCandidate>(resolved.Length);
+            for (var i = 0; i < resolved.Length; i++)
+            {
+                if (resolved[i] is { } c)
                 {
-                    candidates.Add(candidate);
+                    candidates.Add(c);
                 }
             }
 
@@ -298,11 +339,11 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
         }
     }
 
-    private void SyncTrackedSessions()
+    private GlobalSystemMediaTransportControlsSession[] SyncTrackedSessions()
     {
         if (_manager is null)
         {
-            return;
+            return [];
         }
 
         IReadOnlyList<GlobalSystemMediaTransportControlsSession> liveSessions;
@@ -313,7 +354,10 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
         catch (Exception ex) when (IsTransientWinRtException(ex))
         {
             _logger.LogGsmtcEnumerateError(ex);
-            return;
+            lock (_sessionsLock)
+            {
+                return _trackedSessions.Values.Select(static h => h.Session).ToArray();
+            }
         }
 
         var liveMap = new Dictionary<string, GlobalSystemMediaTransportControlsSession>(StringComparer.OrdinalIgnoreCase);
@@ -326,22 +370,40 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
             }
         }
 
-        var removedKeys = _trackedSessions.Keys.Where(k => !liveMap.ContainsKey(k)).ToList();
-        foreach (var key in removedKeys)
+        List<GsmtcSessionHandle>? detached = null;
+        GlobalSystemMediaTransportControlsSession[] snapshot;
+        lock (_sessionsLock)
         {
-            _trackedSessions[key].Detach();
-            _trackedSessions.Remove(key);
+            var removedKeys = _trackedSessions.Keys.Where(k => !liveMap.ContainsKey(k)).ToList();
+            foreach (var key in removedKeys)
+            {
+                detached ??= new List<GsmtcSessionHandle>();
+                detached.Add(_trackedSessions[key]);
+                _trackedSessions.Remove(key);
+            }
+
+            foreach (var (aumid, session) in liveMap)
+            {
+                if (!_trackedSessions.ContainsKey(aumid))
+                {
+                    var handle = new GsmtcSessionHandle(session, SignalRefresh);
+                    handle.Attach();
+                    _trackedSessions[aumid] = handle;
+                }
+            }
+
+            snapshot = _trackedSessions.Values.Select(static h => h.Session).ToArray();
         }
 
-        foreach (var (aumid, session) in liveMap)
+        if (detached is not null)
         {
-            if (!_trackedSessions.ContainsKey(aumid))
+            foreach (var h in detached)
             {
-                var handle = new GsmtcSessionHandle(session, SignalRefresh);
-                handle.Attach();
-                _trackedSessions[aumid] = handle;
+                h.Detach();
             }
         }
+
+        return snapshot;
     }
 
     private async Task<SessionCandidate?> BuildCandidateAsync(
@@ -467,12 +529,17 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
 
     private void DetachAllSessions()
     {
-        foreach (var handle in _trackedSessions.Values)
+        GsmtcSessionHandle[] toDetach;
+        lock (_sessionsLock)
+        {
+            toDetach = _trackedSessions.Values.ToArray();
+            _trackedSessions.Clear();
+        }
+
+        foreach (var handle in toDetach)
         {
             handle.Detach();
         }
-
-        _trackedSessions.Clear();
     }
 
     private void DetachManager()

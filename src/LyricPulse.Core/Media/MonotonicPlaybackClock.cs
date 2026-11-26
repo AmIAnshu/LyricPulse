@@ -80,12 +80,19 @@ public sealed class MonotonicPlaybackClock
         var safeEnd = endTime > safeStart ? endTime : TimeSpan.Zero;
         var current = Volatile.Read(ref _anchor);
         var currentEst = EvaluatePosition(current, nowTicks);
-
-        var reportedNow = ComputeReportedNow(reportedPosition, rate, isPlaying, timelineLastUpdatedUtc, nowUtc);
-        reportedNow = ClampPosition(reportedNow, safeStart, safeEnd);
-
         var sameTrack = current.HasAnchor &&
                         string.Equals(current.TrackKey, trackKey, StringComparison.Ordinal);
+
+        var staleness = nowUtc - timelineLastUpdatedUtc;
+        var trackStartWithStaleTimestamp = !sameTrack &&
+                                           current.HasAnchor &&
+                                           reportedPosition <= TimeSpan.FromMilliseconds(1200) &&
+                                           staleness > TimeSpan.FromSeconds(3.0);
+
+        var reportedNow = trackStartWithStaleTimestamp
+            ? reportedPosition
+            : ComputeReportedNow(reportedPosition, rate, isPlaying, timelineLastUpdatedUtc, nowUtc);
+        reportedNow = ClampPosition(reportedNow, safeStart, safeEnd);
 
         // Windows GSMTC (especially Spotify Desktop) often re-emits the exact same
         // (reportedPosition, LastUpdatedTime) tuple on unrelated SessionsChanged or metadata pings.

@@ -13,12 +13,4 @@ public interface IAudioSpectrumProvider : IDisposable
     void StopCapture();
 
     AudioFrameMetrics GetCurrentMetrics(double timeSeconds, bool isPlaying, float partyEnergy);
-
-    void ConfigureBeatDropSensitivity(float sensitivity)
-    {
-    }
-
-    void ResetTrackClimaxState()
-    {
-    }
 }

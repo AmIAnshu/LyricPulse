@@ -118,7 +118,7 @@ export const STYLE_CATALOG = [
     hasVisuals: false,
     filterGroup: '3D',
     previewOffsetSec: 25.7,
-    mood: { a1: '#FEE2E2', a2: '#F59E0B', a3: '#EC4899', scrim: '#160C14' },
+    mood: { a1: '#FB7185', a2: '#EF4444', a3: '#F97316', scrim: '#24080E' },
   },
 ];
 

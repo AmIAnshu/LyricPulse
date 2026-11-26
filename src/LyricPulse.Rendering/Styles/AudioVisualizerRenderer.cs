@@ -46,11 +46,6 @@ public sealed class AudioVisualizerRenderer : IDisposable
         }
 
         var audio = packet.EffectiveAudioMetrics;
-        if (!packet.ReducedMotion && audio.IsClimaxActive && BeatDropEffectRenderer.IsEnabled(in packet))
-        {
-            intensity *= 1f + (audio.ClimaxIntensity * 0.36f * BeatDropEffectRenderer.ResolveDropIntensity(in packet));
-        }
-
         var palette = StageBackdropRenderer.ResolveBackdropPalette(
             packet.EffectiveStyle,
             packet.Palette,

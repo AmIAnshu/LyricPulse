@@ -47,6 +47,17 @@ public partial class ObsBroadcastWindow : Window, IDisposable
         ChromaBackdrop.Background = SolidColorBrush.Parse(hex);
     }
 
+    public void WakeCanvas()
+    {
+        if (_disposed || !IsVisible || _canvasHost is null)
+        {
+            return;
+        }
+
+        _canvasHost.IsCardPaused = false;
+        _canvasHost.RequestWake();
+    }
+
     public void Dispose()
     {
         if (_disposed)
