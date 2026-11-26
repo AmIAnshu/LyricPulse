@@ -3,8 +3,11 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using LyricPulse.Core.Models;
+using LyricPulse.UI.Theme;
 using LyricPulse.Rendering.Fonts;
 using LyricPulse.Rendering.Host;
 using LyricPulse.Rendering.Shaders;
@@ -24,6 +27,20 @@ public partial class StageWindow : Window, IDisposable
     private readonly Dictionary<OverlayStyleId, StageCardCanvasHost> _cardHosts = new();
     private readonly DispatcherTimer _fullscreenIdleTimer;
     private readonly DispatcherTimer _postFullscreenSettleTimer;
+
+    private readonly SolidColorBrush _dynamicAccentPrimaryBrush = new(Color.FromRgb(0x63, 0x66, 0xF1));
+    private readonly SolidColorBrush _dynamicAccentPrimaryHoverBrush = new(Color.FromRgb(0x74, 0x77, 0xF4));
+    private readonly SolidColorBrush _dynamicAccentPrimaryPressedBrush = new(Color.FromRgb(0x4F, 0x46, 0xE5));
+    private readonly SolidColorBrush _dynamicAccentTextBrush = new(Color.FromRgb(0xC7, 0xD2, 0xFE));
+    private readonly SolidColorBrush _dynamicAccentBorderBrush = new(Color.FromRgb(0x81, 0x8C, 0xF8));
+    private readonly SolidColorBrush _dynamicAccentSoftBgBrush = new(Color.FromRgb(0x1E, 0x22, 0x42));
+    private readonly SolidColorBrush _dynamicFocusRingBrush = new(Color.FromRgb(0xC7, 0xD2, 0xFE));
+
+    private Color _lastAppliedAccent1;
+    private Color _lastAppliedAccent2;
+    private Color _lastAppliedAccent3;
+    private bool _lastAppliedIsLight;
+    private bool _hasAppliedAlbumChrome;
 
     private WindowState _stateBeforeFullscreen = WindowState.Normal;
     private bool _allowShutdownClose;
@@ -78,6 +95,16 @@ public partial class StageWindow : Window, IDisposable
             {
                 _heroHost?.RequestWake();
                 UpdateVisibleStripCards();
+            }
+        };
+
+        RegisterAlbumChromeBrushes();
+        SyncAlbumEnvironmentTheme(viewModel, force: true);
+        ActualThemeVariantChanged += (_, _) =>
+        {
+            if (DataContext is StageViewModel currentVm)
+            {
+                SyncAlbumEnvironmentTheme(currentVm, force: true);
             }
         };
 
@@ -433,7 +460,65 @@ public partial class StageWindow : Window, IDisposable
         {
             SettingsToggleBtn.Focus();
         }
+        else if (e.PropertyName is nameof(StageViewModel.ActivePaletteColor1)
+                 or nameof(StageViewModel.ActivePaletteColor2)
+                 or nameof(StageViewModel.ActivePaletteColor3))
+        {
+            SyncAlbumEnvironmentTheme(vm, force: false);
+        }
+        else if (e.PropertyName is nameof(StageViewModel.AutoSyncColors)
+                 or nameof(StageViewModel.ThemeVariantMode))
+        {
+            SyncAlbumEnvironmentTheme(vm, force: true);
+        }
     }
+
+    private void RegisterAlbumChromeBrushes()
+    {
+        Resources["LpAccentPrimaryBrush"] = _dynamicAccentPrimaryBrush;
+        Resources["LpAccentPrimaryHoverBrush"] = _dynamicAccentPrimaryHoverBrush;
+        Resources["LpAccentPrimaryPressedBrush"] = _dynamicAccentPrimaryPressedBrush;
+        Resources["LpAccentTextBrush"] = _dynamicAccentTextBrush;
+        Resources["LpAccentBorderBrush"] = _dynamicAccentBorderBrush;
+        Resources["LpAccentSoftBgBrush"] = _dynamicAccentSoftBgBrush;
+        Resources["LpFocusRingBrush"] = _dynamicFocusRingBrush;
+    }
+
+    private void SyncAlbumEnvironmentTheme(StageViewModel vm, bool force)
+    {
+        var isLight = ActualThemeVariant == ThemeVariant.Light;
+        var c1 = vm.ActivePaletteColor1;
+        var c2 = vm.ActivePaletteColor2;
+        var c3 = vm.ActivePaletteColor3;
+
+        if (!force &&
+            _hasAppliedAlbumChrome &&
+            _lastAppliedIsLight == isLight &&
+            (ColorDelta(c1, _lastAppliedAccent1) +
+             ColorDelta(c2, _lastAppliedAccent2) +
+             ColorDelta(c3, _lastAppliedAccent3)) < 6)
+        {
+            return;
+        }
+
+        _hasAppliedAlbumChrome = true;
+        _lastAppliedIsLight = isLight;
+        _lastAppliedAccent1 = c1;
+        _lastAppliedAccent2 = c2;
+        _lastAppliedAccent3 = c3;
+
+        var dynamicColors = AlbumEnvironmentPalette.ComputeDynamicAccentColors(c1, c2, c3, isLight);
+        _dynamicAccentPrimaryBrush.Color = dynamicColors.Primary;
+        _dynamicAccentPrimaryHoverBrush.Color = dynamicColors.PrimaryHover;
+        _dynamicAccentPrimaryPressedBrush.Color = dynamicColors.PrimaryPressed;
+        _dynamicAccentTextBrush.Color = dynamicColors.Text;
+        _dynamicAccentBorderBrush.Color = dynamicColors.Border;
+        _dynamicAccentSoftBgBrush.Color = dynamicColors.SoftBg;
+        _dynamicFocusRingBrush.Color = dynamicColors.FocusRing;
+    }
+
+    private static int ColorDelta(Color a, Color b) =>
+        Math.Abs(a.R - b.R) + Math.Abs(a.G - b.G) + Math.Abs(a.B - b.B);
 
     private void UpdateHeroStageHeight()
     {

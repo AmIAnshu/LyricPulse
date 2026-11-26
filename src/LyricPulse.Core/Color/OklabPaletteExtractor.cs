@@ -81,11 +81,13 @@ public static class OklabPaletteExtractor
                 }
 
                 var lab = OklabColorMath.SrgbToOklab(new RgbColor(rgbaPixels[idx], rgbaPixels[idx + 1], rgbaPixels[idx + 2], alpha));
-                chromas.Add(Math.Sqrt((lab.A * lab.A) + (lab.B * lab.B)));
+                var chroma = Math.Sqrt((lab.A * lab.A) + (lab.B * lab.B));
+                chromas.Add(chroma);
 
                 var nx = (x * invHalfW) - 1.0;
-                var radialWeight = 0.65 + (0.35 * Math.Exp(-((nx * nx) + (ny * ny)) / 0.55));
-                samples.Add(new WeightedPixel(lab, radialWeight));
+                var radialWeight = 0.55 + (0.45 * Math.Exp(-((nx * nx) + (ny * ny)) / 0.50));
+                var vividBoost = 1.0 + (Math.Min(chroma, 0.35) * 1.45);
+                samples.Add(new WeightedPixel(lab, radialWeight * vividBoost));
             }
         }
 
@@ -190,7 +192,7 @@ public static class OklabPaletteExtractor
 
             var share = sumW[c] / totalWeight;
             var lch = OklabColorMath.OklabToOklch(centroids[c]);
-            var salience = Math.Pow(share, 0.62) * (0.30 + (2.20 * lch.C)) * (1.0 - (0.85 * Math.Abs(lch.L - 0.60)));
+            var salience = Math.Pow(share, 0.58) * (0.20 + (3.10 * lch.C)) * (1.0 - (0.72 * Math.Abs(lch.L - 0.56)));
             clusters.Add(new OklabCluster(centroids[c], lch, share, salience));
         }
 
@@ -259,7 +261,7 @@ public static class OklabPaletteExtractor
         var h1 = top.Lch.H;
 
         var accent1Rgb = OklabColorMath.OklchToSrgbGamutMapped(
-            new OklchColor(Math.Clamp(top.Lch.L, 0.78, 0.92), Math.Clamp(top.Lch.C, 0.09, 0.22), h1));
+            new OklchColor(Math.Clamp(top.Lch.L, 0.77, 0.89), Math.Clamp(top.Lch.C * 1.15, 0.12, 0.25), h1));
         var accent1Lab = OklabColorMath.SrgbToOklab(accent1Rgb);
 
         var secondCluster = rankedClusters
@@ -276,8 +278,8 @@ public static class OklabPaletteExtractor
             accent1Lab,
             h1,
             h2,
-            secondCluster?.Lch.L ?? (accent1Lab.L > 0.84 ? 0.70 : 0.74),
-            secondCluster?.Lch.C ?? Math.Max(top.Lch.C, 0.16));
+            secondCluster?.Lch.L ?? (accent1Lab.L > 0.82 ? 0.68 : 0.74),
+            secondCluster is not null ? Math.Max(secondCluster.Lch.C * 1.15, 0.16) : Math.Max(top.Lch.C * 1.15, 0.18));
         var accent2Rgb = OklabColorMath.OklchToSrgbGamutMapped(accent2Lch);
 
         var thirdCluster = rankedClusters
@@ -286,20 +288,21 @@ public static class OklabPaletteExtractor
                 OklabColorMath.AngularDistanceDegrees(c.Lch.H, h1) >= MinAccent3HueSeparationDeg &&
                 OklabColorMath.AngularDistanceDegrees(c.Lch.H, accent2Lch.H) >= 20.0);
 
-        var h3 = thirdCluster?.Lch.H ?? OklabColorMath.NormalizeDegrees(h1 + 24.0);
+        var h3 = thirdCluster?.Lch.H ?? OklabColorMath.NormalizeDegrees(h1 + 28.0);
+        var rawC3 = thirdCluster?.Lch.C ?? Math.Max(0.11, top.Lch.C * 0.65);
         var accent3Rgb = OklabColorMath.OklchToSrgbGamutMapped(
-            new OklchColor(Math.Clamp(thirdCluster?.Lch.L ?? 0.68, 0.62, 0.76), Math.Clamp(thirdCluster?.Lch.C ?? 0.07, 0.04, 0.12), h3));
+            new OklchColor(Math.Clamp(thirdCluster?.Lch.L ?? 0.68, 0.61, 0.76), Math.Clamp(rawC3, 0.10, 0.21), h3));
 
         var scrimRgb = OklabColorMath.OklchToSrgbGamutMapped(
-            new OklchColor(Math.Clamp(top.Lch.L * 0.25, 0.14, 0.22), Math.Clamp(top.Lch.C * 0.30, 0.015, 0.055), h1));
+            new OklchColor(Math.Clamp(top.Lch.L * 0.25, 0.14, 0.22), Math.Clamp(top.Lch.C * 0.36, 0.025, 0.075), h1));
 
         return new AlbumAccentPalette(accent1Rgb, accent2Rgb, accent3Rgb, scrimRgb, IsMonochromeFallback: false, sourceAlbumHash);
     }
 
     private static OklchColor EnsureDistinctAccent2(OklabColor accent1Lab, double h1, double h2, double rawL2, double rawC2)
     {
-        var l2 = Math.Clamp(rawL2, 0.66, 0.82);
-        var c2 = Math.Clamp(rawC2, 0.13, 0.26);
+        var l2 = Math.Clamp(rawL2, 0.65, 0.81);
+        var c2 = Math.Clamp(rawC2, 0.16, 0.28);
         var candidate = new OklchColor(l2, c2, h2);
 
         if (OklabColorMath.DeltaE(accent1Lab, OklabColorMath.SrgbToOklab(OklabColorMath.OklchToSrgbGamutMapped(candidate))) >= MinAccentDeltaE)

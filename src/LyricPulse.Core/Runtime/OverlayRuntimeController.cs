@@ -666,40 +666,16 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
                 NotifyStateChanged(published);
             }
 
-            // Spotify / browsers sometimes delay thumbnail stream availability by 300-650ms after MediaPropertiesChanged
+            // Spotify / browsers sometimes delay thumbnail stream availability by 300-2000ms after MediaPropertiesChanged
             if (albumArt is null && !ct.IsCancellationRequested && !_disposed)
             {
-                await Task.Delay(650, ct).ConfigureAwait(false);
-                var (retryArt, retryPalette) = await FetchAlbumArtAndPaletteAsync(ct).ConfigureAwait(false);
-                if (retryArt is not null && !ct.IsCancellationRequested && !_disposed)
+                await TryRetryDeferredAlbumArtAsync(generation, delayMs: 650, ct).ConfigureAwait(false);
+                if (Volatile.Read(ref _state).TrackGeneration == generation &&
+                    Volatile.Read(ref _state).LiveAlbumArt is null &&
+                    !ct.IsCancellationRequested &&
+                    !_disposed)
                 {
-                    RuntimeStateBox? artPublished = null;
-                    var retryTicks = _timestampProvider();
-                    lock (_stateSync)
-                    {
-                        if (_state.TrackGeneration != generation)
-                        {
-                            return;
-                        }
-
-                        var nextTargetPalette = retryPalette ?? _state.LiveTargetPalette;
-                        var nextMorph = _state.IsDemoMode
-                            ? _state.PaletteMorph
-                            : OverlaySnapshotBuilder.CreatePaletteMorph(_state, nextTargetPalette, retryTicks, _timestampFrequency);
-
-                        _state = _state with
-                        {
-                            LiveTargetPalette = nextTargetPalette,
-                            LiveAlbumArt = retryArt,
-                            PaletteMorph = nextMorph
-                        };
-                        artPublished = _state;
-                    }
-
-                    if (artPublished is not null && !_disposed)
-                    {
-                        NotifyStateChanged(artPublished);
-                    }
+                    await TryRetryDeferredAlbumArtAsync(generation, delayMs: 1400, ct).ConfigureAwait(false);
                 }
             }
         }
@@ -710,6 +686,44 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         catch (Exception ex)
         {
             _logger.LogRuntimeTrackLoadFailed(ex, track.RawTitle);
+        }
+    }
+
+    private async Task TryRetryDeferredAlbumArtAsync(long generation, int delayMs, CancellationToken ct)
+    {
+        await Task.Delay(delayMs, ct).ConfigureAwait(false);
+        var (retryArt, retryPalette) = await FetchAlbumArtAndPaletteAsync(ct).ConfigureAwait(false);
+        if (retryArt is null || ct.IsCancellationRequested || _disposed)
+        {
+            return;
+        }
+
+        RuntimeStateBox? artPublished = null;
+        var retryTicks = _timestampProvider();
+        lock (_stateSync)
+        {
+            if (_state.TrackGeneration != generation)
+            {
+                return;
+            }
+
+            var nextTargetPalette = retryPalette ?? _state.LiveTargetPalette;
+            var nextMorph = _state.IsDemoMode
+                ? _state.PaletteMorph
+                : OverlaySnapshotBuilder.CreatePaletteMorph(_state, nextTargetPalette, retryTicks, _timestampFrequency);
+
+            _state = _state with
+            {
+                LiveTargetPalette = nextTargetPalette,
+                LiveAlbumArt = retryArt,
+                PaletteMorph = nextMorph
+            };
+            artPublished = _state;
+        }
+
+        if (artPublished is not null && !_disposed)
+        {
+            NotifyStateChanged(artPublished);
         }
     }
 

@@ -242,9 +242,9 @@ public sealed class EdgeGlowRenderer : IDisposable
             var localMatrix = SKMatrix.CreateRotation(rotAngleRad, sweepCenter.X, sweepCenter.Y);
             var shimmer = 0.5f + (0.5f * MathF.Sin((float)(_rushPhase * Math.PI * 2.0)));
             var tailTone = palette.AccentColor3;
-            var midTone = StyleLayoutHelper.BlendSrgb(palette.AccentColor2, palette.AccentColor1, 0.25f + (0.25f * shimmer));
-            var leadTone = StyleLayoutHelper.BlendSrgb(palette.AccentColor1, new RgbColor(0xFB, 0x92, 0x3C), 0.28f * (1f - shimmer));
-            var hotCoreTone = StyleLayoutHelper.BlendSrgb(leadTone, new RgbColor(255, 255, 255), 0.62f);
+            var midTone = StyleLayoutHelper.BlendSrgb(palette.AccentColor2, palette.AccentColor1, 0.25f + (0.28f * shimmer));
+            var leadTone = StyleLayoutHelper.BlendSrgb(palette.AccentColor1, palette.AccentColor2, 0.22f * (1f - shimmer));
+            var hotCoreTone = StyleLayoutHelper.BlendSrgb(leadTone, new RgbColor(255, 255, 255), 0.58f);
 
             var opacityScale = intensity * packet.GlobalOpacity;
             var bodyScale = thickness * Math.Clamp(opacityScale, 0.45f, 1.35f);
