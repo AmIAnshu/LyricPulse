@@ -103,8 +103,9 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
         }
 
         LyricsResult? plainFallback = null;
+        LyricsResult? looseDurationFallback = null;
 
-        // Step 1A: Exact /api/get with raw title, artist, album, and integer seconds duration.
+        // Step 1A: Exact /api/get with raw title, artist, album, and integer seconds duration (tight 2.5s sync tolerance).
         var exactUri = BuildExactGetUri(track.RawTitle, track.RawArtist, track.AlbumTitle, track.Duration);
         var exactFetch = await FetchTrackDtoAsync(exactUri, cancellationToken).ConfigureAwait(false);
         if (exactFetch.IsTransientError)
@@ -112,13 +113,13 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
             return new LyricsResult(LyricsStatus.Error, null, "LRCLIB request failed transiently.");
         }
 
-        var exactResult = EvaluateTrackDto(track, exactFetch.Value, ref plainFallback, enforceDurationGuard: true);
+        var exactResult = EvaluateTrackDto(track, exactFetch.Value, ref plainFallback, maxAllowedDurationDeltaSec: 2.5, ref looseDurationFallback);
         if (exactResult is not null)
         {
             return exactResult;
         }
 
-        // Step 1B: Retry /api/get with normalized title + primary artist (no album/duration constraint, duration guarded after).
+        // Step 1B: Retry /api/get with normalized title + primary artist (strict 2.5s sync tolerance before trying /api/search).
         var normalizedChanged =
             !track.NormalizedTitle.Equals(track.RawTitle, StringComparison.OrdinalIgnoreCase) ||
             !track.PrimaryArtist.Equals(track.RawArtist, StringComparison.OrdinalIgnoreCase) ||
@@ -134,14 +135,14 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
                 return plainFallback ?? new LyricsResult(LyricsStatus.Error, null, "LRCLIB request failed transiently.");
             }
 
-            var normResult = EvaluateTrackDto(track, normFetch.Value, ref plainFallback, enforceDurationGuard: true);
+            var normResult = EvaluateTrackDto(track, normFetch.Value, ref plainFallback, maxAllowedDurationDeltaSec: 2.5, ref looseDurationFallback);
             if (normResult is not null)
             {
                 return normResult;
             }
         }
 
-        // Step 1C: Fuzzy /api/search with deterministic 0..115 candidate scorer.
+        // Step 1C: Fuzzy /api/search with deterministic 0..115 candidate scorer + tightest duration tie-breaking.
         var searchUri = BuildSearchUri(track.NormalizedTitle, track.PrimaryArtist);
         var searchFetch = await FetchSearchDtosAsync(searchUri, cancellationToken).ConfigureAwait(false);
         var hadTransientError = searchFetch.IsTransientError;
@@ -160,6 +161,11 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
         if (scoredResult is not null)
         {
             return scoredResult;
+        }
+
+        if (looseDurationFallback is not null)
+        {
+            return looseDurationFallback;
         }
 
         if (plainFallback is not null)
@@ -244,24 +250,36 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
 
     private readonly record struct HttpFetchResult<T>(T Value, bool IsTransientError);
 
-    private LyricsResult? EvaluateTrackDto(TrackIdentity track, LrclibTrackDto? dto, ref LyricsResult? plainFallback, bool enforceDurationGuard = false)
+    private LyricsResult? EvaluateTrackDto(
+        TrackIdentity track,
+        LrclibTrackDto? dto,
+        ref LyricsResult? plainFallback,
+        double? maxAllowedDurationDeltaSec,
+        ref LyricsResult? looseDurationFallback)
     {
         if (dto is null)
         {
             return null;
         }
 
-        if (enforceDurationGuard &&
-            track.Duration > TimeSpan.Zero &&
-            dto.Duration is > 0 &&
-            Math.Abs(dto.Duration.Value - track.Duration.TotalSeconds) > 8.0)
+        var durationDelta = track.Duration > TimeSpan.Zero && dto.Duration is > 0
+            ? Math.Abs(dto.Duration.Value - track.Duration.TotalSeconds)
+            : 0.0;
+
+        if (maxAllowedDurationDeltaSec.HasValue && durationDelta > 8.0)
         {
             return null;
         }
 
         if (dto.Instrumental)
         {
-            return new LyricsResult(LyricsStatus.Instrumental, null);
+            if (!maxAllowedDurationDeltaSec.HasValue || durationDelta <= maxAllowedDurationDeltaSec.Value)
+            {
+                return new LyricsResult(LyricsStatus.Instrumental, null);
+            }
+
+            looseDurationFallback ??= new LyricsResult(LyricsStatus.Instrumental, null);
+            return null;
         }
 
         if (!string.IsNullOrWhiteSpace(dto.SyncedLyrics))
@@ -269,7 +287,15 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
             var doc = _parser.ParseLrc(track, dto.SyncedLyrics, SourceKind, Name, isFromCache: false);
             if (!doc.Lines.IsEmpty)
             {
-                return new LyricsResult(LyricsStatus.Synced, doc);
+                var synced = new LyricsResult(LyricsStatus.Synced, doc);
+                if (!maxAllowedDurationDeltaSec.HasValue || durationDelta <= maxAllowedDurationDeltaSec.Value)
+                {
+                    return synced;
+                }
+
+                // Store loose match (2.5s..8.0s off) so exact-duration /api/search candidate can win first!
+                looseDurationFallback ??= synced;
+                return null;
             }
         }
 
@@ -297,6 +323,8 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
 
         LrclibTrackDto? bestDto = null;
         var bestScore = -1;
+        var bestDurationDelta = double.MaxValue;
+        var bestHasWordSync = false;
 
         foreach (var cand in candidates)
         {
@@ -329,14 +357,30 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
                 }
             }
 
-            if (score >= CandidateScorer.MinimumAcceptScore && score > bestScore)
+            if (score < CandidateScorer.MinimumAcceptScore)
+            {
+                continue;
+            }
+
+            var deltaSec = track.Duration > TimeSpan.Zero && cand.Duration is > 0
+                ? Math.Abs(cand.Duration.Value - track.Duration.TotalSeconds)
+                : 9999.0;
+
+            var isBetter = score > bestScore ||
+                (score == bestScore && hasWordSync != bestHasWordSync && hasWordSync) ||
+                (score == bestScore && hasWordSync == bestHasWordSync && deltaSec < bestDurationDelta - 0.1);
+
+            if (isBetter)
             {
                 bestScore = score;
+                bestDurationDelta = deltaSec;
+                bestHasWordSync = hasWordSync;
                 bestDto = cand;
             }
         }
 
-        return EvaluateTrackDto(track, bestDto, ref plainFallback);
+        LyricsResult? unusedLoose = null;
+        return EvaluateTrackDto(track, bestDto, ref plainFallback, maxAllowedDurationDeltaSec: null, ref unusedLoose);
     }
 
     private static HttpRequestMessage CreateGetRequest(string relativeUri)

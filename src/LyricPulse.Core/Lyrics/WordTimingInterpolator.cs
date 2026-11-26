@@ -120,8 +120,9 @@ public static class WordTimingInterpolator
             var syl = EstimateSyllables(token);
             var punct = PunctuationWeight(token);
             totalSyllables += syl;
-            punctPauseSec += punct * 0.20;
-            weights[i] = 0.35 + (0.50 * syl) + (0.15 * Math.Log2(1 + token.Length)) + punct;
+            punctPauseSec += punct * 0.22;
+            var phraseHold = (tokens.Count >= 2 && i == tokens.Count - 1) ? 0.25 : 0.0;
+            weights[i] = 0.18 + (0.62 * syl) + (0.20 * Math.Log2(1 + token.Length)) + punct + phraseHold;
             totalWeight += weights[i];
         }
 
@@ -142,10 +143,10 @@ public static class WordTimingInterpolator
                 ? trackDuration - startTime
                 : DefaultFinalLineDuration;
 
-        var maxNaturalSec = Math.Clamp(1.75 + (totalSyllables * 0.58) + punctPauseSec, 2.4, 12.0);
-        var activeMs = gap.TotalSeconds <= 8.5
-            ? gap.TotalMilliseconds * 0.94
-            : Math.Min(gap.TotalMilliseconds * 0.94, maxNaturalSec * 1000.0);
+        var maxNaturalSec = Math.Clamp(0.95 + (totalSyllables * 0.34) + (tokenCount * 0.065) + (punctPauseSec * 0.85), 1.30, 8.60);
+        var activeMs = gap.TotalSeconds <= 3.6
+            ? gap.TotalMilliseconds * 0.92
+            : Math.Min(gap.TotalMilliseconds * 0.90, maxNaturalSec * 1000.0);
 
         return activeMs < tokenCount * 10.0
             ? Math.Max(gap.TotalMilliseconds, tokenCount * 20.0)

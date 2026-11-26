@@ -1,3 +1,5 @@
+using System.Globalization;
+using LyricPulse.Core.Audio;
 using LyricPulse.Core.Models;
 using LyricPulse.Rendering.Color;
 using LyricPulse.Rendering.Fonts;
@@ -8,25 +10,32 @@ using SkiaSharp;
 namespace LyricPulse.Rendering.Styles;
 
 /// <summary>
-/// Style #9 — Kinetic Wall / Ship (Verci-inspired): organic staggered word cascade floating on a
-/// 3D-tilted pinhole perspective plane (<see cref="SKMatrix"/> homography), depth-drifting ghost lines,
-/// inverted tilted Verci paper cutout highlights on focal words, and word-locked beat dot.
+/// Style #9 — Kinetic Wall Monument Stage: multi-plane 3D-tilted pinhole perspective wall
+/// featuring an architectural beat-reactive coordinate stage, monumental active-word watermark echo,
+/// luminous completed-word trace path, editorial Verci cutouts with semantic vector emblems,
+/// chromatic RGB depth split on beats, left VU telemetry spine, and word-locked beat dot.
 /// </summary>
 public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
 {
     public const float RestingPitchDegrees = 5.5f;
     public const float MaxYawDegrees = 10.0f;
-    public const float MaxRollDegrees = 1.5f;
+    public const float MaxRollDegrees = 1.8f;
     public const float PerspectiveFocalLength = 1150f;
 
     private readonly AestheticsOverlayRenderer _aesthetics = new();
-    private readonly SKPaint _accentRulePaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _hairlinePaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round };
+    private readonly SKPaint _fillPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _tracePaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round };
+    private readonly SKPath _tracePath = new();
+    private readonly SKPoint[] _wordAnchors = new SKPoint[8];
 
     private SpringState _cameraX = SpringState.AtRest(0f);
     private SpringState _cameraY = SpringState.AtRest(0f);
     private SpringState _cameraYawDeg = SpringState.AtRest(-6.5f);
-    private SpringState _wordSlamScale = SpringState.AtRest(1.0f);
+    private SpringState _wordSlamScale = SpringState.AtRest(1.16f);
     private float _highlightFade = 1.0f;
+    private float _smoothedBass;
+    private float _smoothedBeat;
     private (int LineIndex, int WordIndex) _lastWordKey = (-1, -1);
     private float _lastWordDurationSec = 0.32f;
     private bool _disposed;
@@ -38,8 +47,10 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
         _cameraX = SpringState.AtRest(0f);
         _cameraY = SpringState.AtRest(0f);
         _cameraYawDeg = SpringState.AtRest(-6.5f);
-        _wordSlamScale = SpringState.AtRest(1.0f);
+        _wordSlamScale = SpringState.AtRest(1.16f);
         _highlightFade = 1.0f;
+        _smoothedBass = 0f;
+        _smoothedBeat = 0f;
         _lastWordKey = (-1, -1);
         _lastWordDurationSec = 0.32f;
         _aesthetics.ResetDot();
@@ -54,6 +65,10 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
         }
 
         var dt = Math.Clamp(packet.DeltaSeconds, 0f, SpringState.MaxDeltaSeconds);
+        var audio = packet.EffectiveAudioMetrics;
+        _smoothedBass = (_smoothedBass * 0.72f) + (Math.Clamp(audio.BassEnergy, 0f, 1.5f) * 0.28f);
+        _smoothedBeat = (_smoothedBeat * 0.65f) + (Math.Clamp(audio.BeatPulse, 0f, 1.5f) * 0.35f);
+
         var words = slice.CurrentLine.Words;
         var wordCount = words.IsEmpty ? 1 : words.Length;
         var activeIdx = Math.Clamp(slice.ActiveWordIndex, 0, wordCount - 1);
@@ -65,9 +80,11 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
         }
 
         var wordFrac = wordCount <= 1 ? 0.5f : (activeIdx / (float)(wordCount - 1));
-        var targetYaw = ((wordFrac - 0.5f) * 2f) * MaxYawDegrees * Math.Clamp(packet.SafePartyEnergy, 0.7f, 1.25f);
-        var targetCamX = (0.5f - wordFrac) * Math.Min(packet.ViewportWidthDip * 0.12f, 95f);
+        var targetYaw = ((wordFrac - 0.5f) * 2f) * MaxYawDegrees * Math.Clamp(packet.SafePartyEnergy, 0.7f, 1.3f);
+        var targetCamX = (0.5f - wordFrac) * Math.Min(packet.ViewportWidthDip * 0.14f, 110f);
+        var targetCamY = MathF.Sin((float)(packet.RenderTimeSeconds * 0.75)) * (packet.IsCompactCard ? 0f : 4.5f);
 
+        var activeRestScale = packet.IsCompactCard ? 1.08f : 1.18f;
         var key = (slice.ActiveLineIndex, activeIdx);
         if (key != _lastWordKey)
         {
@@ -82,13 +99,13 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
             }
             else
             {
-                var slamStart = 1.20f + ((packet.SafePartyEnergy - 1.0f) * 0.12f);
-                _wordSlamScale = new SpringState(Value: slamStart, Velocity: 0f, Target: 1.00f);
+                var slamStart = activeRestScale + 0.16f + ((packet.SafePartyEnergy - 1.0f) * 0.12f) + (_smoothedBeat * 0.08f);
+                _wordSlamScale = new SpringState(Value: slamStart, Velocity: 0f, Target: activeRestScale);
                 _highlightFade = 0f;
             }
         }
 
-        var fadeRate = packet.ReducedMotion ? (1f / 0.14f) : (1f / 0.16f);
+        var fadeRate = packet.ReducedMotion ? (1f / 0.14f) : (1f / 0.15f);
         if (_highlightFade < 1f)
         {
             _highlightFade = Math.Min(1f, _highlightFade + (dt * fadeRate));
@@ -105,16 +122,16 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
         }
 
         _cameraX = _cameraX.WithTarget(targetCamX).Step(SpringTokens.CameraDrift, dt);
-        _cameraY = _cameraY.WithTarget(0f).Step(SpringTokens.CameraDrift, dt);
+        _cameraY = _cameraY.WithTarget(targetCamY).Step(SpringTokens.CameraDrift, dt);
         _cameraYawDeg = _cameraYawDeg.WithTarget(Math.Clamp(targetYaw, -MaxYawDegrees, MaxYawDegrees)).Step(SpringTokens.CameraDrift, dt);
-        _wordSlamScale = _wordSlamScale.Step(SpringTokens.WordEnter.WithTempoCompression(_lastWordDurationSec), dt);
+        _wordSlamScale = _wordSlamScale.WithTarget(activeRestScale).Step(SpringTokens.WordEnter.WithTempoCompression(_lastWordDurationSec), dt);
 
         var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet, 0.50f, 0.50f);
-        var fontSize = StyleLayoutHelper.ResolveStyleFontSize(packet, styleMultiplier: 0.78f);
-        var rowSpreadX = packet.ViewportWidthDip * (packet.IsCompactCard ? 0.22f : 0.14f);
+        var fontSize = StyleLayoutHelper.ResolveStyleFontSize(packet, styleMultiplier: 0.80f);
+        var rowSpreadX = packet.ViewportWidthDip * (packet.IsCompactCard ? 0.20f : 0.18f);
         var staggerFrac = ComputeCascadeOffsetFrac(activeIdx, slice.ActiveLineIndex);
         var approxX = anchorX + (staggerFrac * rowSpreadX) + _cameraX.Value;
-        var approxY = anchorY + (fontSize * 0.6f);
+        var approxY = anchorY + (fontSize * 0.65f);
         var dotActive = packet.ShowFollowingDot && _aesthetics.AdvanceDot(key, approxX, approxY, dt, reducedMotion: false, _lastWordDurationSec);
 
         var isPlaying = packet.PlaybackSnapshot?.IsPlaying ?? true;
@@ -139,15 +156,18 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
         }
 
         var fontId = packet.ActiveFontId;
-        var fontSize = StyleLayoutHelper.ResolveStyleFontSize(packet, styleMultiplier: 0.78f);
+        var fontSize = StyleLayoutHelper.ResolveStyleFontSize(packet, styleMultiplier: 0.80f);
         var font = context.Fonts.GetOrCreateFont(fontId, fontSize, enforceMinOverlayFloor: !packet.IsCompactCard);
         var (anchorX, anchorY) = StyleLayoutHelper.ComputeAnchorPoint(packet, 0.50f, 0.50f);
+        var isFullStage = packet.SurfaceMode == StageRenderSurfaceMode.StageCanvas && !packet.IsCompactCard;
 
+        var scrimHalfW = packet.ViewportWidthDip * (isFullStage ? 0.44f : 0.30f);
+        var scrimHalfH = packet.ViewportHeightDip * (isFullStage ? 0.36f : 0.18f);
         var scrimRect = new SKRect(
-            anchorX - (packet.ViewportWidthDip * 0.42f),
-            anchorY - (packet.ViewportHeightDip * 0.34f),
-            anchorX + (packet.ViewportWidthDip * 0.42f),
-            anchorY + (packet.ViewportHeightDip * 0.34f));
+            anchorX - scrimHalfW,
+            anchorY - scrimHalfH,
+            anchorX + scrimHalfW,
+            anchorY + scrimHalfH);
 
         context.Legibility.DrawAmbientScrim(
             context.Canvas,
@@ -157,14 +177,22 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
             packet.ScrimIntensity,
             packet.HighContrastScrim);
 
+        // Layer 1 (StageCanvas only): Deep Parallax Architectural Grid + Giant Typography Watermark + VU Spine
+        if (isFullStage)
+        {
+            DrawArchitecturalBackplane(in context, font, fontId, slice, anchorX, anchorY);
+        }
+
+        // Layer 2: Primary 3D-tilted Perspective Typography Wall
         var save = context.Canvas.Save();
         try
         {
             if (!packet.ReducedMotion)
             {
+                var pitchDeg = RestingPitchDegrees + (_smoothedBass * 2.4f);
                 var rollDeg = Math.Clamp((_cameraYawDeg.Value / MaxYawDegrees) * MaxRollDegrees, -MaxRollDegrees, MaxRollDegrees);
                 var perspective = Create3DPerspectiveMatrix(
-                    RestingPitchDegrees,
+                    pitchDeg,
                     _cameraYawDeg.Value,
                     rollDeg,
                     PerspectiveFocalLength * Math.Max(packet.RenderScaling, 1f),
@@ -174,18 +202,24 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
                 context.Canvas.Translate(_cameraX.Value, _cameraY.Value);
             }
 
-            DrawScatteredWordCascade(in context, font, fontId, slice, anchorX, anchorY);
+            DrawScatteredWordCascade(in context, font, fontId, slice, anchorX, anchorY, isFullStage);
         }
         finally
         {
             context.Canvas.RestoreToCount(save);
         }
 
+        // Layer 3 (StageCanvas only): Left Line Index Pill & Audio Telemetry VU Spine (clear of DesktopOverlay corners)
+        if (isFullStage)
+        {
+            DrawStageTelemetryRail(in context, fontId, slice, fontSize);
+        }
+
         StyleLayoutHelper.DrawSecondarySubline(
             in context,
             slice.CurrentLine,
             anchorX,
-            anchorY + (fontSize * 2.8f),
+            anchorY + (fontSize * 3.0f),
             fontSize);
     }
 
@@ -198,7 +232,10 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
 
         _disposed = true;
         _aesthetics.Dispose();
-        _accentRulePaint.Dispose();
+        _hairlinePaint.Dispose();
+        _fillPaint.Dispose();
+        _tracePaint.Dispose();
+        _tracePath.Dispose();
     }
 
     internal static SKMatrix Create3DPerspectiveMatrix(
@@ -241,13 +278,172 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
         return SKMatrix.Concat(fromOrigin, SKMatrix.Concat(homography, toOrigin));
     }
 
-    private void DrawScatteredWordCascade(
+    private void DrawArchitecturalBackplane(
         in StyleRenderContext context,
         SKFont font,
         LyricFontId fontId,
         Core.Runtime.ActiveLyricSlice slice,
         float centerX,
         float centerY)
+    {
+        var canvas = context.Canvas;
+        var packet = context.Packet;
+        var w = packet.ViewportWidthDip;
+        var h = packet.ViewportHeightDip;
+        var palette = packet.Palette;
+
+        // Slower deep parallax perspective matrix (38% camera intensity)
+        var backSave = canvas.Save();
+        try
+        {
+            if (!packet.ReducedMotion)
+            {
+                var perspective = Create3DPerspectiveMatrix(
+                    RestingPitchDegrees * 0.55f,
+                    _cameraYawDeg.Value * 0.38f,
+                    0f,
+                    PerspectiveFocalLength * Math.Max(packet.RenderScaling, 1f),
+                    centerX,
+                    centerY);
+                canvas.Concat(in perspective);
+                canvas.Translate(_cameraX.Value * 0.35f, _cameraY.Value * 0.35f);
+            }
+
+            // Editorial stage frame registration brackets & horizon rules
+            var padX = Math.Clamp(w * 0.11f, 44f, 120f);
+            var padY = Math.Clamp(h * 0.14f, 40f, 96f);
+            var frame = new SKRect(padX, padY, w - padX, h - padY);
+            var tickLen = Math.Clamp(MathF.Min(w, h) * 0.025f, 10f, 20f);
+
+            var ruleAlpha = Math.Clamp(0.11f + (_smoothedBass * 0.12f), 0.08f, 0.28f);
+            _hairlinePaint.StrokeWidth = 1.0f;
+            _hairlinePaint.Color = palette.AccentColor3.ToSkColorWithAlpha(ruleAlpha * 0.55f);
+            canvas.DrawLine(frame.Left, centerY, frame.Right, centerY, _hairlinePaint);
+
+            // Subtle vertical guide rules at left/right golden thirds
+            _hairlinePaint.Color = palette.AccentColor1.ToSkColorWithAlpha(ruleAlpha * 0.35f);
+            canvas.DrawLine(w * 0.26f, frame.Top, w * 0.26f, frame.Bottom, _hairlinePaint);
+            canvas.DrawLine(w * 0.74f, frame.Top, w * 0.74f, frame.Bottom, _hairlinePaint);
+
+            // Architectural corner L-brackets around focal stage
+            _hairlinePaint.StrokeWidth = 1.5f;
+            _hairlinePaint.Color = palette.AccentColor1.ToSkColorWithAlpha(ruleAlpha);
+            DrawCornerBracket(canvas, frame.Left, frame.Top, tickLen, tickLen);
+            DrawCornerBracket(canvas, frame.Right, frame.Top, -tickLen, tickLen);
+            if (!packet.BottomFadeToBlack)
+            {
+                DrawCornerBracket(canvas, frame.Left, frame.Bottom, tickLen, -tickLen);
+                DrawCornerBracket(canvas, frame.Right, frame.Bottom, -tickLen, -tickLen);
+            }
+
+            // Monumental active-word watermark echo floating in deep shadow behind wall
+            var line = slice.CurrentLine!;
+            var watermarkText = !line.Words.IsEmpty
+                ? line.Words[Math.Clamp(slice.ActiveWordIndex, 0, line.Words.Length - 1)].Text.ToUpperInvariant()
+                : line.RawText.ToUpperInvariant();
+
+            if (!string.IsNullOrWhiteSpace(watermarkText))
+            {
+                var wmScale = 2.65f + (_smoothedBeat * 0.18f);
+                var wmMeasured = TextShaperService.MeasureWidth(watermarkText, font, context.Fonts);
+                var wmFit = TextShaperService.ComputeAutoFitScale(wmMeasured * wmScale, w * 0.90f, 1.0f);
+                var finalWmScale = wmScale * wmFit;
+                var wmAlpha = Math.Clamp(0.055f + (_smoothedBeat * 0.045f), 0.04f, 0.13f);
+
+                font.GetFontMetrics(out var metrics);
+                var baselineOffset = -((metrics.Ascent + metrics.Descent) * 0.5f);
+
+                var wmSave = canvas.Save();
+                try
+                {
+                    canvas.Translate(centerX, centerY);
+                    canvas.Scale(finalWmScale, finalWmScale);
+                    context.Legibility.DrawLegibleText(
+                        canvas,
+                        watermarkText,
+                        0f,
+                        baselineOffset,
+                        SKTextAlign.Center,
+                        font,
+                        fontId,
+                        StyleLayoutHelper.BlendSrgb(palette.AccentColor2, palette.AccentColor3, 0.5f),
+                        opacity: wmAlpha,
+                        fonts: context.Fonts);
+                }
+                finally
+                {
+                    canvas.RestoreToCount(wmSave);
+                }
+            }
+        }
+        finally
+        {
+            canvas.RestoreToCount(backSave);
+        }
+    }
+
+    private void DrawCornerBracket(SKCanvas canvas, float x, float y, float dx, float dy)
+    {
+        canvas.DrawLine(x, y, x + dx, y, _hairlinePaint);
+        canvas.DrawLine(x, y, x, y + dy, _hairlinePaint);
+    }
+
+    private void DrawStageTelemetryRail(
+        in StyleRenderContext context,
+        LyricFontId fontId,
+        Core.Runtime.ActiveLyricSlice slice,
+        float fontSize)
+    {
+        var packet = context.Packet;
+        var canvas = context.Canvas;
+        var doc = packet.SceneSnapshot.Document;
+        var totalLines = doc?.Lines.Length ?? 0;
+        if (totalLines <= 0)
+        {
+            return;
+        }
+
+        var railX = Math.Clamp(packet.ViewportWidthDip * 0.06f, 28f, 64f);
+        var centerY = packet.ViewportHeightDip * 0.50f;
+        var monoFont = context.Fonts.GetOrCreateFont(LyricFontId.SystemMono, Math.Clamp(fontSize * 0.28f, 11f, 14f), enforceMinOverlayFloor: false);
+
+        var lineLabel = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{Math.Clamp(slice.ActiveLineIndex + 1, 1, totalLines):D2}/{totalLines:D2}");
+
+        context.Legibility.DrawLegibleText(
+            canvas,
+            lineLabel,
+            railX,
+            centerY - 46f,
+            SKTextAlign.Left,
+            monoFont,
+            LyricFontId.SystemMono,
+            packet.Palette.AccentColor1,
+            opacity: 0.62f,
+            fonts: context.Fonts);
+
+        // Minimalist 6-bar vertical equalizer spine next to line index
+        var bands = packet.EffectiveAudioMetrics.SafeBands;
+        for (var b = 0; b < 6 && b < bands.Length; b++)
+        {
+            var mag = Math.Clamp(bands[b * 2 % bands.Length], 0.08f, 1.0f);
+            var barW = 4f + (mag * 22f);
+            var y = centerY - 26f + (b * 8f);
+            var barColor = StyleLayoutHelper.BlendSrgb(packet.Palette.AccentColor1, packet.Palette.AccentColor2, b / 5f);
+            _fillPaint.Color = barColor.ToSkColorWithAlpha(0.28f + (mag * 0.52f));
+            canvas.DrawRoundRect(new SKRect(railX, y, railX + barW, y + 3.5f), 1.75f, 1.75f, _fillPaint);
+        }
+    }
+
+    private void DrawScatteredWordCascade(
+        in StyleRenderContext context,
+        SKFont font,
+        LyricFontId fontId,
+        Core.Runtime.ActiveLyricSlice slice,
+        float centerX,
+        float centerY,
+        bool isFullStage)
     {
         var packet = context.Packet;
         var line = slice.CurrentLine!;
@@ -276,23 +472,24 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
             return;
         }
 
-        // Show up to 5 visible cascade words centered around active word (inspired by Verci's "Ship": hum / when / you / [walk] / in)
+        // Show up to 6 visible cascade words on full stage, 5 on compact/overlay
         var activeIdx = Math.Clamp(slice.ActiveWordIndex, 0, words.Length - 1);
+        var lookBack = isFullStage ? 3 : 2;
         var windowRadius = packet.IsCompactCard ? 1 : 2;
-        var startIdx = Math.Max(0, activeIdx - 3);
+        var startIdx = Math.Max(0, activeIdx - lookBack);
         var endIdx = Math.Min(words.Length - 1, activeIdx + windowRadius);
         var visibleCount = (endIdx - startIdx) + 1;
-        var slotPitch = font.Size * (packet.IsCompactCard ? 1.18f : 1.28f);
-        var spreadX = packet.ViewportWidthDip * (packet.IsCompactCard ? 0.14f : 0.12f);
+        var slotPitch = font.Size * (packet.IsCompactCard ? 1.15f : 1.24f);
+        var spreadX = packet.ViewportWidthDip * (packet.IsCompactCard ? 0.14f : 0.15f);
 
-        // Soft ghosted previous line floating at upper-right
+        // Previous line whisper (top-left editorial context)
         if (!packet.IsCompactCard && slice.PreviousLine is not null)
         {
             var ghostSave = context.Canvas.Save();
             try
             {
-                context.Canvas.Translate(centerX + (spreadX * 0.9f), centerY - (slotPitch * 2.2f));
-                context.Canvas.Scale(0.55f, 0.55f);
+                context.Canvas.Translate(centerX - (spreadX * 0.82f), centerY - (slotPitch * 2.35f));
+                context.Canvas.Scale(0.52f, 0.52f);
                 context.Legibility.DrawLegibleText(
                     context.Canvas,
                     slice.PreviousLine.RawText,
@@ -311,44 +508,130 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
             }
         }
 
+        // Next line preview whisper (lower-right diagonal anticipation on full stage)
+        if (isFullStage && slice.NextLine is not null && !slice.NextLine.IsInstrumentalBreak)
+        {
+            var nextSave = context.Canvas.Save();
+            try
+            {
+                context.Canvas.Translate(centerX + (spreadX * 0.86f), centerY + (slotPitch * 2.38f));
+                context.Canvas.Scale(0.48f, 0.48f);
+                context.Legibility.DrawLegibleText(
+                    context.Canvas,
+                    slice.NextLine.RawText,
+                    0f,
+                    baselineOffset,
+                    SKTextAlign.Center,
+                    font,
+                    fontId,
+                    packet.Palette.AccentColor1,
+                    opacity: 0.25f,
+                    fonts: context.Fonts);
+            }
+            finally
+            {
+                context.Canvas.RestoreToCount(nextSave);
+            }
+        }
+
+        // Pass 1: Precompute sculpted cascade positions & draw continuous kinetic trace links between spoken words
+        var anchorCount = Math.Min(visibleCount, _wordAnchors.Length);
+        for (var i = startIdx; i <= endIdx && (i - startIdx) < anchorCount; i++)
+        {
+            var k = i - startIdx;
+            var relRow = k - ((visibleCount - 1) * 0.5f);
+            var offsetFrac = ComputeCascadeOffsetFrac(i, line.Index);
+            var rawX = centerX + (offsetFrac * spreadX);
+            var wordY = centerY + (relRow * slotPitch);
+            var measured = TextShaperService.MeasureWidth(words[i].Text, font, context.Fonts);
+            var isActive = i == activeIdx;
+            var scale = isActive && !packet.ReducedMotion ? _wordSlamScale.Value : (i < activeIdx ? 0.88f : 0.80f);
+            var fit = TextShaperService.ComputeAutoFitScale(measured * scale, packet.ViewportWidthDip * 0.72f, 1.0f);
+            var finalScale = scale * fit;
+            var halfW = (measured * finalScale * 0.5f) + 20f;
+            var clampedX = Math.Clamp(rawX, halfW, Math.Max(halfW, packet.ViewportWidthDip - halfW));
+            _wordAnchors[k] = new SKPoint(clampedX, wordY);
+        }
+
+        var completedAnchors = Math.Min(anchorCount - 1, activeIdx - startIdx);
+        if (!packet.IsCompactCard && completedAnchors > 0)
+        {
+            _tracePath.Rewind();
+            _tracePath.MoveTo(_wordAnchors[0]);
+            for (var c = 1; c <= completedAnchors; c++)
+            {
+                var p0 = _wordAnchors[c - 1];
+                var p1 = _wordAnchors[c];
+                var midY = (p0.Y + p1.Y) * 0.5f;
+                _tracePath.CubicTo(p0.X, midY, p1.X, midY, p1.X, p1.Y);
+            }
+
+            _tracePaint.StrokeWidth = 2.0f + (_smoothedBeat * 1.4f);
+            _tracePaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha(0.24f + (_smoothedBass * 0.16f));
+            context.Canvas.DrawPath(_tracePath, _tracePaint);
+        }
+
         var dotX = centerX;
         var dotY = centerY;
 
+        // Pass 2: Render all cascade words, hero chromatic cutout plaques, semantic vector visuals, and sweep bar
         for (var i = startIdx; i <= endIdx; i++)
         {
             var word = words[i];
-            var relRow = (i - startIdx) - (visibleCount - 1) * 0.5f;
-            var offsetFrac = ComputeCascadeOffsetFrac(i, line.Index);
-            var wordX = centerX + (offsetFrac * spreadX);
-            var wordY = centerY + (relRow * slotPitch);
+            var k = i - startIdx;
+            var posPt = k < anchorCount ? _wordAnchors[k] : new SKPoint(centerX, centerY);
+            var clampedX = posPt.X;
+            var wordY = posPt.Y;
 
             var isActive = i == activeIdx;
             var isPast = i < activeIdx;
             var opacity = isActive
-                ? (packet.ReducedMotion ? (0.92f + (0.08f * highlightEased)) : 1.0f)
+                ? (packet.ReducedMotion ? (0.94f + (0.06f * highlightEased)) : 1.0f)
                 : isPast ? 0.72f : 0.34f;
-            var scale = isActive && !packet.ReducedMotion ? _wordSlamScale.Value : (isPast ? 0.92f : 0.86f);
+            var scale = isActive && !packet.ReducedMotion ? _wordSlamScale.Value : (isPast ? 0.88f : 0.80f);
             var measured = TextShaperService.MeasureWidth(word.Text, font, context.Fonts);
-            var fit = TextShaperService.ComputeAutoFitScale(measured * scale, packet.ViewportWidthDip * 0.74f, 1.0f);
+            var fit = TextShaperService.ComputeAutoFitScale(measured * scale, packet.ViewportWidthDip * 0.72f, 1.0f);
             var finalScale = scale * fit;
-            var clampedX = Math.Clamp(wordX, (measured * finalScale * 0.5f) + 18f, Math.Max((measured * finalScale * 0.5f) + 18f, packet.ViewportWidthDip - (measured * finalScale * 0.5f) - 18f));
 
             if (isActive)
             {
-                dotX = clampedX - (measured * finalScale * 0.5f) + (measured * finalScale * (float)Math.Clamp(slice.WordProgress, 0.0, 1.0));
-                dotY = wordY + (font.Size * finalScale * 0.62f);
+                var boxHalfW = measured * finalScale * 0.5f;
+                dotX = clampedX - boxHalfW + (measured * finalScale * (float)Math.Clamp(slice.WordProgress, 0.0, 1.0));
+                dotY = wordY + (font.Size * finalScale * 0.64f);
 
                 if (packet.ShowColorSweepLayer)
                 {
-                    var sweepRect = new SKRect(clampedX - (measured * finalScale * 0.5f), wordY - (font.Size * finalScale * 0.52f), clampedX + (measured * finalScale * 0.5f), wordY + (font.Size * finalScale * 0.52f));
+                    var sweepRect = new SKRect(clampedX - boxHalfW, wordY - (font.Size * finalScale * 0.52f), clampedX + boxHalfW, wordY + (font.Size * finalScale * 0.52f));
                     _aesthetics.DrawWordColorSweep(context.Canvas, sweepRect, slice.WordProgress, packet, opacity);
+                }
+
+                // Semantic animated vector icon badge anchored crisply beside focal cutout/word
+                if (word.Visual is { } matchedVisual)
+                {
+                    var badgeOffsetX = (boxHalfW + (font.Size * 0.62f)) * (clampedX > centerX ? -1f : 1f);
+                    var badgeX = Math.Clamp(clampedX + badgeOffsetX, 42f, packet.ViewportWidthDip - 42f);
+                    var badgeY = wordY - (font.Size * 0.08f);
+                    var badgeSize = Math.Clamp(font.Size * finalScale * 0.72f, 22f, 44f);
+                    _aesthetics.DrawReactiveVisual(context.Canvas, in context, matchedVisual, badgeX, badgeY, badgeSize, opacity, isActive: true);
                 }
             }
 
             var useCutout = isActive && (word.Visual is not null || word.Text.Length >= 4);
             if (useCutout)
             {
-                var tilt = ((i % 2 == 0) ? -1.8f : 1.8f);
+                var tilt = ((i + line.Index) % 2 == 0) ? -2.1f : 2.1f;
+
+                // Subtle dual accent edge glow behind editorial sticker cutout on beat hits
+                if (!packet.ReducedMotion && _smoothedBeat > 0.05f)
+                {
+                    var plaqueHalfW = (measured * finalScale * 0.5f) + 12f;
+                    var plaqueHalfH = (font.Size * finalScale * 0.56f);
+                    _fillPaint.Color = packet.Palette.AccentColor2.ToSkColorWithAlpha(Math.Clamp(_smoothedBeat * 0.24f, 0f, 0.30f));
+                    context.Canvas.DrawRoundRect(
+                        new SKRect(clampedX - plaqueHalfW - 4f, wordY - plaqueHalfH - 4f, clampedX + plaqueHalfW + 4f, wordY + plaqueHalfH + 4f),
+                        12f, 12f, _fillPaint);
+                }
+
                 var cutoutSave = context.Canvas.Save();
                 try
                 {
@@ -365,7 +648,7 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
             }
 
             var color = isActive
-                ? StyleLayoutHelper.BlendSrgb(packet.Palette.AccentColor1, SKColors.White.ToRgb(), 0.45f * highlightEased)
+                ? StyleLayoutHelper.BlendSrgb(packet.Palette.AccentColor1, SKColors.White.ToRgb(), 0.55f * highlightEased)
                 : isPast ? packet.Palette.AccentColor1 : packet.Palette.AccentColor3;
 
             var wordSave = context.Canvas.Save();
@@ -373,6 +656,35 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
             {
                 context.Canvas.Translate(clampedX, wordY);
                 context.Canvas.Scale(finalScale, finalScale);
+
+                // Chromatic depth split echo on non-cutout active words
+                if (isActive && !packet.ReducedMotion && _smoothedBeat > 0.06f)
+                {
+                    var splitDx = 2.6f * (0.4f + _smoothedBeat);
+                    context.Legibility.DrawLegibleText(
+                        context.Canvas,
+                        word.Text,
+                        -splitDx,
+                        baselineOffset,
+                        SKTextAlign.Center,
+                        font,
+                        fontId,
+                        packet.Palette.AccentColor1,
+                        opacity: 0.30f,
+                        fonts: context.Fonts);
+                    context.Legibility.DrawLegibleText(
+                        context.Canvas,
+                        word.Text,
+                        splitDx,
+                        baselineOffset,
+                        SKTextAlign.Center,
+                        font,
+                        fontId,
+                        packet.Palette.AccentColor2,
+                        opacity: 0.30f,
+                        fonts: context.Fonts);
+                }
+
                 context.Legibility.DrawLegibleText(
                     context.Canvas,
                     word.Text,
@@ -396,11 +708,12 @@ public sealed class KineticWallStyleRenderer : IKineticStyleRenderer
     }
 
     private static float ComputeCascadeOffsetFrac(int wordIdx, int lineIdx) =>
-        ((wordIdx + lineIdx) % 4) switch
+        ((wordIdx * 3 + lineIdx) % 5) switch
         {
-            0 => -0.78f,
-            1 => 0.64f,
-            2 => -0.18f,
-            _ => 0.82f
+            0 => -0.82f,
+            1 => 0.68f,
+            2 => -0.22f,
+            3 => 0.86f,
+            _ => 0.14f
         };
 }

@@ -6,29 +6,23 @@ using SkiaSharp;
 namespace LyricPulse.Rendering.Styles;
 
 /// <summary>
-/// Renders full-perimeter Ambilight / concert-stage glow and multi-layer liquid Neon Rush
-/// plasma ribbons (<see cref="EdgeGlowMode"/>) reacting smoothly to WASAPI audio metrics.
-/// Uses delta-integrated phase accumulation so speed never warps on beat transients, and
-/// pre-allocated Skia objects for locked 60-144 FPS performance without blur-filter overhead.
+/// Renders full-perimeter Ambilight / concert-stage glow and Neon Rush — a single,
+/// continuous, unbroken GPU-shaded neon plasma ribbon gliding smoothly along a
+/// true #000000 OLED frame without segmentation joints, dots, or blur-filter lag.
 /// Strictly skipped on transparent DesktopOverlay and compact GalleryCard thumbnails.
 /// </summary>
 public sealed class EdgeGlowRenderer : IDisposable
 {
-    private const int TaperSegmentCount = 8;
-
     private readonly SKPaint _edgePaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _rimPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round };
-    private readonly SKPaint _headPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPath _perimeterPath = new();
-    private readonly SKPath _beamPath = new();
-    private readonly SKPathMeasure _pathMeasure = new();
 
     private readonly SKColor[] _edgeColors = new SKColor[4];
     private readonly float[] _edgeStops = [0f, 0.28f, 0.65f, 1f];
     private readonly SKColor[] _cornerColors = new SKColor[4];
     private readonly float[] _cornerStops = [0f, 0.35f, 0.68f, 1f];
-    private readonly SKColor[] _beamColors = new SKColor[4];
-    private readonly float[] _beamStops = [0f, 0.22f, 0.56f, 1f];
+    private readonly SKColor[] _sweepColors = new SKColor[12];
+    private readonly float[] _sweepStops = [0.00f, 0.38f, 0.46f, 0.54f, 0.63f, 0.72f, 0.80f, 0.87f, 0.92f, 0.96f, 0.985f, 1.00f];
 
     private double _lastRenderTimeSec = -1.0;
     private double _rushPhase;
@@ -79,6 +73,15 @@ public sealed class EdgeGlowRenderer : IDisposable
             packet.Palette,
             settings?.AutoSyncColors ?? true);
 
+        var canvas = context.Canvas;
+
+        // Neon Rush keeps unlit borders & interior pitch black (#000000); one single seamless ribbon glides around the frame.
+        if (mode == EdgeGlowMode.NeonRush)
+        {
+            DrawSingleNeonRushLine(canvas, w, h, packet, palette, intensity, thicknessSetting);
+            return;
+        }
+
         var beatLift = packet.ReducedMotion
             ? 0f
             : (_smoothedBass * 0.54f) + (_smoothedBeat * 0.46f) + (audio.TrebleEnergy * 0.14f);
@@ -87,7 +90,6 @@ public sealed class EdgeGlowRenderer : IDisposable
         {
             EdgeGlowMode.SoftAmbient => (0.15f + (beatLift * 0.04f), 0.25f, 0.0f),
             EdgeGlowMode.NeonRim => (0.17f + (beatLift * 0.07f), 0.28f + (beatLift * 0.22f), 0.58f + (beatLift * 0.34f)),
-            EdgeGlowMode.NeonRush => (0.19f + (beatLift * 0.08f), 0.29f + (beatLift * 0.24f), 0.45f + (beatLift * 0.30f)),
             _ => (0.16f + (beatLift * 0.08f), 0.26f + (beatLift * 0.30f), 0.26f + (beatLift * 0.34f))
         };
 
@@ -101,15 +103,6 @@ public sealed class EdgeGlowRenderer : IDisposable
         var cBottom = StyleLayoutHelper.BlendSrgb(palette.AccentColor2, palette.AccentColor3, 0.5f + (0.5f * MathF.Cos(phase * MathF.Tau)));
         var cLeft = StyleLayoutHelper.BlendSrgb(palette.AccentColor1, palette.AccentColor3, 0.5f + (0.5f * MathF.Sin((phase + 0.25f) * MathF.Tau)));
         var cRight = StyleLayoutHelper.BlendSrgb(palette.AccentColor2, palette.AccentColor1, 0.5f + (0.5f * MathF.Cos((phase + 0.35f) * MathF.Tau)));
-
-        var canvas = context.Canvas;
-
-        // Neon Rush keeps unlit borders & interior pitch black (#000000); only chasing beams glow around the bezel.
-        if (mode == EdgeGlowMode.NeonRush)
-        {
-            DrawNeonRushPerimeter(canvas, w, h, packet, palette, intensity, thicknessSetting);
-            return;
-        }
 
         // 1. Multi-stop silky perimeter edge washes (SoftAmbient / BeatPulse / NeonRim)
         DrawEdgeBand(canvas, new SKRect(0f, 0f, w, reachY), new SKPoint(0f, 0f), new SKPoint(0f, reachY), cTop, alpha * 0.90f);
@@ -158,10 +151,7 @@ public sealed class EdgeGlowRenderer : IDisposable
         _disposed = true;
         _edgePaint.Dispose();
         _rimPaint.Dispose();
-        _headPaint.Dispose();
         _perimeterPath.Dispose();
-        _beamPath.Dispose();
-        _pathMeasure.Dispose();
     }
 
     private void UpdateSmoothedMotionState(
@@ -172,9 +162,8 @@ public sealed class EdgeGlowRenderer : IDisposable
         float beatPulse,
         bool reducedMotion)
     {
-        // Smooth audio transients slightly so thickness & surge breathe organically
-        _smoothedBass = (_smoothedBass * 0.72f) + (Math.Clamp(bassEnergy, 0f, 1.5f) * 0.28f);
-        _smoothedBeat = (_smoothedBeat * 0.65f) + (Math.Clamp(beatPulse, 0f, 1.5f) * 0.35f);
+        _smoothedBass = (_smoothedBass * 0.74f) + (Math.Clamp(bassEnergy, 0f, 1.5f) * 0.26f);
+        _smoothedBeat = (_smoothedBeat * 0.68f) + (Math.Clamp(beatPulse, 0f, 1.5f) * 0.32f);
 
         if (reducedMotion)
         {
@@ -182,9 +171,8 @@ public sealed class EdgeGlowRenderer : IDisposable
             return;
         }
 
-        // True delta-time integration (~0.095 laps/sec at 1.0x speed, ~15s per full perimeter lap at default 0.70x)
-        // prevents time-multiplication phase jumps when bass hits mid-song.
-        var baseRate = 0.095f * speedSetting * Math.Clamp(safePartyEnergy, 0.75f, 1.35f);
+        // Silky slow delta-integrated rotation (~0.075 laps/sec at 1.0x -> ~19s per lap at 0.70x default)
+        var baseRate = 0.075f * speedSetting * Math.Clamp(safePartyEnergy, 0.75f, 1.35f);
         var dt = (_lastRenderTimeSec >= 0.0 && renderTimeSeconds >= _lastRenderTimeSec)
             ? renderTimeSeconds - _lastRenderTimeSec
             : -1.0;
@@ -196,14 +184,14 @@ public sealed class EdgeGlowRenderer : IDisposable
         }
         else if (dt > 0.0)
         {
-            var effectiveRate = baseRate * (1.0f + (_smoothedBass * 0.22f) + (_smoothedBeat * 0.14f));
+            var effectiveRate = baseRate * (1.0f + (_smoothedBass * 0.16f) + (_smoothedBeat * 0.10f));
             _rushPhase = (_rushPhase + (dt * effectiveRate)) % 1.0;
         }
 
         _lastRenderTimeSec = renderTimeSeconds;
     }
 
-    private void DrawNeonRushPerimeter(
+    private void DrawSingleNeonRushLine(
         SKCanvas canvas,
         float w,
         float h,
@@ -214,13 +202,13 @@ public sealed class EdgeGlowRenderer : IDisposable
     {
         var isOpenArch = packet.BottomFadeToBlack;
         var minDim = MathF.Min(w, h);
-        var inset = Math.Clamp(2.5f * thickness, 2.0f, Math.Min(8.0f, minDim * 0.04f));
+        var inset = Math.Clamp(2.2f * thickness, 2.0f, Math.Min(7.5f, minDim * 0.04f));
         var cornerR = Math.Clamp(8f + (thickness * 2.5f), 5f, minDim * 0.05f);
 
         _perimeterPath.Rewind();
         if (isOpenArch)
         {
-            // Rounded Open Top-U arch stops cleanly well above bottomFadeToBlack region
+            // Seamless Open Top-U arch ending well above bottomFadeToBlack rows
             var archY = h * 0.72f;
             _perimeterPath.MoveTo(inset, archY);
             _perimeterPath.LineTo(inset, inset + cornerR);
@@ -234,54 +222,65 @@ public sealed class EdgeGlowRenderer : IDisposable
             _perimeterPath.AddRoundRect(new SKRect(inset, inset, w - inset, h - inset), cornerR, cornerR);
         }
 
-        _pathMeasure.SetPath(_perimeterPath, forceClosed: !isOpenArch);
-        var totalLen = _pathMeasure.Length;
-        if (totalLen <= 20f)
-        {
-            return;
-        }
-
         if (isOpenArch)
         {
-            // Clip strictly above bottom 8% so even thick radial glow blooms leave bottom rows at alpha=0
             canvas.Save();
             canvas.ClipRect(new SKRect(0f, 0f, w, h * 0.92f));
         }
 
         try
         {
-            // Asymmetric lush beam lengths (38% and 32% of perimeter) while leaving unlit borders pure black #000000
-            var beamLen1 = totalLen * (0.38f + (_smoothedBeat * 0.08f));
-            var beamLen2 = totalLen * (0.32f + (_smoothedBass * 0.07f));
+            var sweepCenter = isOpenArch
+                ? new SKPoint(w * 0.5f, h * 0.48f)
+                : new SKPoint(w * 0.5f, h * 0.5f);
 
-            float headDist1;
-            float headDist2;
-            if (isOpenArch)
-            {
-                // Smooth eased ping-pong travel along the open U-arch so beams never pop off corners
-                var sweep1 = 0.5f - (0.5f * MathF.Cos((float)(_rushPhase * Math.PI * 2.0)));
-                var sweep2 = 0.5f - (0.5f * MathF.Cos((float)(((_rushPhase + 0.50) % 1.0) * Math.PI * 2.0)));
-                var travelMin = Math.Min(totalLen * 0.14f, beamLen1 * 0.45f);
-                var travelMax = Math.Max(travelMin + 12f, totalLen * 0.96f);
-                headDist1 = travelMin + ((travelMax - travelMin) * sweep1);
-                headDist2 = travelMin + ((travelMax - travelMin) * sweep2);
-            }
-            else
-            {
-                var p1 = (float)_rushPhase;
-                var p2 = (float)((_rushPhase + 0.50) % 1.0);
-                headDist1 = p1 * totalLen;
-                headDist2 = p2 * totalLen;
-            }
+            // In fullscreen: continuous 360° glide; in windowed mode: smooth eased sweep along the upper arch
+            var rotAngleRad = isOpenArch
+                ? ((-155f + (170f * (0.5f - (0.5f * MathF.Cos((float)(_rushPhase * Math.PI * 2.0)))))) * (MathF.PI / 180f))
+                : (float)(_rushPhase * Math.PI * 2.0);
 
-            // Iridescent harmonic color shift between album palette and neon cyan/magenta accents
+            var localMatrix = SKMatrix.CreateRotation(rotAngleRad, sweepCenter.X, sweepCenter.Y);
             var shimmer = 0.5f + (0.5f * MathF.Sin((float)(_rushPhase * Math.PI * 2.0)));
-            var cyanNeon = StyleLayoutHelper.BlendSrgb(palette.AccentColor1, new RgbColor(0x38, 0xBD, 0xF8), 0.32f + (0.14f * shimmer));
-            var magentaNeon = StyleLayoutHelper.BlendSrgb(palette.AccentColor2, new RgbColor(0xEC, 0x48, 0x99), 0.30f + (0.14f * (1f - shimmer)));
+            var tailTone = palette.AccentColor3;
+            var midTone = StyleLayoutHelper.BlendSrgb(palette.AccentColor2, palette.AccentColor1, 0.25f + (0.25f * shimmer));
+            var leadTone = StyleLayoutHelper.BlendSrgb(palette.AccentColor1, new RgbColor(0xFB, 0x92, 0x3C), 0.28f * (1f - shimmer));
+            var hotCoreTone = StyleLayoutHelper.BlendSrgb(leadTone, new RgbColor(255, 255, 255), 0.62f);
 
-            // Traveling edge-coupled light pools + tapered multi-layer plasma ribbons
-            DrawTaperedNeonRibbon(canvas, w, h, totalLen, headDist1, beamLen1, cyanNeon, palette.AccentColor3, intensity * packet.GlobalOpacity, thickness, !isOpenArch);
-            DrawTaperedNeonRibbon(canvas, w, h, totalLen, headDist2, beamLen2, magentaNeon, palette.AccentColor1, intensity * packet.GlobalOpacity, thickness, !isOpenArch);
+            var opacityScale = intensity * packet.GlobalOpacity;
+            var bodyScale = thickness * Math.Clamp(opacityScale, 0.45f, 1.35f);
+
+            // Layer 1: Wide silky atmospheric neon halation hugging bezel inward
+            DrawContinuousSweepStroke(
+                canvas,
+                sweepCenter,
+                localMatrix,
+                strokeWidth: Math.Clamp((30.0f + (_smoothedBeat * 12.0f) + (_smoothedBass * 6.0f)) * bodyScale, 6f, 84f),
+                tailTone,
+                midTone,
+                leadTone,
+                peakAlpha: Math.Clamp(0.22f * opacityScale, 0f, 0.36f));
+
+            // Layer 2: Rich saturated liquid neon body
+            DrawContinuousSweepStroke(
+                canvas,
+                sweepCenter,
+                localMatrix,
+                strokeWidth: Math.Clamp((12.5f + (_smoothedBeat * 5.0f)) * bodyScale, 3.5f, 38f),
+                tailTone,
+                midTone,
+                leadTone,
+                peakAlpha: Math.Clamp(0.62f * opacityScale, 0f, 0.85f));
+
+            // Layer 3: Razor-clean luminous inner core (no round ball dot, smooth both-end taper!)
+            DrawContinuousSweepStroke(
+                canvas,
+                sweepCenter,
+                localMatrix,
+                strokeWidth: Math.Clamp((3.6f + (_smoothedBeat * 1.8f)) * thickness, 1.8f, 11f),
+                midTone,
+                leadTone,
+                hotCoreTone,
+                peakAlpha: Math.Clamp(0.95f * opacityScale, 0f, 1.0f));
         }
         finally
         {
@@ -292,134 +291,48 @@ public sealed class EdgeGlowRenderer : IDisposable
         }
     }
 
-    private void DrawTaperedNeonRibbon(
+    private void DrawContinuousSweepStroke(
         SKCanvas canvas,
-        float w,
-        float h,
-        float totalLen,
-        float headDist,
-        float segLen,
-        RgbColor neonColor,
+        SKPoint sweepCenter,
+        SKMatrix localMatrix,
+        float strokeWidth,
         RgbColor tailColor,
-        float opacityIntensity,
-        float thickness,
-        bool isClosedLoop)
+        RgbColor midColor,
+        RgbColor peakColor,
+        float peakAlpha)
     {
-        var clampedHead = Math.Clamp(headDist, 0f, totalLen);
-        _pathMeasure.GetPosition(clampedHead, out var headPos);
-
-        // 1. Tight perimeter-hugged inward light spill strictly around active beam heads (center stays pitch black)
-        var minDim = MathF.Min(w, h);
-        var poolRadius = Math.Clamp(
-            minDim * (0.11f + (thickness * 0.03f) + (_smoothedBeat * 0.025f)),
-            24f,
-            minDim * 0.22f);
-        DrawRadialBloom(canvas, headPos.X, headPos.Y, poolRadius, neonColor, Math.Clamp(0.20f * opacityIntensity, 0f, 0.32f));
-
-        // 2. Tapered 8-segment multi-layer plasma trail (feathers smoothly to 0% alpha & thin tip)
-        var coreWidthBase = (28.0f + (_smoothedBeat * 12.0f) + (_smoothedBass * 6.0f)) * thickness * Math.Clamp(opacityIntensity, 0.45f, 1.35f);
-        for (var i = 0; i < TaperSegmentCount; i++)
+        if (peakAlpha <= 0.004f || strokeWidth <= 0.5f)
         {
-            var t0 = i / (float)TaperSegmentCount;
-            var t1 = (i + 1.15f) / TaperSegmentCount; // slight overlap hides segment seams cleanly
-            t1 = MathF.Min(t1, 1.0f);
-
-            var segStartDist = headDist - (segLen * (1f - t0));
-            var segEndDist = headDist - (segLen * (1f - t1));
-
-            if (!ExtractPathSegment(totalLen, segStartDist, segEndDist, isClosedLoop))
-            {
-                continue;
-            }
-
-            var mid = (t0 + t1) * 0.5f;
-            var alphaCurve = MathF.Pow(mid, 1.55f);
-            var widthCurve = 0.24f + (0.76f * MathF.Sqrt(mid));
-            var blendColor = StyleLayoutHelper.BlendSrgb(tailColor, neonColor, 0.25f + (0.75f * mid));
-
-            _rimPaint.Shader = null;
-
-            // Layer A: Wide atmospheric bleed halo
-            _rimPaint.StrokeWidth = Math.Clamp(coreWidthBase * 1.45f * widthCurve, 3f, 92f);
-            _rimPaint.Color = blendColor.ToSkColorWithAlpha(Math.Clamp(0.16f * alphaCurve * opacityIntensity, 0f, 0.34f));
-            canvas.DrawPath(_beamPath, _rimPaint);
-
-            // Layer B: Rich saturated liquid neon body
-            _rimPaint.StrokeWidth = Math.Clamp(coreWidthBase * 0.72f * widthCurve, 2f, 52f);
-            _rimPaint.Color = blendColor.ToSkColorWithAlpha(Math.Clamp(0.48f * alphaCurve * opacityIntensity, 0f, 0.80f));
-            canvas.DrawPath(_beamPath, _rimPaint);
-
-            // Layer C: Luminous iridescent inner tube (leading 75%)
-            if (i >= 2)
-            {
-                _rimPaint.StrokeWidth = Math.Clamp(coreWidthBase * 0.28f * widthCurve, 1.5f, 22f);
-                _rimPaint.Color = StyleLayoutHelper.BlendSrgb(blendColor, new RgbColor(255, 255, 255), 0.52f)
-                    .ToSkColorWithAlpha(Math.Clamp(0.76f * alphaCurve * opacityIntensity, 0f, 0.94f));
-                canvas.DrawPath(_beamPath, _rimPaint);
-            }
-
-            // Layer D: Silky white-hot plasma highlight (front 38% only)
-            if (i >= TaperSegmentCount - 3)
-            {
-                _rimPaint.StrokeWidth = Math.Clamp(coreWidthBase * 0.11f * widthCurve, 1.2f, 8.5f);
-                _rimPaint.Color = StyleLayoutHelper.BlendSrgb(neonColor, new RgbColor(255, 255, 255), 0.82f)
-                    .ToSkColorWithAlpha(Math.Clamp(0.92f * alphaCurve * opacityIntensity, 0f, 1.0f));
-                canvas.DrawPath(_beamPath, _rimPaint);
-            }
+            return;
         }
 
-        // 3. Soft volumetric plasma head flare (harmonized halo instead of a small hard white dot)
-        var flareR = Math.Clamp((24f + (_smoothedBeat * 14f)) * thickness * Math.Clamp(opacityIntensity, 0.5f, 1.35f), 10f, 64f);
-        _beamColors[0] = StyleLayoutHelper.BlendSrgb(neonColor, new RgbColor(255, 255, 255), 0.88f)
-            .ToSkColorWithAlpha(Math.Clamp(0.92f * opacityIntensity, 0f, 1.0f));
-        _beamColors[1] = neonColor.ToSkColorWithAlpha(Math.Clamp(0.58f * opacityIntensity, 0f, 0.85f));
-        _beamColors[2] = neonColor.ToSkColorWithAlpha(Math.Clamp(0.18f * opacityIntensity, 0f, 0.35f));
-        _beamColors[3] = neonColor.ToSkColorWithAlpha(0f);
+        // Smooth C1/C2 envelope over stops [0..1] spanning one unbroken ~62% long glowing line,
+        // feathering seamlessly to 0% alpha at both ends so zero joints or blunt caps ever appear.
+        _sweepColors[0] = SKColors.Transparent;
+        _sweepColors[1] = SKColors.Transparent;
+        _sweepColors[2] = tailColor.ToSkColorWithAlpha(peakAlpha * 0.04f);
+        _sweepColors[3] = tailColor.ToSkColorWithAlpha(peakAlpha * 0.14f);
+        _sweepColors[4] = midColor.ToSkColorWithAlpha(peakAlpha * 0.32f);
+        _sweepColors[5] = midColor.ToSkColorWithAlpha(peakAlpha * 0.56f);
+        _sweepColors[6] = StyleLayoutHelper.BlendSrgb(midColor, peakColor, 0.5f).ToSkColorWithAlpha(peakAlpha * 0.80f);
+        _sweepColors[7] = peakColor.ToSkColorWithAlpha(peakAlpha * 0.96f);
+        _sweepColors[8] = peakColor.ToSkColorWithAlpha(peakAlpha);
+        _sweepColors[9] = StyleLayoutHelper.BlendSrgb(midColor, peakColor, 0.7f).ToSkColorWithAlpha(peakAlpha * 0.52f);
+        _sweepColors[10] = midColor.ToSkColorWithAlpha(peakAlpha * 0.12f);
+        _sweepColors[11] = SKColors.Transparent;
 
-        using var headShader = SKShader.CreateRadialGradient(headPos, flareR, _beamColors, _beamStops, SKShaderTileMode.Clamp);
-        _headPaint.Shader = headShader;
-        _headPaint.Color = SKColors.White;
+        using var shader = SKShader.CreateSweepGradient(sweepCenter, _sweepColors, _sweepStops, localMatrix);
+        _rimPaint.Shader = shader;
+        _rimPaint.StrokeWidth = strokeWidth;
+        _rimPaint.Color = SKColors.White;
         try
         {
-            canvas.DrawCircle(headPos, flareR, _headPaint);
+            canvas.DrawPath(_perimeterPath, _rimPaint);
         }
         finally
         {
-            _headPaint.Shader = null;
+            _rimPaint.Shader = null;
         }
-    }
-
-    private bool ExtractPathSegment(float totalLen, float startDist, float endDist, bool isClosedLoop)
-    {
-        _beamPath.Rewind();
-
-        if (isClosedLoop)
-        {
-            var s = ((startDist % totalLen) + totalLen) % totalLen;
-            var e = ((endDist % totalLen) + totalLen) % totalLen;
-            if (e < s)
-            {
-                _pathMeasure.GetSegment(s, totalLen, _beamPath, startWithMoveTo: true);
-                _pathMeasure.GetSegment(0f, e, _beamPath, startWithMoveTo: false);
-            }
-            else if (e - s > 2f)
-            {
-                _pathMeasure.GetSegment(s, e, _beamPath, startWithMoveTo: true);
-            }
-        }
-        else
-        {
-            var cs = Math.Clamp(startDist, 0f, totalLen);
-            var ce = Math.Clamp(endDist, 0f, totalLen);
-            if (ce - cs <= 2f)
-            {
-                return false;
-            }
-
-            _pathMeasure.GetSegment(cs, ce, _beamPath, startWithMoveTo: true);
-        }
-
-        return !_beamPath.IsEmpty;
     }
 
     private void DrawRadialBloom(SKCanvas canvas, float cx, float cy, float radius, RgbColor color, float alpha)

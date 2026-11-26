@@ -124,6 +124,20 @@ public sealed class MonotonicPlaybackClock
         var drift = reportedNow - currentEst;
         var absDrift = drift.Duration();
 
+        // Chromium / Edge / Web players sometimes emit whole-second truncated timestamps (e.g. 14.000s with LastUpdatedTime=now)
+        // once per second while advancing forward. Do not sawtooth backward < 1.05s when ReportedPosition itself is advancing cleanly.
+        var isIntegerSecondQuantized = reportedPosition.Ticks > 0 &&
+            Math.Abs(reportedPosition.Ticks % TimeSpan.TicksPerSecond) <= TimeSpan.TicksPerMillisecond;
+        if (isIntegerSecondQuantized &&
+            reportedNow < currentEst &&
+            absDrift <= TimeSpan.FromMilliseconds(1050) &&
+            reportedPosition >= current.LastReportedPosition &&
+            timelineLastUpdatedUtc.Year >= 2000 &&
+            (nowUtc - timelineLastUpdatedUtc).Duration() <= TimeSpan.FromMilliseconds(250))
+        {
+            return new ClockUpdateResult(ClockUpdateKind.IgnoredJitter, currentEst, currentEst);
+        }
+
         if (absDrift <= JitterDeadzone)
         {
             return new ClockUpdateResult(ClockUpdateKind.IgnoredJitter, currentEst, currentEst);

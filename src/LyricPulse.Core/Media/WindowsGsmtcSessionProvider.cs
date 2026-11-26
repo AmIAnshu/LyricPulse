@@ -17,7 +17,7 @@ namespace LyricPulse.Core.Media;
 [ExcludeFromCodeCoverage(Justification = "Thin Windows WinRT COM OS interop shell; all business logic is unit tested in MediaSessionCoordinator, MediaSessionSelector, PlayerClassifier, and MonotonicPlaybackClock.")]
 public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
 {
-    private static readonly TimeSpan CoalescingWindow = TimeSpan.FromMilliseconds(50);
+    private static readonly TimeSpan CoalescingWindow = TimeSpan.FromMilliseconds(15);
     private static readonly TimeSpan[] InitBackoffDelays =
     [
         TimeSpan.FromSeconds(1),
@@ -231,7 +231,7 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
 
             while (!ct.IsCancellationRequested)
             {
-                var pollDelayMs = _coordinator.CurrentSession?.PlaybackState == MediaPlaybackState.Playing ? 3200 : 1600;
+                var pollDelayMs = _coordinator.CurrentSession?.PlaybackState == MediaPlaybackState.Playing ? 850 : 1100;
                 using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 waitCts.CancelAfter(pollDelayMs);
 
@@ -355,11 +355,13 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
             return null;
         }
 
-        var playbackInfo = TryInvokeWinRt(() => session.GetPlaybackInfo(), "GetPlaybackInfo");
-        var timeline = TryInvokeWinRt(() => session.GetTimelineProperties(), "GetTimelineProperties");
         var mediaProps = await TryInvokeWinRtAsync(
             () => session.TryGetMediaPropertiesAsync().AsTask(ct),
             "TryGetMediaPropertiesAsync").ConfigureAwait(false);
+
+        // Read playback status & timeline position AFTER awaiting media properties so WinRT COM latency doesn't stale-shift position
+        var playbackInfo = TryInvokeWinRt(() => session.GetPlaybackInfo(), "GetPlaybackInfo");
+        var timeline = TryInvokeWinRt(() => session.GetTimelineProperties(), "GetTimelineProperties");
 
         if (playbackInfo is null)
         {
