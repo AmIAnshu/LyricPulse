@@ -612,9 +612,9 @@
     "semantic_hash": ""
   },
   "src/LyricPulse.Rendering/Styles/ConstellationStyleRenderer.cs": {
-    "mtime": 1795639766.621905,
-    "seen": 1795640899.298149,
-    "ast_hash": "7b6da8a33621a11ef304b5d5ed1e256b",
+    "mtime": 1795674522.4550688,
+    "seen": 1795674765.9923005,
+    "ast_hash": "cb99b0a0fec6bdb08221287f1ae91625",
     "semantic_hash": ""
   },
   "src/LyricPulse.Rendering/Styles/FisheyeStyleRenderer.cs": {
@@ -972,9 +972,9 @@
     "semantic_hash": ""
   },
   ".planning/STATE.md": {
-    "mtime": 1795606834.5454888,
-    "seen": 1795640899.298149,
-    "ast_hash": "216d5aa67c80de557653eb1501198c79",
+    "mtime": 1795640915.8302305,
+    "seen": 1795674765.9928846,
+    "ast_hash": "47fc30b30d3e0796d6a85b9111481c2a",
     "semantic_hash": ""
   },
   ".planning/UI_AUDIT.md": {
@@ -1053,6 +1053,12 @@
     "mtime": 1795640423.5214136,
     "seen": 1795640899.298149,
     "ast_hash": "709855d99c1efc8a5b7d2979dea07cef",
+    "semantic_hash": ""
+  },
+  "tests/LyricPulse.Tests/Rendering/ConstellationOverhaulTests.cs": {
+    "mtime": 1795642583.5152068,
+    "seen": 1795674765.9928312,
+    "ast_hash": "03a026566109a10ce6ff953b7c5108ae",
     "semantic_hash": ""
   }
 }

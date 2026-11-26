@@ -1,9 +1,5 @@
 {
   "0": "Kinetic Styles & Semantic Visuals",
-  "1": "Win32 Overlay & NativeAOT Packaging",
-  "2": "GSMTC Clock & Album Color Sync",
   "3": "Studio UI, Gallery & System Tray",
-  "4": "Lyrics Pipeline & Core Test Suite",
-  "5": "GPU SkSL Shaders & Font Registry",
-  "6": "Roadmap, RAF Host & Broadcast Scope"
+  "4": "Lyrics Pipeline & Core Test Suite"
 }
