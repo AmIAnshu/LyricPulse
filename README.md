@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://lyricpulse.vercel.app"><img src="https://img.shields.io/badge/Live%20Demo-lyricpulse.vercel.app-5B54EC?style=for-the-badge&logo=vercel&logoColor=white" alt="Live Demo on Vercel"></a>
-  <a href="https://github.com/AmIAnshu/LyricPulse/releases/tag/v4.1"><img src="https://img.shields.io/badge/Download-v4.1%20(.EXE)-22C55E?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows v4.1 EXE"></a>
+  <a href="https://github.com/AmIAnshu/LyricPulse/releases/tag/LyricPulseV0.1"><img src="https://img.shields.io/badge/Download-LyricPulseV0.1%20(.EXE)-22C55E?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows LyricPulseV0.1 EXE"></a>
 </p>
 
 <p align="center">
@@ -81,7 +81,7 @@ LyricPulse is inspired by apps like [Verci](https://www.instagram.com/verci), br
 
 ### Option 1 — Download Ready-to-Run Windows Executable (No Setup Required)
 
-1. Download **`LyricPulse.App.exe`** from **[GitHub Releases (v4.1)](https://github.com/AmIAnshu/LyricPulse/releases/tag/v4.1)**.
+1. Download **`LyricPulse.App.exe`** from **[GitHub Releases (LyricPulseV0.1)](https://github.com/AmIAnshu/LyricPulse/releases/tag/LyricPulseV0.1)**.
 2. Double-click `LyricPulse.App.exe` on Windows 10 (1903+) / Windows 11 (x64) — self-contained single-file binary, no `.NET` install needed.
 
 ### Option 2 — Build from Source

@@ -426,18 +426,104 @@ document.getElementById('edgeSecondaryInput')?.addEventListener('input', (e) => 
 });
 
 // File uploads (Local Audio / Cover Image / LRC)
+function cropSmartCoverCanvas(img) {
+  const tmp = document.createElement('canvas');
+  tmp.width = img.width;
+  tmp.height = img.height;
+  const tctx = tmp.getContext('2d');
+  tctx.drawImage(img, 0, 0);
+
+  let data;
+  try {
+    data = tctx.getImageData(0, 0, img.width, img.height).data;
+  } catch {
+    data = null;
+  }
+
+  let sx = 0;
+  let sy = 0;
+  let sw = img.width;
+  let sh = img.height;
+
+  if (data && img.width >= 32 && img.height >= 32) {
+    const w = img.width;
+    const h = img.height;
+    const stepX = w > 256 ? 2 : 1;
+    const stepY = h > 256 ? 2 : 1;
+    const y0 = Math.floor(h * 0.08);
+    const y1 = Math.floor(h * 0.66);
+
+    let leftCol = -1;
+    let rightCol = -1;
+    for (let x = 0; x < w; x += stepX) {
+      let tot = 0;
+      let opq = 0;
+      for (let y = y0; y <= y1; y += stepY) {
+        tot++;
+        if (data[((y * w + x) * 4) + 3] >= 24) opq++;
+      }
+      if (tot > 0 && opq / tot >= 0.32) {
+        if (leftCol < 0) leftCol = x;
+        rightCol = Math.min(w - 1, x + stepX - 1);
+      }
+    }
+
+    const boxW = rightCol - leftCol + 1;
+    if (leftCol >= 0 && boxW >= w * 0.35) {
+      const innerL = Math.min(rightCol, leftCol + Math.max(2, Math.floor(boxW * 0.06)));
+      const innerR = Math.max(innerL, rightCol - Math.max(2, Math.floor(boxW * 0.06)));
+      let topRow = -1;
+      let solidEnd = -1;
+      for (let y = 0; y < h; y += stepY) {
+        let tot = 0;
+        let opq = 0;
+        for (let x = innerL; x <= innerR; x += stepX) {
+          tot++;
+          if (data[((y * w + x) * 4) + 3] >= 24) opq++;
+        }
+        const frac = tot > 0 ? opq / tot : 0;
+        if (topRow < 0) {
+          if (frac >= 0.55) {
+            topRow = y;
+            solidEnd = y;
+          }
+          continue;
+        }
+        if (frac >= 0.52) solidEnd = Math.min(h - 1, y + stepY - 1);
+        else if (y - topRow >= h * 0.30 && frac < 0.24) break;
+      }
+
+      const boxH = solidEnd - topRow + 1;
+      if (topRow >= 0 && boxH >= h * 0.35 && (boxW <= w * 0.965 || boxH <= h * 0.965)) {
+        const inset = Math.min(3, Math.max(1, Math.floor(Math.min(boxW, boxH) / 96)));
+        sx = leftCol + inset;
+        sy = topRow + inset;
+        sw = boxW - inset * 2;
+        sh = boxH - inset * 2;
+      }
+    }
+  }
+
+  const cropSide = Math.max(16, Math.min(sw, sh));
+  const cxOffset = sx + (sw - cropSide) * 0.5;
+  const cyOffset = sy + (sh - cropSide) * 0.5;
+  const out = document.createElement('canvas');
+  out.width = 288;
+  out.height = 288;
+  const octx = out.getContext('2d');
+  octx.fillStyle = '#000';
+  octx.fillRect(0, 0, 288, 288);
+  octx.drawImage(img, cxOffset, cyOffset, cropSide, cropSide, 0, 0, 288, 288);
+  return out;
+}
+
 document.getElementById('coverPickerBtn').addEventListener('click', () => document.getElementById('coverUploadInput').click());
 document.getElementById('coverUploadInput').addEventListener('change', (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
   const img = new Image();
   img.onload = () => {
-    const c = document.createElement('canvas');
-    c.width = 288;
-    c.height = 288;
-    const cx = c.getContext('2d');
-    const size = Math.min(img.width, img.height);
-    cx.drawImage(img, (img.width - size) / 2, (img.height - size) / 2, size, size, 0, 0, 288, 288);
+    const c = cropSmartCoverCanvas(img);
     state.coverCanvas = c;
     state.customCoverLoaded = true;
     state.extractedPalette = extractPaletteFromCanvas(c);

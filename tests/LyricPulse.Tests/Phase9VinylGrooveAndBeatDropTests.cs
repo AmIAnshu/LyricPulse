@@ -976,6 +976,87 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
         lyricLitPixels.Should().BeGreaterThan(120, "right column must render crisp white active and contextual 3D lyrics");
     }
 
+    [Fact]
+    public void SkiaAlbumColorExtractor_CropsSpotifyBadgeAndMarginsEdgeToEdge_WithoutBreakingNormalCovers()
+    {
+        // 1. Simulated Spotify Desktop GSMTC transparent-padded badge with bottom white Spotify logo strip
+        byte[] BuildTransparentSpotifyThumbnail()
+        {
+            using var bmp = new SKBitmap(320, 320, SKColorType.Bgra8888, SKAlphaType.Premul);
+            bmp.Erase(SKColors.Transparent);
+            using var canvas = new SKCanvas(bmp);
+            using var artPaint = new SKPaint { Color = new SKColor(0xE8, 0x5D, 0x22, 0xFF) };
+            // Inner centered square cover art (~75% width, top ~2%..77%), transparent margins left/right
+            canvas.DrawRect(new SKRect(40f, 4f, 280f, 244f), artPaint);
+            // Detached bottom white Spotify logo strip (y = 264..300)
+            using var logoPaint = new SKPaint { Color = SKColors.White };
+            canvas.DrawCircle(104f, 282f, 16f, logoPaint);
+            canvas.DrawRect(new SKRect(128f, 272f, 224f, 292f), logoPaint);
+            using var img = SKImage.FromBitmap(bmp);
+            using var encoded = img.Encode(SKEncodedImageFormat.Png, 100);
+            return encoded.ToArray();
+        }
+
+        // 2. Simulated opaque dark-matte padded composite thumbnail with bottom white Spotify logo
+        byte[] BuildOpaqueMatteSpotifyThumbnail()
+        {
+            using var bmp = new SKBitmap(320, 320, SKColorType.Bgra8888, SKAlphaType.Premul);
+            bmp.Erase(new SKColor(0x22, 0x22, 0x22, 0xFF));
+            using var canvas = new SKCanvas(bmp);
+            using var artPaint = new SKPaint { Color = new SKColor(0x1D, 0xA1, 0xF2, 0xFF) };
+            canvas.DrawRect(new SKRect(40f, 6f, 280f, 246f), artPaint);
+            using var logoPaint = new SKPaint { Color = SKColors.White };
+            canvas.DrawCircle(104f, 284f, 15f, logoPaint);
+            canvas.DrawRect(new SKRect(128f, 274f, 222f, 294f), logoPaint);
+            using var img = SKImage.FromBitmap(bmp);
+            using var encoded = img.Encode(SKEncodedImageFormat.Png, 100);
+            return encoded.ToArray();
+        }
+
+        // 3. Normal full-bleed solid crimson cover (must stay completely uncropped!)
+        byte[] BuildFullBleedCover()
+        {
+            using var bmp = new SKBitmap(200, 200, SKColorType.Bgra8888, SKAlphaType.Premul);
+            bmp.Erase(new SKColor(0xCC, 0x18, 0x38, 0xFF));
+            using var img = SKImage.FromBitmap(bmp);
+            using var encoded = img.Encode(SKEncodedImageFormat.Png, 100);
+            return encoded.ToArray();
+        }
+
+        var transPng = BuildTransparentSpotifyThumbnail();
+        using var transDecoded = SkiaAlbumColorExtractor.DecodeBoundedCoverImage(transPng, 320);
+        transDecoded.Should().NotBeNull();
+        using (var transBmp = SKBitmap.FromImage(transDecoded!))
+        {
+            var topLeftCorner = transBmp.GetPixel(4, 4);
+            var bottomCenter = transBmp.GetPixel(transBmp.Width / 2, transBmp.Height - 4);
+            topLeftCorner.Alpha.Should().Be(255, "transparent side padding must be cropped out edge-to-edge");
+            topLeftCorner.Red.Should().BeGreaterThan((byte)(topLeftCorner.Blue + 120), "edge-to-edge cover color must fill card corners");
+            bottomCenter.Red.Should().BeGreaterThan((byte)(bottomCenter.Blue + 120), "bottom white Spotify logo bar must be stripped completely");
+        }
+
+        var mattePng = BuildOpaqueMatteSpotifyThumbnail();
+        using var matteDecoded = SkiaAlbumColorExtractor.DecodeBoundedCoverImage(mattePng, 320);
+        matteDecoded.Should().NotBeNull();
+        using (var matteBmp = SKBitmap.FromImage(matteDecoded!))
+        {
+            var topLeftCorner = matteBmp.GetPixel(4, 4);
+            var bottomCenter = matteBmp.GetPixel(matteBmp.Width / 2, matteBmp.Height - 4);
+            topLeftCorner.Blue.Should().BeGreaterThan((byte)(topLeftCorner.Red + 120), "opaque dark matte side padding must be cropped out edge-to-edge");
+            bottomCenter.Blue.Should().BeGreaterThan((byte)(bottomCenter.Red + 120), "bottom white Spotify logo bar on opaque matte must be cropped completely");
+        }
+
+        var extractor = new SkiaAlbumColorExtractor();
+        var extractedTrans = extractor.Extract(new AlbumArtPayload("spotify-trans", transPng));
+        extractedTrans.IsMonochromeFallback.Should().BeFalse();
+        extractedTrans.AccentColor1.R.Should().BeGreaterThan((byte)(extractedTrans.AccentColor1.B + 80), "dominant accent must come from orange cover art rather than bottom white Spotify logo");
+
+        var fullBleedPng = BuildFullBleedCover();
+        using var fullBmp = SKBitmap.Decode(fullBleedPng);
+        var fullCrop = SkiaAlbumColorExtractor.ComputeSmartArtworkCropRect(fullBmp);
+        fullCrop.Width.Should().BeApproximately(200f, 0.1f, "normal full-bleed cover must retain full bounds");
+    }
+
     private sealed class FakeSlowArtMediaProvider : IMediaSessionProvider
     {
         private readonly TaskCompletionSource<AlbumArtPayload?> _artTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);

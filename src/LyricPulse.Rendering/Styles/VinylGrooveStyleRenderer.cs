@@ -582,6 +582,10 @@ public sealed class VinylGrooveStyleRenderer : IKineticStyleRenderer
 
             if (_cachedCoverArt is not null)
             {
+                _fillPaint.Shader = null;
+                _fillPaint.Color = theme.DeepAmbient.ToSkColor();
+                canvas.DrawRect(drawRect, _fillPaint);
+
                 _coverPaint.Color = SKColors.White;
                 canvas.DrawImage(
                     _cachedCoverArt,
