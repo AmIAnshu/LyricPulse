@@ -7,9 +7,9 @@ namespace LyricPulse.Rendering.Styles;
 
 /// <summary>
 /// Authoritative <see cref="ILyricSceneRenderer"/> coordinating <see cref="StageBackdropRenderer"/>,
-/// <see cref="PlaybackLifecycleChoreographer"/>, and all 10 registered kinetic lyric styles
+/// <see cref="PlaybackLifecycleChoreographer"/>, <see cref="BeatDropEffectRenderer"/>, and all 11 registered kinetic lyric styles
 /// (<c>Fisheye</c>, <c>FisheyeVisual</c>, <c>Codestyle</c>, <c>CodestyleVisual</c>, <c>VisualStack</c>,
-/// <c>Constellation</c>, <c>SpidersWeb</c>, <c>NodeLine</c>, <c>KineticWall</c>, <c>Messages</c>).
+/// <c>Constellation</c>, <c>SpidersWeb</c>, <c>NodeLine</c>, <c>KineticWall</c>, <c>Messages</c>, <c>VinylGroove</c>).
 /// Synchronizes cross-thread Advance/Render/Dispose, honors per-frame <c>StyleOverride</c> for
 /// simultaneous Gallery previews, and preserves spring velocity across timing offset nudges.
 /// </summary>
@@ -21,6 +21,7 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
     private readonly StageBackdropRenderer _backdrop;
     private readonly AudioVisualizerRenderer _visualizer;
     private readonly EdgeGlowRenderer _edgeGlow;
+    private readonly BeatDropEffectRenderer _beatDrop = new();
     private readonly Lock _sync = new();
 
     private OverlayStyleId _lastRoutedStyle = OverlayStyleId.Fisheye;
@@ -63,6 +64,7 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
             _styles[OverlayStyleId.NodeLine] = new NodeLineStyleRenderer();
             _styles[OverlayStyleId.KineticWall] = new KineticWallStyleRenderer();
             _styles[OverlayStyleId.Messages] = new MessagesStyleRenderer();
+            _styles[OverlayStyleId.VinylGroove] = new VinylGrooveStyleRenderer();
         }
 
         _fallbackStyle = _styles.TryGetValue(OverlayStyleId.Fisheye, out var fisheye)
@@ -89,7 +91,7 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
 
     /// <summary>
     /// Returns the canonical staggered Neon Horizon phase offset (in seconds) for a Gallery live preview card
-    /// so all 10 style cards display their signature lyrics asynchronously per MOTION_AND_STYLES.md section 7.3.
+    /// so all 11 style cards display their signature lyrics asynchronously per MOTION_AND_STYLES.md section 7.3.
     /// </summary>
     public static double GetGalleryPreviewPhaseOffsetSeconds(OverlayStyleId styleId) =>
         StyleLayoutHelper.GetGalleryPreviewPhaseOffsetSeconds(styleId);
@@ -128,13 +130,15 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
             if (trackChanged)
             {
                 _backdrop.Reset();
+                _beatDrop.Reset();
             }
 
             var isNeonRushStage = IsNeonRushStage(in packet);
             var backdropActive = !isNeonRushStage && _backdrop.Advance(in packet);
+            var dropActive = _beatDrop.Advance(in packet);
             _lastLifecycle = _lifecycle.Advance(in packet);
             var styleActive = _lastLifecycle.ShouldRenderLyrics && renderer.Advance(in packet, in _lastLifecycle);
-            return backdropActive || _lastLifecycle.IsAnimating || styleActive;
+            return backdropActive || dropActive || _lastLifecycle.IsAnimating || styleActive;
         }
     }
 
@@ -170,8 +174,9 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
                 _backdrop.Render(in context);
             }
 
-            // Layer 0.5: Audio-reactive background visualizer + perimeter Edges Glow
+            // Layer 0.5: Audio-reactive background visualizer, Concert Drop sparks/shockwaves & perimeter Edges Glow
             _visualizer.Render(in context);
+            _beatDrop.RenderStageDrops(in context);
             _edgeGlow.Render(in context);
 
             if (lifecycle.ShouldRenderLyrics)
@@ -180,13 +185,25 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
                 if (effectiveOpacity > 0.004f)
                 {
                     var opacitySave = context.Legibility.BeginGlobalOpacityLayer(canvas, effectiveOpacity);
+                    var dropZoom = _beatDrop.GetLyricZoomMultiplier(in packet);
+                    var zoomSave = dropZoom > 1.002f ? canvas.Save() : -1;
                     try
                     {
+                        if (zoomSave >= 0)
+                        {
+                            canvas.Scale(dropZoom, dropZoom, packet.ViewportWidthDip * 0.5f, packet.ViewportHeightDip * 0.5f);
+                        }
+
                         var renderer = ResolveRenderer(packet.EffectiveStyle);
                         renderer.Render(in context, in lifecycle);
                     }
                     finally
                     {
+                        if (zoomSave >= 0)
+                        {
+                            canvas.RestoreToCount(zoomSave);
+                        }
+
                         LegibilityPipeline.EndGlobalOpacityLayer(canvas, opacitySave);
                     }
                 }
@@ -220,6 +237,7 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
             }
 
             _styles.Clear();
+            _beatDrop.Dispose();
             _visualizer.Dispose();
             _edgeGlow.Dispose();
             _backdrop.Dispose();

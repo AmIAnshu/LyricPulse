@@ -104,18 +104,18 @@ internal static class SmokeTestRunner
             }
         }
 
-        // Verify Phase 5 StageViewModel + 10-card live Gallery metadata
+        // Verify Phase 5 StageViewModel + dynamic Gallery metadata
         var stageVm = new StageViewModel(runtime);
         stageVm.ApplySnapshot(demoSnapshot);
-        if (stageVm.StyleCards.Count != 10 || stageVm.StudioPresets.Length != 4)
+        if (stageVm.StyleCards.Count != allStyles.Length || stageVm.StudioPresets.Length != 4)
         {
-            await Console.Error.WriteLineAsync("[FAIL] StageViewModel failed 10-style / 4-preset initialization.").ConfigureAwait(false);
+            await Console.Error.WriteLineAsync($"[FAIL] StageViewModel failed {allStyles.Length}-style / 4-preset initialization.").ConfigureAwait(false);
             return 5;
         }
 
         var trayState = TrayMenuState.FromSnapshot(demoSnapshot);
         await Console.Out.WriteLineAsync(
-            $"[PASS] LyricPulse Phase 5 smoke test succeeded | Fonts=5 | Shaders=3/3 OK | DemoLines={annotatedDemo.Lines.Length} | Styles={allStyles.Length}/10 | StageCards={stageVm.StyleCards.Count} | TrayHeader='{trayState.HeaderPrimaryLine}'").ConfigureAwait(false);
+            $"[PASS] LyricPulse smoke test succeeded | Fonts=5 | Shaders=3/3 OK | DemoLines={annotatedDemo.Lines.Length} | Styles={allStyles.Length}/{allStyles.Length} | StageCards={stageVm.StyleCards.Count} | TrayHeader='{trayState.HeaderPrimaryLine}'").ConfigureAwait(false);
         return 0;
     }
 }

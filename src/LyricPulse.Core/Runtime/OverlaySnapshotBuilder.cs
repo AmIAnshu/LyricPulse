@@ -88,10 +88,11 @@ internal static class OverlaySnapshotBuilder
         var rawPos = TimeSpan.FromSeconds(loopSec);
         var effectivePos = TimingOffsetService.ComputeEffectiveLookupTime(rawPos, state.TimingOffset.Offset, DemoSongProvider.LoopDuration);
         var slice = ActiveLyricSlice.Resolve(demoDoc, effectivePos, DemoSongProvider.LoopDuration);
-        var audioMetrics = state.IsEffectiveReducedMotion
+        var rawMetrics = state.IsEffectiveReducedMotion
             ? AudioFrameMetrics.Silent
             : audioMetricsResolver?.Invoke(elapsedSec, true, state.Settings.PartyEnergyLevel)
-              ?? AudioSpectrumAnalyzer.ComputeSyntheticPulse(elapsedSec, true, state.Settings.PartyEnergyLevel);
+              ?? AudioSpectrumAnalyzer.ComputeSyntheticPulse(elapsedSec, true, state.Settings.PartyEnergyLevel, state.Settings.BeatDropSensitivity);
+        var audioMetrics = ApplyManualDropOverride(rawMetrics, state, nowTimestamp, timestampFrequency);
 
         return new OverlayPlaybackSnapshot(
             Track: demoDoc.Track,
@@ -138,10 +139,11 @@ internal static class OverlaySnapshotBuilder
         var liveSlice = ActiveLyricSlice.Resolve(state.LiveDocument, effectiveLivePos, duration);
         var isPlaying = session?.PlaybackState == MediaPlaybackState.Playing;
         var timeSec = nowTimestamp / (double)timestampFrequency;
-        var audioMetrics = state.IsEffectiveReducedMotion
+        var rawMetrics = state.IsEffectiveReducedMotion
             ? AudioFrameMetrics.Silent
             : audioMetricsResolver?.Invoke(timeSec, isPlaying, state.Settings.PartyEnergyLevel)
-              ?? AudioSpectrumAnalyzer.ComputeSyntheticPulse(timeSec, isPlaying, state.Settings.PartyEnergyLevel);
+              ?? AudioSpectrumAnalyzer.ComputeSyntheticPulse(timeSec, isPlaying, state.Settings.PartyEnergyLevel, state.Settings.BeatDropSensitivity);
+        var audioMetrics = ApplyManualDropOverride(rawMetrics, state, nowTimestamp, timestampFrequency);
 
         return new OverlayPlaybackSnapshot(
             Track: state.LiveTrack,
@@ -170,5 +172,39 @@ internal static class OverlaySnapshotBuilder
             TrackMoodVisual: state.LiveMoodVisual,
             AlbumArt: state.LiveAlbumArt,
             AudioMetrics: audioMetrics);
+    }
+
+    private static AudioFrameMetrics ApplyManualDropOverride(
+        AudioFrameMetrics baseMetrics,
+        RuntimeStateBox state,
+        long nowTimestamp,
+        long timestampFrequency)
+    {
+        if (state.IsEffectiveReducedMotion || state.ManualDropPreviewStartTimestamp is not { } previewStart)
+        {
+            return baseMetrics;
+        }
+
+        var elapsedSec = (nowTimestamp - previewStart) / (double)timestampFrequency;
+        if (elapsedSec is < 0.0 or >= 3.40)
+        {
+            return baseMetrics;
+        }
+
+        var manualTrigger = elapsedSec < 0.48
+            ? Math.Clamp(1f - (float)(elapsedSec / 0.48), 0f, 1f)
+            : 0f;
+        var manualClimax = MathF.Pow(Math.Clamp(1f - (float)(elapsedSec / 3.40), 0f, 1f), 1.35f);
+        var mergedDrop = Math.Max(baseMetrics.DropTrigger, manualTrigger);
+        var mergedClimax = Math.Max(baseMetrics.ClimaxIntensity, manualClimax);
+
+        return baseMetrics with
+        {
+            BassEnergy = Math.Clamp(Math.Max(baseMetrics.BassEnergy, manualClimax * 0.85f), 0f, 1f),
+            BeatPulse = Math.Clamp(Math.Max(baseMetrics.BeatPulse, manualTrigger), 0f, 1f),
+            DropTrigger = mergedDrop,
+            ClimaxIntensity = mergedClimax,
+            IsClimaxActive = mergedClimax >= 0.15f
+        };
     }
 }

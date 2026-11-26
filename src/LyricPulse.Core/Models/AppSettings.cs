@@ -120,6 +120,12 @@ public sealed record AppSettings
     public const float MinVisualizerIntensity = 0.2f;
     public const float MaxVisualizerIntensity = 1.5f;
     public const float DefaultVisualizerIntensity = 0.75f;
+    public const float MinBeatDropIntensity = 0.30f;
+    public const float MaxBeatDropIntensity = 1.50f;
+    public const float DefaultBeatDropIntensity = 1.00f;
+    public const float MinBeatDropSensitivity = 0.50f;
+    public const float MaxBeatDropSensitivity = 1.60f;
+    public const float DefaultBeatDropSensitivity = 1.00f;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     public OverlayStyleId ActiveStyle { get; init; } = OverlayStyleId.Fisheye;
@@ -179,6 +185,9 @@ public sealed record AppSettings
     public float EdgeGlowThickness { get; init; } = DefaultEdgeGlowThickness;
     public AudioVisualizerMode AudioVisualizerMode { get; init; } = AudioVisualizerMode.RadialHalo;
     public float AudioVisualizerIntensity { get; init; } = DefaultVisualizerIntensity;
+    public bool BeatDropEffectEnabled { get; init; } = true;
+    public float BeatDropIntensity { get; init; } = DefaultBeatDropIntensity;
+    public float BeatDropSensitivity { get; init; } = DefaultBeatDropSensitivity;
 
     [JsonIgnore]
     public MediaSourcePolicy SourcePolicy =>
@@ -239,6 +248,12 @@ public sealed record AppSettings
         var normalizedVisualizerIntensity = float.IsFinite(AudioVisualizerIntensity)
             ? Math.Clamp(AudioVisualizerIntensity, MinVisualizerIntensity, MaxVisualizerIntensity)
             : DefaultVisualizerIntensity;
+        var normalizedBeatDropIntensity = !float.IsFinite(BeatDropIntensity) || BeatDropIntensity <= 0f
+            ? DefaultBeatDropIntensity
+            : Math.Clamp(BeatDropIntensity, MinBeatDropIntensity, MaxBeatDropIntensity);
+        var normalizedBeatDropSensitivity = !float.IsFinite(BeatDropSensitivity) || BeatDropSensitivity <= 0f
+            ? DefaultBeatDropSensitivity
+            : Math.Clamp(BeatDropSensitivity, MinBeatDropSensitivity, MaxBeatDropSensitivity);
         var normalizedFont = string.IsNullOrWhiteSpace(FontFamily) ? "Jost" : FontFamily.Trim();
         var pinned = PinnedStyles.IsDefaultOrEmpty
             ? Default.PinnedStyles
@@ -269,6 +284,8 @@ public sealed record AppSettings
             EdgeGlowThickness = normalizedEdgeGlowThickness,
             AudioVisualizerMode = normalizedVisualizerMode,
             AudioVisualizerIntensity = normalizedVisualizerIntensity,
+            BeatDropIntensity = normalizedBeatDropIntensity,
+            BeatDropSensitivity = normalizedBeatDropSensitivity,
             PerDisplayBounds = bounds,
             DisabledDisplays = disabled,
             BlockedAppIds = blocked,

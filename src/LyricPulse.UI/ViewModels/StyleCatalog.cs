@@ -19,7 +19,7 @@ public sealed record ColorPresetOption(
     RgbColor Accent3);
 
 /// <summary>
-/// Canonical 10-style catalog and curated studio palettes matching
+/// Canonical 11-style catalog and curated studio palettes matching
 /// <c>design-system/lyricpulse/pages/gallery.md</c> and <c>settings.md</c>.
 /// </summary>
 public static class StyleCatalog
@@ -45,7 +45,9 @@ public static class StyleCatalog
         new(OverlayStyleId.KineticWall, "Kinetic Wall", "3D Stage", "3D Motion",
             "Words land sequentially onto a typographic wall drifting smoothly in 3D perspective.", false, 28.6),
         new(OverlayStyleId.Messages, "Messages", "Phone Screen", "Chat Thread",
-            "Song lines arrive as a sleek phone message thread with timed chat bubbles per line.", false, 22.9)
+            "Song lines arrive as a sleek phone message thread with timed chat bubbles per line.", false, 22.9),
+        new(OverlayStyleId.VinylGroove, "Vinyl Groove", "Turntable", "Hi-Fi Vinyl",
+            "Spinning LP record synced to song progress with a glowing stylus arm and warm studio sheen.", false, 25.7)
     ];
 
     public static ImmutableArray<ColorPresetOption> StudioPresets { get; } =

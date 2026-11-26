@@ -141,7 +141,7 @@ public sealed class Phase4BRenderingTests
         var doc = annotated with { Lines = bilingualLines };
 
         using var router = new LyricStyleRouter();
-        router.RegisteredStyles.Should().HaveCount(10);
+        router.RegisteredStyles.Should().HaveCount(11);
         router.BackdropRenderer.AllowCpuShadersForTesting = true;
 
         var allStyles = Enum.GetValues<OverlayStyleId>();

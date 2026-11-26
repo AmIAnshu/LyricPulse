@@ -43,12 +43,12 @@ public sealed class Phase5StageAndSettingsTests
         var vm = new StageViewModel(runtime);
         vm.ApplySnapshot(runtime.SampleFrame());
 
-        vm.StyleCards.Should().HaveCount(10);
-        vm.FilteredStyleCards.Should().HaveCount(10);
+        vm.StyleCards.Should().HaveCount(11);
+        vm.FilteredStyleCards.Should().HaveCount(11);
         vm.StudioPresets.Should().HaveCount(4);
         vm.HotkeyRows.Should().HaveCount(5);
         vm.SelectedStyleInfo.StyleId.Should().Be(OverlayStyleId.Fisheye);
-        vm.StyleCounterText.Should().Be("1 / 10");
+        vm.StyleCounterText.Should().Be("1 / 11");
 
         // Next & Previous wrap-around
         vm.NextStyleCommand.Execute(null);
@@ -62,7 +62,7 @@ public sealed class Phase5StageAndSettingsTests
         vm.PreviousStyleCommand.Execute(null);
         await Task.Delay(60);
         vm.ApplySnapshot(runtime.SampleFrame());
-        vm.ActiveStyle.Should().Be(OverlayStyleId.Messages);
+        vm.ActiveStyle.Should().Be(OverlayStyleId.VinylGroove);
     }
 
     [Fact]
@@ -99,7 +99,7 @@ public sealed class Phase5StageAndSettingsTests
         vm.SetStyleFilterCommand.Execute("Pinned");
         vm.FilteredStyleCards.Count.Should().BeGreaterThanOrEqualTo(4);
         vm.SetStyleFilterCommand.Execute("All");
-        vm.FilteredStyleCards.Should().HaveCount(10);
+        vm.FilteredStyleCards.Should().HaveCount(11);
     }
 
     [Fact]

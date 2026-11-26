@@ -57,6 +57,7 @@ public sealed class StageBackdropRenderer : IDisposable
             OverlayStyleId.NodeLine => new AlbumAccentPalette(new RgbColor(0x22, 0xC5, 0x5E), new RgbColor(0x2D, 0xD4, 0xBF), new RgbColor(0x86, 0xEF, 0xAC), new RgbColor(0x08, 0x18, 0x11), false, albumPalette.SourceAlbumHash),
             OverlayStyleId.KineticWall => new AlbumAccentPalette(new RgbColor(0x0E, 0xA5, 0xE9), new RgbColor(0xFB, 0x92, 0x3C), new RgbColor(0x38, 0xBD, 0xF8), new RgbColor(0x09, 0x13, 0x1E), false, albumPalette.SourceAlbumHash),
             OverlayStyleId.Messages => new AlbumAccentPalette(new RgbColor(0x25, 0x63, 0xEB), new RgbColor(0x06, 0xB6, 0xD4), new RgbColor(0x60, 0xA5, 0xFA), new RgbColor(0x09, 0x12, 0x24), false, albumPalette.SourceAlbumHash),
+            OverlayStyleId.VinylGroove => new AlbumAccentPalette(new RgbColor(0xFE, 0xE2, 0xE2), new RgbColor(0xF5, 0x9E, 0x0B), new RgbColor(0xEC, 0x48, 0x99), new RgbColor(0x16, 0x0C, 0x14), false, albumPalette.SourceAlbumHash),
             _ => albumPalette
         };
     }
@@ -127,7 +128,10 @@ public sealed class StageBackdropRenderer : IDisposable
 
         var audio = packet.EffectiveAudioMetrics;
         var bass = Math.Clamp(audio.BassEnergy + (audio.BeatPulse * 0.45f), 0f, 1f);
-        var totalEnergy = Math.Clamp(packet.SafePartyEnergy + _beatPulse + (bass * 0.28f), 0.5f, 1.85f);
+        var climaxBoost = (!packet.ReducedMotion && audio.IsClimaxActive && BeatDropEffectRenderer.IsEnabled(in packet))
+            ? audio.ClimaxIntensity * 0.42f * BeatDropEffectRenderer.ResolveDropIntensity(in packet)
+            : 0f;
+        var totalEnergy = Math.Clamp(packet.SafePartyEnergy + _beatPulse + (bass * 0.28f) + climaxBoost, 0.5f, 2.25f);
 
         var renderedShader = context.Shaders.DrawAmbientPartyMesh(
             context.Canvas,

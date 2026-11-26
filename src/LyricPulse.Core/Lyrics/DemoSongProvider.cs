@@ -39,6 +39,7 @@ public sealed class DemoSongProvider
         OverlayStyleId.NodeLine => TimeSpan.FromSeconds(20.1),
         OverlayStyleId.KineticWall => TimeSpan.FromSeconds(28.6),
         OverlayStyleId.Messages => TimeSpan.FromSeconds(22.9),
+        OverlayStyleId.VinylGroove => TimeSpan.FromSeconds(25.7),
         _ => TimeSpan.FromSeconds(0.2)
     };
 

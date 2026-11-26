@@ -93,6 +93,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
 
         UpdateState(s => s with { Settings = loadedSettings });
         ApplyMediaPolicy(loadedSettings);
+        _audioSpectrumProvider?.ConfigureBeatDropSensitivity(loadedSettings.BeatDropSensitivity);
 
         _mediaProvider.SessionChanged += OnMediaSessionChanged;
         _mediaProvider.TrackChanged += OnMediaTrackChanged;
@@ -194,6 +195,27 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
 
     public Task SetAudioVisualizerIntensityAsync(float intensity, CancellationToken cancellationToken = default) =>
         UpdateSettingsAsync(s => s with { AudioVisualizerIntensity = intensity }, cancellationToken);
+
+    public Task SetBeatDropEffectEnabledAsync(bool enabled, CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { BeatDropEffectEnabled = enabled }, cancellationToken);
+
+    public Task SetBeatDropIntensityAsync(float intensity, CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { BeatDropIntensity = intensity }, cancellationToken);
+
+    public Task SetBeatDropSensitivityAsync(float sensitivity, CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { BeatDropSensitivity = sensitivity }, cancellationToken);
+
+    public void TriggerBeatDropPreview()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        var nowTicks = _timestampProvider();
+        var updated = UpdateState(s => s with { ManualDropPreviewStartTimestamp = nowTicks });
+        NotifyStateChanged(updated);
+    }
 
     public void SetStageWindowOpen(bool isOpen)
     {
@@ -417,6 +439,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         AppSettings normalized;
         RuntimeStateBox nextState;
         bool policyChanged;
+        bool dropSensitivityChanged;
 
         await _settingsWriteLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -424,6 +447,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
             var previous = Volatile.Read(ref _state).Settings;
             normalized = updater(previous).ValidateAndNormalize();
             policyChanged = HasMediaPolicyChanged(previous, normalized);
+            dropSensitivityChanged = Math.Abs(previous.BeatDropSensitivity - normalized.BeatDropSensitivity) > 0.001f;
             var visualPrefChanged = previous.VisualPreference != normalized.VisualPreference;
 
             await _settingsStore.SaveAsync(normalized, cancellationToken).ConfigureAwait(false);
@@ -437,6 +461,11 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         if (policyChanged)
         {
             ApplyMediaPolicy(normalized);
+        }
+
+        if (dropSensitivityChanged)
+        {
+            _audioSpectrumProvider?.ConfigureBeatDropSensitivity(normalized.BeatDropSensitivity);
         }
 
         SettingsChanged?.Invoke(this, normalized);
@@ -579,6 +608,7 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
             };
         });
 
+        _audioSpectrumProvider?.ResetTrackClimaxState();
         NotifyStateChanged(updated);
         BeginTrackLoad(track, updated.TrackGeneration, forceRefresh: false);
     }

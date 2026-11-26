@@ -96,6 +96,12 @@ public sealed partial class WasapiLoopbackAudioProvider : IAudioSpectrumProvider
         cts?.Dispose();
     }
 
+    public void ConfigureBeatDropSensitivity(float sensitivity) =>
+        _analyzer.DropSensitivity = sensitivity;
+
+    public void ResetTrackClimaxState() =>
+        _analyzer.ResetBeatDropState();
+
     public AudioFrameMetrics GetCurrentMetrics(double timeSeconds, bool isPlaying, float partyEnergy) =>
         _analyzer.ComputeMetrics(timeSeconds, isPlaying, partyEnergy);
 

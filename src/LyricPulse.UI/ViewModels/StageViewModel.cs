@@ -266,6 +266,7 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
                 _ = SafeRunAsync(() => _runtime.SetAudioVisualizerModeAsync(parsed));
             }
         });
+        PreviewBeatDropCommand = new RelayCommand(() => _runtime.TriggerBeatDropPreview());
         SelectStyleByIndexCommand = new RelayCommand(p =>
         {
             if (p is int idx && idx >= 0 && idx < StyleCatalog.All.Length)
@@ -371,6 +372,7 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
     public ICommand SelectSecondaryLineCommand { get; }
     public ICommand SelectEdgeGlowModeCommand { get; }
     public ICommand SelectAudioVisualizerModeCommand { get; }
+    public ICommand PreviewBeatDropCommand { get; }
     public ICommand SelectStyleByIndexCommand { get; }
     public ICommand ApplyColorPresetCommand { get; }
     public ICommand SetStyleFilterCommand { get; }
@@ -388,7 +390,7 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
     public bool IsActiveStylePinned => _snapshot.Settings.PinnedStyles.Contains(ActiveStyle);
     public string ActivePinTooltip => IsActiveStylePinned ? "Unpin from System Tray" : "Pin to System Tray";
     public int PinnedCount => _snapshot.Settings.PinnedStyles.IsDefault ? 0 : _snapshot.Settings.PinnedStyles.Length;
-    public string GalleryCountCaption => $"10 styles · {PinnedCount} pinned";
+    public string GalleryCountCaption => $"{StyleCatalog.All.Length} styles · {PinnedCount} pinned";
 
     public StageFlyoutKind ActiveFlyout
     {
@@ -860,6 +862,52 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public bool BeatDropEffectEnabled
+    {
+        get => _snapshot.Settings.BeatDropEffectEnabled;
+        set
+        {
+            if (_snapshot.Settings.BeatDropEffectEnabled != value)
+            {
+                _ = SafeRunAsync(() => _runtime.SetBeatDropEffectEnabledAsync(value));
+            }
+        }
+    }
+
+    public int BeatDropIntensityPercent
+    {
+        get => (int)Math.Round(_snapshot.Settings.BeatDropIntensity * 100f);
+        set
+        {
+            var clamped = Math.Clamp(value, 30, 150) / 100f;
+            if (Math.Abs(_snapshot.Settings.BeatDropIntensity - clamped) > 0.01f)
+            {
+                _ = SafeRunAsync(() => _runtime.SetBeatDropIntensityAsync(clamped));
+            }
+        }
+    }
+
+    public int BeatDropSensitivityPercent
+    {
+        get => (int)Math.Round(_snapshot.Settings.BeatDropSensitivity * 100f);
+        set
+        {
+            var clamped = Math.Clamp(value, 50, 160) / 100f;
+            if (Math.Abs(_snapshot.Settings.BeatDropSensitivity - clamped) > 0.01f)
+            {
+                _ = SafeRunAsync(() => _runtime.SetBeatDropSensitivityAsync(clamped));
+            }
+        }
+    }
+
+    public bool IsDropClimaxActive =>
+        BeatDropEffectEnabled && !_snapshot.IsEffectiveReducedMotion && _snapshot.EffectiveAudioMetrics.IsClimaxActive;
+
+    public string DropStatusLabel =>
+        !BeatDropEffectEnabled ? "Off" :
+        _snapshot.IsEffectiveReducedMotion ? "Reduced" :
+        _snapshot.EffectiveAudioMetrics.IsClimaxActive ? "DROP SURGE" : "Monitoring";
+
     public bool IsLiveSystemAudioActive => _snapshot.EffectiveAudioMetrics.IsLiveAudioActive;
     public string AudioStatusLabel => IsLiveSystemAudioActive ? "System Audio Live" : "Beat Sync";
     public string DiagnosticAudioLine => IsLiveSystemAudioActive
@@ -1122,6 +1170,11 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsVisParticleField));
         OnPropertyChanged(nameof(IsVisBassHorizon));
         OnPropertyChanged(nameof(AudioVisualizerIntensityPercent));
+        OnPropertyChanged(nameof(BeatDropEffectEnabled));
+        OnPropertyChanged(nameof(BeatDropIntensityPercent));
+        OnPropertyChanged(nameof(BeatDropSensitivityPercent));
+        OnPropertyChanged(nameof(IsDropClimaxActive));
+        OnPropertyChanged(nameof(DropStatusLabel));
         OnPropertyChanged(nameof(IsLiveSystemAudioActive));
         OnPropertyChanged(nameof(AudioStatusLabel));
         OnPropertyChanged(nameof(DiagnosticAudioLine));

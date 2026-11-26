@@ -118,7 +118,8 @@ internal sealed record RuntimeStateBox(
     DateTimeOffset? LastOffsetNudgeUtc,
     long TrackGeneration,
     long SeekGeneration,
-    long OffsetGeneration)
+    long OffsetGeneration,
+    long? ManualDropPreviewStartTimestamp = null)
 {
     public bool IsEffectiveReducedMotion => Settings.ReducedMotion || IsOsReducedMotion;
 
@@ -145,5 +146,6 @@ internal sealed record RuntimeStateBox(
         LastOffsetNudgeUtc: null,
         TrackGeneration: 0,
         SeekGeneration: 0,
-        OffsetGeneration: 0);
+        OffsetGeneration: 0,
+        ManualDropPreviewStartTimestamp: null);
 }

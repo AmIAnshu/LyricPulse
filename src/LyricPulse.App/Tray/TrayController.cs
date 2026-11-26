@@ -11,7 +11,7 @@ namespace LyricPulse.App.Tray;
 /// <summary>
 /// Manages the native Windows System Tray <see cref="TrayIcon"/> and <see cref="NativeMenu"/>.
 /// Mutates menu items in-place whenever the menu structure is unchanged (zero menu flicker),
-/// provides direct access to the Fullscreen Stage Window, Desktop Overlay toggle, all 10 styles,
+/// provides direct access to the Fullscreen Stage Window, Desktop Overlay toggle, all 11 styles,
 /// and timing offsets with zero emoji chrome.
 /// </summary>
 public sealed class TrayController : IDisposable

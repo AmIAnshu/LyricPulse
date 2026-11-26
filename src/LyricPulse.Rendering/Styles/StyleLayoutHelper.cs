@@ -174,6 +174,7 @@ internal static class StyleLayoutHelper
         OverlayStyleId.NodeLine => 20.1,
         OverlayStyleId.KineticWall => 28.6,
         OverlayStyleId.Messages => 22.9,
+        OverlayStyleId.VinylGroove => 25.7,
         _ => 0.2
     };
 

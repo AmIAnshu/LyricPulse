@@ -12,7 +12,10 @@ public sealed record AudioFrameMetrics(
     float OverallLevel,
     float BeatPulse,
     bool IsLiveAudioActive,
-    ImmutableArray<float> SpectrumBands)
+    ImmutableArray<float> SpectrumBands,
+    float DropTrigger = 0f,
+    float ClimaxIntensity = 0f,
+    bool IsClimaxActive = false)
 {
     public const int BandCount = 32;
 
@@ -23,7 +26,10 @@ public sealed record AudioFrameMetrics(
         OverallLevel: 0f,
         BeatPulse: 0f,
         IsLiveAudioActive: false,
-        SpectrumBands: ImmutableArray.Create(new float[BandCount]));
+        SpectrumBands: ImmutableArray.Create(new float[BandCount]),
+        DropTrigger: 0f,
+        ClimaxIntensity: 0f,
+        IsClimaxActive: false);
 
     public ImmutableArray<float> SafeBands =>
         SpectrumBands.IsDefault || SpectrumBands.Length != BandCount

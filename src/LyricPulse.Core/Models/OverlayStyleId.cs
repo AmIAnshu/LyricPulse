@@ -1,7 +1,7 @@
 namespace LyricPulse.Core.Models;
 
 /// <summary>
-/// Canonical identifiers for the 10 kinetic desktop lyric overlay styles.
+/// Canonical identifiers for the 11 kinetic desktop lyric overlay styles.
 /// </summary>
 public enum OverlayStyleId
 {
@@ -14,5 +14,6 @@ public enum OverlayStyleId
     SpidersWeb = 6,
     NodeLine = 7,
     KineticWall = 8,
-    Messages = 9
+    Messages = 9,
+    VinylGroove = 10
 }

@@ -5,7 +5,7 @@
 See: [.planning/PROJECT.md](PROJECT.md) · [.planning/ROADMAP.md](ROADMAP.md) · [.planning/REQUIREMENTS.md](REQUIREMENTS.md)
 
 **Core value:** Zero-friction, butter-smooth (60+ FPS) real-time synced kinetic lyrics rendered in an ambient party fullscreen stage (or optional click-through desktop overlay / OBS broadcast window) without DRM or cloud lock-in.
-**Current focus:** **v2.7 Node Line Botanical Vine, Spider's Web Silk Constellation & Environmental Album Chrome Complete & Packaged** — Blur-free multi-depth Bioluminescent Neural Botanical Vine (`NodeLine`), Nocturnal Silk Constellation (`SpidersWeb`), vivid OKLab dark-cover chroma preservation, album-driven `NeonRush` perimeter glow (hardcoded orange bias removed), `+650ms` & `+1400ms` GSMTC album art retry, and live contrast-safe `StageWindow` UI chrome theming (`AlbumEnvironmentPalette`).
+**Current focus:** **v2.8 Style #11 (`Vinyl Groove`) + Multi-Timescale Beat Drop Climax Engine & Concert Drop Suite Complete & Packaged** — Tactile 33⅓ RPM vinyl turntable with circular live album-art center label (or studio mood seal fallback), song-progress pivoting tonearm & stylus glow, right-column legible lyrics, multi-timescale sub-bass/buildup Beat Drop climax detector (`AudioSpectrumAnalyzer`), Concert Drop shockwaves + 72 supersonic sparks + overdrive (`BeatDropEffectRenderer`), sensitivity/energy controls & 1-click Preview Drop trigger.
 
 ## Progress Snapshot
 
@@ -25,22 +25,23 @@ See: [.planning/PROJECT.md](PROJECT.md) · [.planning/ROADMAP.md](ROADMAP.md) ·
 | **v2.4** | Neon Rush Liquid Plasma Redesign (Delta-Integrated Slow Glide, 8-Segment Tapered Ribbons & Live Speed/Thickness Sliders) | **DONE** | `9e49d29` | **301/301 tests pass · 0 warnings · Published `win-x64` verified** |
 | **v2.5** | Pitch-Black `#000000` Neon Rush OLED Polish (Bypass Party Mesh & Corner Fog, `#000000` ScrimTint, Dark Unlit Edges & PureBlack Fix) | **DONE** | `3decdc9` | **301/301 tests pass · 0 warnings · Published `win-x64` verified** |
 | **v2.6** | Single-Line SweepGradient Neon Rush, Monument Stage Kinetic Wall Overhaul & Deep Lyrics Sync Accuracy Upgrade | **DONE** | `b0d466a` | **305/305 tests pass · 0 warnings · Published `win-x64-latest` verified** |
-| **v2.7** | Node Line Botanical Vine, Spider's Web Silk Constellation & Environmental Album Chrome | **DONE** | *v2.7 release commit* | **310/310 tests pass · 0 warnings · Published `win-x64` verified** |
+| **v2.7** | Node Line Botanical Vine, Spider's Web Silk Constellation & Environmental Album Chrome | **DONE** | `60cd182` | **310/310 tests pass · 0 warnings · Published `win-x64` verified** |
+| **v2.8** | Style #11 (`Vinyl Groove`) & Multi-Timescale Beat Drop Climax Engine + Concert Drop Suite | **DONE** | *v2.8 release commit* | **314/314 tests pass · 0 warnings · Published `win-x64` verified** |
 
-## Verified v2.7 Release Metrics
+## Verified v2.8 Release Metrics
 
 - **Build (`.NET 10`, `net10.0-windows10.0.19041.0`):**
   - `dotnet build LyricPulse.sln -c Debug -p:TreatWarningsAsErrors=true`: **0 Warnings, 0 Errors**
   - `dotnet build LyricPulse.sln -c Release -p:TreatWarningsAsErrors=true`: **0 Warnings, 0 Errors**
 - **Automated Test Suite (`dotnet test LyricPulse.sln -c Release --no-build`):**
-  - **310 / 310 Passed** (`0 Failed, 0 Skipped`)
+  - **314 / 314 Passed** (`0 Failed, 0 Skipped`)
 - **Self-Contained Single-File Release (`win-x64`):**
   - Binary: `publish/win-x64/LyricPulse.App.exe`
-  - Size: **`133,714,450` bytes (`127.52 MB`)**
+  - Size: **`133,755,410` bytes (`127.56 MB`)**
   - Release `--smoke-test`: **Exit `0`**
   - Published `--smoke-test`: **Exit `0`**
 - **Graphify Knowledge Graph ([graphify-out/GRAPH_REPORT.md](../graphify-out/GRAPH_REPORT.md)):**
-  - **`2,875` nodes · `9,735` edges · `111` communities**
+  - **`2,942` nodes · `10,062` edges · `107` communities**
 
 ---
-*Last updated: 2026-11-26 after v2.7 Node Line Botanical Vine, Spider's Web Silk Constellation, OKLab/NeonRush/UI album chrome environment integration, full verification, packaging, and Graphify sync*
+*Last updated: 2026-11-26 after v2.8 Style #11 (`Vinyl Groove`) + Beat Drop Climax Engine & Concert Drop Suite, full verification, packaging, and Graphify sync*

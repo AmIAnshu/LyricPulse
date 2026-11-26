@@ -190,6 +190,7 @@ public sealed record TrayMenuState(
         OverlayStyleId.NodeLine => "Node Line",
         OverlayStyleId.KineticWall => "Kinetic Wall",
         OverlayStyleId.Messages => "Messages",
+        OverlayStyleId.VinylGroove => "Vinyl Groove",
         _ => styleId.ToString()
     };
 
