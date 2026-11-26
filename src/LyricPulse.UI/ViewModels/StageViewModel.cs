@@ -262,6 +262,20 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
                 _ = SafeRunAsync(() => _runtime.SetEdgeGlowModeAsync(parsed));
             }
         });
+        SelectEdgeGlowAnimationCommand = new RelayCommand(p =>
+        {
+            if (p is EdgeGlowAnimationMode anim)
+            {
+                _ = SafeRunAsync(() => _runtime.SetEdgeGlowAnimationAsync(anim));
+            }
+            else if (p is string s && Enum.TryParse<EdgeGlowAnimationMode>(s, ignoreCase: true, out var parsed))
+            {
+                _ = SafeRunAsync(() => _runtime.SetEdgeGlowAnimationAsync(parsed));
+            }
+        });
+        TogglePlayPauseCommand = new RelayCommand(() => _ = SafeRunAsync(() => _runtime.TogglePlayPauseAsync()));
+        NextTrackCommand = new RelayCommand(() => _ = SafeRunAsync(() => _runtime.SkipNextAsync()));
+        PreviousTrackCommand = new RelayCommand(() => _ = SafeRunAsync(() => _runtime.SkipPreviousAsync()));
         SelectAudioVisualizerModeCommand = new RelayCommand(p =>
         {
             if (p is AudioVisualizerMode vmMode)
@@ -377,6 +391,10 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
     public ICommand SelectScrimIntensityCommand { get; }
     public ICommand SelectSecondaryLineCommand { get; }
     public ICommand SelectEdgeGlowModeCommand { get; }
+    public ICommand SelectEdgeGlowAnimationCommand { get; }
+    public ICommand TogglePlayPauseCommand { get; }
+    public ICommand NextTrackCommand { get; }
+    public ICommand PreviousTrackCommand { get; }
     public ICommand SelectAudioVisualizerModeCommand { get; }
     public ICommand SelectStyleByIndexCommand { get; }
     public ICommand ApplyColorPresetCommand { get; }
@@ -390,6 +408,8 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
 
     public StyleMetadata SelectedStyleInfo => StyleCatalog.GetMetadata(_snapshot.Settings.ActiveStyle);
     public OverlayStyleId ActiveStyle => _snapshot.Settings.ActiveStyle;
+    public bool IsGlassStageActive => ActiveStyle == OverlayStyleId.VinylGroove;
+    public bool IsPlaying => _snapshot.IsPlaying || (!_snapshot.IsDemoMode && _snapshot.Track is null && _snapshot.LyricsStatus != LyricsStatus.Synced);
     public int ActiveStyleIndex => Math.Max(0, StyleCatalog.All.IndexOf(SelectedStyleInfo));
     public string StyleCounterText => $"{ActiveStyleIndex + 1} / {StyleCatalog.All.Length}";
     public bool IsActiveStylePinned => _snapshot.Settings.PinnedStyles.Contains(ActiveStyle);
@@ -846,6 +866,72 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public bool EdgeGlowDesktopEnabled
+    {
+        get => _snapshot.Settings.EdgeGlowDesktopEnabled;
+        set
+        {
+            if (_snapshot.Settings.EdgeGlowDesktopEnabled != value)
+            {
+                _ = SafeRunAsync(() => _runtime.UpdateSettingsAsync(s => s with { EdgeGlowDesktopEnabled = value }));
+            }
+        }
+    }
+
+    public bool EdgeGlowTwoColorGradient
+    {
+        get => _snapshot.Settings.EdgeGlowTwoColorGradient;
+        set
+        {
+            if (_snapshot.Settings.EdgeGlowTwoColorGradient != value)
+            {
+                _ = SafeRunAsync(() => _runtime.SetEdgeGlowTwoColorGradientAsync(value));
+            }
+        }
+    }
+
+    public EdgeGlowAnimationMode EdgeGlowAnimation => _snapshot.Settings.EdgeGlowAnimation;
+    public bool IsEdgeGlowAnimMusicSync => EdgeGlowAnimation == EdgeGlowAnimationMode.MusicSync;
+    public bool IsEdgeGlowAnimAmbientDrift => EdgeGlowAnimation == EdgeGlowAnimationMode.AmbientDrift;
+    public bool IsEdgeGlowAnimStill => EdgeGlowAnimation == EdgeGlowAnimationMode.Still;
+
+    public int EdgeGlowSpillPercent
+    {
+        get => (int)Math.Round(_snapshot.Settings.EdgeGlowSpill * 100f);
+        set
+        {
+            var clamped = Math.Clamp(value, 25, 200) / 100f;
+            if (Math.Abs(_snapshot.Settings.EdgeGlowSpill - clamped) > 0.01f)
+            {
+                _ = SafeRunAsync(() => _runtime.SetEdgeGlowSpillAsync(clamped));
+            }
+        }
+    }
+
+    public bool EdgeGlowOverrideAlbumColors
+    {
+        get => _snapshot.Settings.EdgeGlowOverrideAlbumColors;
+        set
+        {
+            if (_snapshot.Settings.EdgeGlowOverrideAlbumColors != value)
+            {
+                _ = SafeRunAsync(() => _runtime.UpdateSettingsAsync(s => s with { EdgeGlowOverrideAlbumColors = value }));
+            }
+        }
+    }
+
+    public Color EdgeGlowPrimaryColor
+    {
+        get => ToAvaloniaColor(_snapshot.Settings.EdgeGlowPrimaryColor);
+        set => _ = SafeRunAsync(() => _runtime.UpdateSettingsAsync(s => s with { EdgeGlowPrimaryColor = FromAvaloniaColor(value) }));
+    }
+
+    public Color EdgeGlowSecondaryColor
+    {
+        get => ToAvaloniaColor(_snapshot.Settings.EdgeGlowSecondaryColor);
+        set => _ = SafeRunAsync(() => _runtime.UpdateSettingsAsync(s => s with { EdgeGlowSecondaryColor = FromAvaloniaColor(value) }));
+    }
+
     public AudioVisualizerMode AudioVisualizerMode => _snapshot.Settings.AudioVisualizerMode;
     public bool IsVisNone => AudioVisualizerMode == AudioVisualizerMode.None;
     public bool IsVisSpectrumBars => AudioVisualizerMode == AudioVisualizerMode.SpectrumBars;
@@ -1060,6 +1146,7 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
         {
             OnPropertyChanged(nameof(SelectedStyleInfo));
             OnPropertyChanged(nameof(ActiveStyle));
+            OnPropertyChanged(nameof(IsGlassStageActive));
             OnPropertyChanged(nameof(ActiveStyleIndex));
             OnPropertyChanged(nameof(StyleCounterText));
             OnPropertyChanged(nameof(IsActiveStylePinned));
@@ -1136,6 +1223,16 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(EdgeGlowIntensityPercent));
             OnPropertyChanged(nameof(EdgeGlowSpeedPercent));
             OnPropertyChanged(nameof(EdgeGlowThicknessPercent));
+            OnPropertyChanged(nameof(EdgeGlowDesktopEnabled));
+            OnPropertyChanged(nameof(EdgeGlowTwoColorGradient));
+            OnPropertyChanged(nameof(EdgeGlowAnimation));
+            OnPropertyChanged(nameof(IsEdgeGlowAnimMusicSync));
+            OnPropertyChanged(nameof(IsEdgeGlowAnimAmbientDrift));
+            OnPropertyChanged(nameof(IsEdgeGlowAnimStill));
+            OnPropertyChanged(nameof(EdgeGlowSpillPercent));
+            OnPropertyChanged(nameof(EdgeGlowOverrideAlbumColors));
+            OnPropertyChanged(nameof(EdgeGlowPrimaryColor));
+            OnPropertyChanged(nameof(EdgeGlowSecondaryColor));
             OnPropertyChanged(nameof(AudioVisualizerMode));
             OnPropertyChanged(nameof(IsVisNone));
             OnPropertyChanged(nameof(IsVisSpectrumBars));
@@ -1187,6 +1284,7 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
         if (statusChanged)
         {
             OnPropertyChanged(nameof(IsDemoMode));
+            OnPropertyChanged(nameof(IsPlaying));
             OnPropertyChanged(nameof(IsLoadingLyrics));
             OnPropertyChanged(nameof(MediaTrackTitle));
             OnPropertyChanged(nameof(MediaStatusLabel));

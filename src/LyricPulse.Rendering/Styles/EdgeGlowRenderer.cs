@@ -1,3 +1,5 @@
+using LyricPulse.Core.Audio;
+using LyricPulse.Core.Color;
 using LyricPulse.Core.Models;
 using LyricPulse.Rendering.Color;
 using LyricPulse.Rendering.Host;
@@ -6,23 +8,31 @@ using SkiaSharp;
 namespace LyricPulse.Rendering.Styles;
 
 /// <summary>
-/// Renders full-perimeter Ambilight / concert-stage glow and Neon Rush — a single,
-/// continuous, unbroken GPU-shaded neon plasma ribbon gliding smoothly along a
-/// true #000000 OLED frame without segmentation joints, dots, or blur-filter lag.
-/// Strictly skipped on transparent DesktopOverlay and compact GalleryCard thumbnails.
+/// Renders Lumn-inspired rounded perimeter ambient lighting and reactive Neon Rush rim glows
+/// across both the Stage Window and system-wide transparent desktop monitor bounds.
+/// Zero per-frame heap allocations; Skia filters are cached by quantized radius.
 /// </summary>
 public sealed class EdgeGlowRenderer : IDisposable
 {
     private readonly SKPaint _edgePaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
+    private readonly SKPaint _strokePaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round };
     private readonly SKPaint _rimPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round, StrokeJoin = SKStrokeJoin.Round };
+    private readonly SKPaint _fadePaint = new() { IsAntialias = true, BlendMode = SKBlendMode.DstIn };
+    private readonly SKPath _outerClipPath = new();
     private readonly SKPath _perimeterPath = new();
+    private readonly SKPath _spillPath = new();
 
-    private readonly SKColor[] _edgeColors = new SKColor[4];
-    private readonly float[] _edgeStops = [0f, 0.28f, 0.65f, 1f];
-    private readonly SKColor[] _cornerColors = new SKColor[4];
-    private readonly float[] _cornerStops = [0f, 0.35f, 0.68f, 1f];
-    private readonly SKColor[] _sweepColors = new SKColor[12];
-    private readonly float[] _sweepStops = [0.00f, 0.38f, 0.46f, 0.54f, 0.63f, 0.72f, 0.80f, 0.87f, 0.92f, 0.96f, 0.985f, 1.00f];
+    private readonly SKColor[] _twoColorSweep = new SKColor[5];
+    private readonly float[] _twoColorStops = [0.00f, 0.30f, 0.56f, 0.82f, 1.00f];
+    private readonly SKColor[] _rushSweepColors = new SKColor[10];
+    private readonly float[] _rushSweepStops = [0.00f, 0.14f, 0.28f, 0.42f, 0.54f, 0.66f, 0.78f, 0.88f, 0.95f, 1.00f];
+    private readonly SKColor[] _bottomFadeColors = [SKColors.White, SKColors.Transparent];
+    private readonly float[] _bottomFadeStops = [0f, 1f];
+
+    private SKMaskFilter? _spillMaskFilter;
+    private float _cachedSpillSigma = -1f;
+    private SKMaskFilter? _tubeMaskFilter;
+    private float _cachedTubeSigma = -1f;
 
     private double _lastRenderTimeSec = -1.0;
     private double _rushPhase;
@@ -35,110 +45,146 @@ public sealed class EdgeGlowRenderer : IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         var packet = context.Packet;
-        var settings = packet.PlaybackSnapshot?.Settings;
-        var mode = settings?.EdgeGlowMode ?? AppSettings.Default.EdgeGlowMode;
-        if (mode == EdgeGlowMode.Off || packet.SurfaceMode != StageRenderSurfaceMode.StageCanvas)
+        if (packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay && !packet.AllowDesktopEdgeGlow)
         {
             return;
         }
 
-        if (packet.ReducedMotion && mode != EdgeGlowMode.SoftAmbient)
+        var settings = packet.PlaybackSnapshot?.Settings ?? AppSettings.Default;
+        var mode = settings.EdgeGlowMode;
+        if (mode == EdgeGlowMode.Off)
         {
             return;
         }
 
         var w = packet.ViewportWidthDip;
         var h = packet.ViewportHeightDip;
-        if (w <= 8f || h <= 8f)
+        if (w < 8f || h < 8f)
         {
             return;
         }
 
-        var intensity = Math.Clamp(
-            settings?.EdgeGlowIntensity ?? AppSettings.DefaultEdgeGlowIntensity,
-            AppSettings.MinGlowIntensity,
-            AppSettings.MaxGlowIntensity);
-        var speedSetting = settings is { EdgeGlowSpeed: > 0f } s1 && float.IsFinite(s1.EdgeGlowSpeed)
-            ? Math.Clamp(s1.EdgeGlowSpeed, AppSettings.MinEdgeGlowSpeed, AppSettings.MaxEdgeGlowSpeed)
-            : AppSettings.DefaultEdgeGlowSpeed;
-        var thicknessSetting = settings is { EdgeGlowThickness: > 0f } s2 && float.IsFinite(s2.EdgeGlowThickness)
-            ? Math.Clamp(s2.EdgeGlowThickness, AppSettings.MinEdgeGlowThickness, AppSettings.MaxEdgeGlowThickness)
-            : AppSettings.DefaultEdgeGlowThickness;
+        var intensity = Math.Clamp(settings.EdgeGlowIntensity, 0f, AppSettings.MaxGlowIntensity);
+        if (intensity <= 0.01f)
+        {
+            return;
+        }
 
-        var audio = packet.EffectiveAudioMetrics;
+        var thicknessMult = Math.Clamp(settings.EdgeGlowThickness, AppSettings.MinEdgeGlowThickness, AppSettings.MaxEdgeGlowThickness);
+        var spillMult = Math.Clamp(settings.EdgeGlowSpill, AppSettings.MinEdgeGlowSpill, AppSettings.MaxEdgeGlowSpill);
+        var animMode = packet.ReducedMotion ? EdgeGlowAnimationMode.Still : settings.EdgeGlowAnimation;
 
-        UpdateSmoothedMotionState(packet.RenderTimeSeconds, speedSetting, packet.SafePartyEnergy, audio.BassEnergy, audio.BeatPulse, packet.ReducedMotion);
+        var dt = UpdateSmoothedMotionState(packet, settings, animMode);
+        AdvancePhase(dt, settings, animMode);
 
-        var palette = StageBackdropRenderer.ResolveBackdropPalette(
-            packet.EffectiveStyle,
-            packet.Palette,
-            settings?.AutoSyncColors ?? true);
+        var isPlaying = packet.PlaybackSnapshot?.IsPlaying ?? true;
+        var compactFactor = packet.IsCompactCard ? 0.55f : 1.0f;
+        var desktopIdleScale = packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay &&
+                               !isPlaying &&
+                               animMode == EdgeGlowAnimationMode.MusicSync
+            ? 0.42f
+            : 1.0f;
+
+        var musicDrive = animMode == EdgeGlowAnimationMode.MusicSync && isPlaying
+            ? (1.0f + (_smoothedBass * 0.48f) + (_smoothedBeat * 0.62f))
+            : animMode == EdgeGlowAnimationMode.AmbientDrift
+                ? (1.0f + (0.10f * MathF.Sin((float)(_rushPhase * Math.PI * 2.0))))
+                : 1.0f;
+
+        var (primaryColor, secondaryColor) = ResolveGlowColors(packet, settings);
+        var minSide = MathF.Min(w, h);
+        var isDesktop = packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay;
+        var cornerRadius = isDesktop
+            ? Math.Clamp(minSide * 0.016f, 10f, 22f)
+            : packet.IsCompactCard
+                ? Math.Clamp(minSide * 0.045f, 10f, 18f)
+                : Math.Clamp(minSide * 0.028f, 14f, 32f);
 
         var canvas = context.Canvas;
-
-        // Neon Rush keeps unlit borders & interior pitch black (#000000); one single seamless ribbon glides around the frame.
-        if (mode == EdgeGlowMode.NeonRush)
+        var save = packet.BottomFadeToBlack ? canvas.SaveLayer() : canvas.Save();
+        try
         {
-            DrawSingleNeonRushLine(canvas, w, h, packet, palette, intensity, thicknessSetting);
-            return;
+            if (isDesktop)
+            {
+                _outerClipPath.Reset();
+                _outerClipPath.AddRoundRect(new SKRect(0f, 0f, w, h), cornerRadius * 0.55f, cornerRadius * 0.55f);
+                canvas.ClipPath(_outerClipPath, SKClipOperation.Intersect, antialias: true);
+            }
+            else
+            {
+                canvas.ClipRect(new SKRect(0f, 0f, w, h));
+            }
+
+            switch (mode)
+            {
+                case EdgeGlowMode.SoftAmbient:
+                    DrawLumnPerimeter(
+                        canvas, w, h, cornerRadius, primaryColor, secondaryColor,
+                        settings.EdgeGlowTwoColorGradient,
+                        spillStrength: intensity * spillMult * 0.65f * compactFactor * desktopIdleScale,
+                        tubeStrength: intensity * 0.34f * compactFactor * desktopIdleScale,
+                        coreStrength: intensity * 0.16f * compactFactor * desktopIdleScale,
+                        thicknessMult, spillMult, musicDrive, includeRushSpotlight: false);
+                    break;
+
+                case EdgeGlowMode.BeatPulse:
+                    var pulseStrength = animMode == EdgeGlowAnimationMode.Still
+                        ? 0.55f
+                        : 0.36f + (_smoothedBass * 0.55f) + (_smoothedBeat * 0.72f);
+                    DrawLumnPerimeter(
+                        canvas, w, h, cornerRadius, primaryColor, secondaryColor,
+                        settings.EdgeGlowTwoColorGradient,
+                        spillStrength: intensity * spillMult * 0.85f * pulseStrength * compactFactor * desktopIdleScale,
+                        tubeStrength: intensity * 0.58f * pulseStrength * compactFactor * desktopIdleScale,
+                        coreStrength: intensity * 0.42f * pulseStrength * compactFactor * desktopIdleScale,
+                        thicknessMult, spillMult, musicDrive, includeRushSpotlight: false);
+                    break;
+
+                case EdgeGlowMode.NeonRim:
+                    DrawLumnPerimeter(
+                        canvas, w, h, cornerRadius, primaryColor, secondaryColor,
+                        settings.EdgeGlowTwoColorGradient,
+                        spillStrength: intensity * spillMult * 0.78f * compactFactor * desktopIdleScale,
+                        tubeStrength: intensity * 0.72f * compactFactor * desktopIdleScale,
+                        coreStrength: intensity * 0.64f * compactFactor * desktopIdleScale,
+                        thicknessMult, spillMult, musicDrive, includeRushSpotlight: false);
+                    break;
+
+                case EdgeGlowMode.NeonRush:
+                    DrawLumnPerimeter(
+                        canvas, w, h, cornerRadius, primaryColor, secondaryColor,
+                        settings.EdgeGlowTwoColorGradient,
+                        spillStrength: intensity * spillMult * 0.96f * compactFactor * desktopIdleScale,
+                        tubeStrength: intensity * 0.88f * compactFactor * desktopIdleScale,
+                        coreStrength: intensity * 0.82f * compactFactor * desktopIdleScale,
+                        thicknessMult, spillMult, musicDrive,
+                        includeRushSpotlight: animMode != EdgeGlowAnimationMode.Still);
+                    break;
+            }
+
+            if (packet.BottomFadeToBlack)
+            {
+                var fadeStartY = Math.Max(0f, h - Math.Clamp(h * 0.14f, 28f, 64f));
+                using var fadeShader = SKShader.CreateLinearGradient(
+                    new SKPoint(0f, fadeStartY),
+                    new SKPoint(0f, h - 2f),
+                    _bottomFadeColors,
+                    _bottomFadeStops,
+                    SKShaderTileMode.Clamp);
+                _fadePaint.Shader = fadeShader;
+                try
+                {
+                    canvas.DrawRect(0f, fadeStartY, w, h - fadeStartY, _fadePaint);
+                }
+                finally
+                {
+                    _fadePaint.Shader = null;
+                }
+            }
         }
-
-        var beatLift = packet.ReducedMotion
-            ? 0f
-            : (_smoothedBass * 0.54f) + (_smoothedBeat * 0.46f) + (audio.TrebleEnergy * 0.14f);
-
-        var (reachFrac, baseAlpha, rimAlpha) = mode switch
+        finally
         {
-            EdgeGlowMode.SoftAmbient => (0.15f + (beatLift * 0.04f), 0.25f, 0.0f),
-            EdgeGlowMode.NeonRim => (0.17f + (beatLift * 0.07f), 0.28f + (beatLift * 0.22f), 0.58f + (beatLift * 0.34f)),
-            _ => (0.16f + (beatLift * 0.08f), 0.26f + (beatLift * 0.30f), 0.26f + (beatLift * 0.34f))
-        };
-
-        var reachThicknessScale = 0.78f + (thicknessSetting * 0.20f);
-        var reachX = Math.Clamp(w * reachFrac * reachThicknessScale, 28f, w * 0.34f);
-        var reachY = Math.Clamp(h * reachFrac * reachThicknessScale, 28f, h * 0.34f);
-        var alpha = Math.Clamp(baseAlpha * intensity * packet.GlobalOpacity, 0f, 0.85f);
-
-        var phase = packet.ReducedMotion ? 0f : (float)((packet.RenderTimeSeconds * (0.18 * speedSetting)) % 1.0);
-        var cTop = StyleLayoutHelper.BlendSrgb(palette.AccentColor1, palette.AccentColor2, 0.5f + (0.5f * MathF.Sin(phase * MathF.Tau)));
-        var cBottom = StyleLayoutHelper.BlendSrgb(palette.AccentColor2, palette.AccentColor3, 0.5f + (0.5f * MathF.Cos(phase * MathF.Tau)));
-        var cLeft = StyleLayoutHelper.BlendSrgb(palette.AccentColor1, palette.AccentColor3, 0.5f + (0.5f * MathF.Sin((phase + 0.25f) * MathF.Tau)));
-        var cRight = StyleLayoutHelper.BlendSrgb(palette.AccentColor2, palette.AccentColor1, 0.5f + (0.5f * MathF.Cos((phase + 0.35f) * MathF.Tau)));
-
-        // 1. Multi-stop silky perimeter edge washes (SoftAmbient / BeatPulse / NeonRim)
-        DrawEdgeBand(canvas, new SKRect(0f, 0f, w, reachY), new SKPoint(0f, 0f), new SKPoint(0f, reachY), cTop, alpha * 0.90f);
-        if (!packet.BottomFadeToBlack)
-        {
-            DrawEdgeBand(canvas, new SKRect(0f, h - reachY, w, h), new SKPoint(0f, h), new SKPoint(0f, h - reachY), cBottom, alpha * 0.94f);
-        }
-
-        DrawEdgeBand(canvas, new SKRect(0f, 0f, reachX, h), new SKPoint(0f, 0f), new SKPoint(reachX, 0f), cLeft, alpha * 0.86f);
-        DrawEdgeBand(canvas, new SKRect(w - reachX, 0f, w, h), new SKPoint(w, 0f), new SKPoint(w - reachX, 0f), cRight, alpha * 0.86f);
-
-        // 2. Soft corner bass blooms
-        var minDim = MathF.Min(w, h);
-        var cornerRadius = Math.Clamp(minDim * (0.24f + (_smoothedBass * 0.07f) + (thicknessSetting * 0.03f)), 32f, minDim * 0.36f);
-        var cornerAlpha = Math.Clamp(alpha * 0.72f, 0f, 0.74f);
-        DrawRadialBloom(canvas, 0f, 0f, cornerRadius, cTop, cornerAlpha);
-        DrawRadialBloom(canvas, w, 0f, cornerRadius, cRight, cornerAlpha);
-        if (!packet.BottomFadeToBlack)
-        {
-            DrawRadialBloom(canvas, 0f, h, cornerRadius, cLeft, cornerAlpha);
-            DrawRadialBloom(canvas, w, h, cornerRadius, cBottom, cornerAlpha);
-        }
-
-        // 3. Rim strokes for BeatPulse / NeonRim
-        if (rimAlpha > 0.01f && !packet.BottomFadeToBlack)
-        {
-            var outerAlpha = Math.Clamp(rimAlpha * 0.30f * intensity * packet.GlobalOpacity, 0f, 0.50f);
-            _rimPaint.Shader = null;
-            _rimPaint.StrokeWidth = Math.Clamp((9.0f + (_smoothedBeat * 5.5f)) * thicknessSetting, 4f, 28f);
-            _rimPaint.Color = palette.AccentColor2.ToSkColorWithAlpha(outerAlpha);
-            canvas.DrawRect(2.5f, 2.5f, w - 5f, h - 5f, _rimPaint);
-
-            _rimPaint.StrokeWidth = Math.Clamp((2.6f + (_smoothedBeat * 2.4f)) * thicknessSetting, 1.5f, 9f);
-            _rimPaint.Color = palette.AccentColor1.ToSkColorWithAlpha(Math.Clamp(rimAlpha * intensity * packet.GlobalOpacity, 0f, 0.95f));
-            canvas.DrawRect(2.0f, 2.0f, w - 4f, h - 4f, _rimPaint);
+            canvas.RestoreToCount(save);
         }
     }
 
@@ -150,182 +196,256 @@ public sealed class EdgeGlowRenderer : IDisposable
         }
 
         _disposed = true;
-        _edgePaint.Dispose();
-        _rimPaint.Dispose();
+        _spillMaskFilter?.Dispose();
+        _spillMaskFilter = null;
+        _tubeMaskFilter?.Dispose();
+        _tubeMaskFilter = null;
+        _outerClipPath.Dispose();
         _perimeterPath.Dispose();
+        _spillPath.Dispose();
+        _edgePaint.Dispose();
+        _strokePaint.Dispose();
+        _rimPaint.Dispose();
+        _fadePaint.Dispose();
     }
 
-    private void UpdateSmoothedMotionState(
-        double renderTimeSeconds,
-        float speedSetting,
-        float safePartyEnergy,
-        float bassEnergy,
-        float beatPulse,
-        bool reducedMotion)
+    private float UpdateSmoothedMotionState(
+        in FrameRenderPacket packet,
+        AppSettings settings,
+        EdgeGlowAnimationMode animMode)
     {
-        _smoothedBass = (_smoothedBass * 0.74f) + (Math.Clamp(bassEnergy, 0f, 1.5f) * 0.26f);
-        _smoothedBeat = (_smoothedBeat * 0.68f) + (Math.Clamp(beatPulse, 0f, 1.5f) * 0.32f);
+        var nowSec = packet.RenderTimeSeconds;
+        var dt = _lastRenderTimeSec >= 0.0
+            ? Math.Clamp((float)(nowSec - _lastRenderTimeSec), 0f, 0.05f)
+            : Math.Clamp(packet.DeltaSeconds, 0f, 0.05f);
+        _lastRenderTimeSec = nowSec;
 
-        if (reducedMotion)
+        if (animMode != EdgeGlowAnimationMode.MusicSync || settings.ReducedMotion)
         {
-            _lastRenderTimeSec = renderTimeSeconds;
+            _smoothedBass = 0f;
+            _smoothedBeat = 0f;
+            return dt;
+        }
+
+        var audio = packet.EffectiveAudioMetrics;
+        var isPlaying = packet.PlaybackSnapshot?.IsPlaying ?? true;
+        var bassTarget = isPlaying ? Math.Clamp(audio.BassEnergy, 0f, 1.5f) : 0.06f;
+        var beatTarget = isPlaying ? Math.Clamp(audio.BeatPulse, 0f, 1.5f) : 0f;
+        var smoothing = 1f - MathF.Exp(-dt * 14f);
+
+        _smoothedBass += (bassTarget - _smoothedBass) * smoothing;
+        _smoothedBeat += (beatTarget - _smoothedBeat) * smoothing;
+        return dt;
+    }
+
+    private void AdvancePhase(float dt, AppSettings settings, EdgeGlowAnimationMode animMode)
+    {
+        if (animMode == EdgeGlowAnimationMode.Still || settings.ReducedMotion)
+        {
             return;
         }
 
-        // Silky slow delta-integrated rotation (~0.075 laps/sec at 1.0x -> ~19s per lap at 0.70x default)
-        var baseRate = 0.075f * speedSetting * Math.Clamp(safePartyEnergy, 0.75f, 1.35f);
-        var dt = (_lastRenderTimeSec >= 0.0 && renderTimeSeconds >= _lastRenderTimeSec)
-            ? renderTimeSeconds - _lastRenderTimeSec
-            : -1.0;
-
-        if (dt < 0.0 || dt > 0.25)
-        {
-            _rushPhase = (renderTimeSeconds * baseRate) % 1.0;
-            if (_rushPhase < 0.0) _rushPhase += 1.0;
-        }
-        else if (dt > 0.0)
-        {
-            var effectiveRate = baseRate * (1.0f + (_smoothedBass * 0.16f) + (_smoothedBeat * 0.10f));
-            _rushPhase = (_rushPhase + (dt * effectiveRate)) % 1.0;
-        }
-
-        _lastRenderTimeSec = renderTimeSeconds;
+        var speedSetting = Math.Clamp(settings.EdgeGlowSpeed, AppSettings.MinEdgeGlowSpeed, AppSettings.MaxEdgeGlowSpeed);
+        var reactivity = animMode == EdgeGlowAnimationMode.MusicSync
+            ? 0.55f + (_smoothedBass * 0.90f) + (_smoothedBeat * 0.55f)
+            : 0.42f;
+        _rushPhase = (_rushPhase + (dt * 0.18 * speedSetting * reactivity)) % 1.0;
     }
 
-    private void DrawSingleNeonRushLine(
+    private static (RgbColor Primary, RgbColor Secondary) ResolveGlowColors(in FrameRenderPacket packet, AppSettings settings)
+    {
+        if (settings.EdgeGlowOverrideAlbumColors)
+        {
+            var p = BoostGlowVividness(settings.EdgeGlowPrimaryColor);
+            var s = settings.EdgeGlowTwoColorGradient
+                ? BoostGlowVividness(settings.EdgeGlowSecondaryColor)
+                : p;
+            return (p, s);
+        }
+
+        var srcPalette = StageBackdropRenderer.ResolveBackdropPalette(
+            packet.EffectiveStyle,
+            packet.Palette,
+            settings.AutoSyncColors);
+
+        var primary = BoostGlowVividness(srcPalette.AccentColor1);
+        var secondary = settings.EdgeGlowTwoColorGradient
+            ? BoostGlowVividness(PickDistinctSecondary(srcPalette, primary))
+            : primary;
+
+        return (primary, secondary);
+    }
+
+    private static RgbColor PickDistinctSecondary(AlbumAccentPalette palette, RgbColor primary)
+    {
+        var pLab = OklabColorMath.SrgbToOklab(primary);
+        var c2 = palette.AccentColor2;
+        var c3 = palette.AccentColor3;
+
+        var d2 = ColorDistanceSquared(pLab, OklabColorMath.SrgbToOklab(c2));
+        var d3 = ColorDistanceSquared(pLab, OklabColorMath.SrgbToOklab(c3));
+
+        return d2 >= d3 ? c2 : c3;
+    }
+
+    private static double ColorDistanceSquared(OklabColor a, OklabColor b)
+    {
+        var dl = a.L - b.L;
+        var da = a.A - b.A;
+        var db = a.B - b.B;
+        return (dl * dl) + (da * da) + (db * db);
+    }
+
+    private static RgbColor BoostGlowVividness(RgbColor color)
+    {
+        var lch = OklabColorMath.OklabToOklch(OklabColorMath.SrgbToOklab(color));
+        if (lch.C < 0.025)
+        {
+            return new RgbColor(
+                (byte)Math.Clamp((int)MathF.Round(color.R * 0.85f + 38f), 0, 255),
+                (byte)Math.Clamp((int)MathF.Round(color.G * 0.85f + 38f), 0, 255),
+                (byte)Math.Clamp((int)MathF.Round(color.B * 0.85f + 42f), 0, 255));
+        }
+
+        var targetL = Math.Clamp(lch.L < 0.58 ? 0.72 : lch.L + 0.06, 0.62, 0.86);
+        var targetC = Math.Clamp(lch.C * 1.18, 0.14, 0.28);
+        return OklabColorMath.OklchToSrgbGamutMapped(new OklchColor(targetL, targetC, lch.H));
+    }
+
+    private void DrawLumnPerimeter(
         SKCanvas canvas,
         float w,
         float h,
-        FrameRenderPacket packet,
-        AlbumAccentPalette palette,
-        float intensity,
-        float thickness)
+        float cornerRadius,
+        RgbColor primaryColor,
+        RgbColor secondaryColor,
+        bool twoColorGradient,
+        float spillStrength,
+        float tubeStrength,
+        float coreStrength,
+        float thicknessMult,
+        float spillMult,
+        float musicDrive,
+        bool includeRushSpotlight)
     {
-        var isOpenArch = packet.BottomFadeToBlack;
-        var minDim = MathF.Min(w, h);
-        var inset = Math.Clamp(2.2f * thickness, 2.0f, Math.Min(7.5f, minDim * 0.04f));
-        var cornerR = Math.Clamp(8f + (thickness * 2.5f), 5f, minDim * 0.05f);
+        var cx = w * 0.5f;
+        var cy = h * 0.5f;
+        var minSide = MathF.Min(w, h);
+        var angleDeg = (float)(_rushPhase * 360.0);
+        var rotMatrix = SKMatrix.CreateRotationDegrees(angleDeg, cx, cy);
 
-        _perimeterPath.Rewind();
-        if (isOpenArch)
+        // Build 60% Primary / 40% Secondary Lumn perimeter gradient (or lush single-color gradient)
+        var midBlend = StyleLayoutHelper.BlendSrgb(primaryColor, secondaryColor, twoColorGradient ? 0.45f : 0.15f);
+        var whiteHotPrimary = StyleLayoutHelper.BlendSrgb(primaryColor, new RgbColor(255, 255, 255), 0.46f);
+        var whiteHotSecondary = StyleLayoutHelper.BlendSrgb(secondaryColor, new RgbColor(255, 255, 255), 0.42f);
+
+        // Pass 1: Wide feathered Lumn inward wash hugging all 4 rounded screen edges (Glow Spill & Thickness envelope)
+        var alphaEnvelope = Math.Clamp(0.46f * spillStrength * Math.Clamp(musicDrive, 0.85f, 1.38f), 0f, 0.76f);
+        if (alphaEnvelope > 0.01f)
         {
-            // Seamless Open Top-U arch ending well above bottomFadeToBlack rows
-            var archY = h * 0.72f;
-            _perimeterPath.MoveTo(inset, archY);
-            _perimeterPath.LineTo(inset, inset + cornerR);
-            _perimeterPath.QuadTo(inset, inset, inset + cornerR, inset);
-            _perimeterPath.LineTo(w - inset - cornerR, inset);
-            _perimeterPath.QuadTo(w - inset, inset, w - inset, inset + cornerR);
-            _perimeterPath.LineTo(w - inset, archY);
-        }
-        else
-        {
-            _perimeterPath.AddRoundRect(new SKRect(inset, inset, w - inset, h - inset), cornerR, cornerR);
-        }
+            var thicknessReach = 0.64f + (0.36f * thicknessMult);
+            var spillStrokeWidth = Math.Clamp(minSide * 0.068f * spillMult * thicknessReach * (0.90f + 0.25f * musicDrive), 14f, minSide * 0.24f);
+            var blurSigma = Math.Clamp(spillStrokeWidth * 0.56f, 6f, 68f);
+            var spillInset = Math.Clamp(spillStrokeWidth * 0.10f, 1f, 8f);
 
-        if (isOpenArch)
-        {
-            canvas.Save();
-            canvas.ClipRect(new SKRect(0f, 0f, w, h * 0.92f));
-        }
+            _spillPath.Reset();
+            _spillPath.AddRoundRect(new SKRect(spillInset, spillInset, w - spillInset, h - spillInset), cornerRadius, cornerRadius);
 
-        try
-        {
-            var sweepCenter = isOpenArch
-                ? new SKPoint(w * 0.5f, h * 0.48f)
-                : new SKPoint(w * 0.5f, h * 0.5f);
+            PopulatePerimeterColors(_twoColorSweep, primaryColor, secondaryColor, midBlend, alphaEnvelope);
+            using var spillShader = SKShader.CreateSweepGradient(
+                new SKPoint(cx, cy),
+                _twoColorSweep,
+                _twoColorStops,
+                rotMatrix);
 
-            // In fullscreen: continuous 360° glide; in windowed mode: smooth eased sweep along the upper arch
-            var rotAngleRad = isOpenArch
-                ? ((-155f + (170f * (0.5f - (0.5f * MathF.Cos((float)(_rushPhase * Math.PI * 2.0)))))) * (MathF.PI / 180f))
-                : (float)(_rushPhase * Math.PI * 2.0);
-
-            var localMatrix = SKMatrix.CreateRotation(rotAngleRad, sweepCenter.X, sweepCenter.Y);
-            var shimmer = 0.5f + (0.5f * MathF.Sin((float)(_rushPhase * Math.PI * 2.0)));
-            var tailTone = palette.AccentColor3;
-            var midTone = StyleLayoutHelper.BlendSrgb(palette.AccentColor2, palette.AccentColor1, 0.25f + (0.28f * shimmer));
-            var leadTone = StyleLayoutHelper.BlendSrgb(palette.AccentColor1, palette.AccentColor2, 0.22f * (1f - shimmer));
-            var hotCoreTone = StyleLayoutHelper.BlendSrgb(leadTone, new RgbColor(255, 255, 255), 0.58f);
-
-            var opacityScale = intensity * packet.GlobalOpacity;
-            var bodyScale = thickness * Math.Clamp(opacityScale, 0.45f, 1.35f);
-
-            // Layer 1: Wide silky atmospheric neon halation hugging bezel inward
-            DrawContinuousSweepStroke(
-                canvas,
-                sweepCenter,
-                localMatrix,
-                strokeWidth: Math.Clamp((30.0f + (_smoothedBeat * 12.0f) + (_smoothedBass * 6.0f)) * bodyScale, 6f, 84f),
-                tailTone,
-                midTone,
-                leadTone,
-                peakAlpha: Math.Clamp(0.22f * opacityScale, 0f, 0.36f));
-
-            // Layer 2: Rich saturated liquid neon body
-            DrawContinuousSweepStroke(
-                canvas,
-                sweepCenter,
-                localMatrix,
-                strokeWidth: Math.Clamp((12.5f + (_smoothedBeat * 5.0f)) * bodyScale, 3.5f, 38f),
-                tailTone,
-                midTone,
-                leadTone,
-                peakAlpha: Math.Clamp(0.62f * opacityScale, 0f, 0.85f));
-
-            // Layer 3: Razor-clean luminous inner core (no round ball dot, smooth both-end taper!)
-            DrawContinuousSweepStroke(
-                canvas,
-                sweepCenter,
-                localMatrix,
-                strokeWidth: Math.Clamp((3.6f + (_smoothedBeat * 1.8f)) * thickness, 1.8f, 11f),
-                midTone,
-                leadTone,
-                hotCoreTone,
-                peakAlpha: Math.Clamp(0.95f * opacityScale, 0f, 1.0f));
-        }
-        finally
-        {
-            if (isOpenArch)
+            _strokePaint.Shader = spillShader;
+            _strokePaint.Color = SKColors.White;
+            _strokePaint.StrokeWidth = spillStrokeWidth;
+            _strokePaint.MaskFilter = GetOrCreateSpillBlur(blurSigma);
+            try
             {
-                canvas.Restore();
+                canvas.DrawPath(_spillPath, _strokePaint);
+            }
+            finally
+            {
+                _strokePaint.MaskFilter = null;
+                _strokePaint.Shader = null;
             }
         }
-    }
 
-    private void DrawContinuousSweepStroke(
-        SKCanvas canvas,
-        SKPoint sweepCenter,
-        SKMatrix localMatrix,
-        float strokeWidth,
-        RgbColor tailColor,
-        RgbColor midColor,
-        RgbColor peakColor,
-        float peakAlpha)
-    {
-        if (peakAlpha <= 0.004f || strokeWidth <= 0.5f)
+        // Pass 2: Crisp glowing neon bezel tube around the rounded screen border (Thickness)
+        var tubeAlpha = Math.Clamp(0.76f * tubeStrength * Math.Clamp(musicDrive, 0.90f, 1.35f), 0f, 0.95f);
+        var tubeStrokeWidth = Math.Clamp(MathF.Max(4.0f, minSide * 0.010f) * thicknessMult * (0.92f + 0.18f * musicDrive), 3.0f, 22f);
+        var tubeInset = Math.Clamp(tubeStrokeWidth * 0.36f, 1.2f, 8.0f);
+        var tubeRadius = MathF.Max(4f, cornerRadius - tubeInset * 0.3f);
+
+        _perimeterPath.Reset();
+        _perimeterPath.AddRoundRect(new SKRect(tubeInset, tubeInset, w - tubeInset, h - tubeInset), tubeRadius, tubeRadius);
+
+        if (tubeAlpha > 0.01f)
+        {
+            PopulatePerimeterColors(_twoColorSweep, primaryColor, secondaryColor, midBlend, tubeAlpha);
+            using var tubeShader = SKShader.CreateSweepGradient(
+                new SKPoint(cx, cy),
+                _twoColorSweep,
+                _twoColorStops,
+                rotMatrix);
+
+            _strokePaint.Shader = tubeShader;
+            _strokePaint.Color = SKColors.White;
+            _strokePaint.StrokeWidth = tubeStrokeWidth;
+            _strokePaint.MaskFilter = GetOrCreateTubeBlur(Math.Clamp(tubeStrokeWidth * 0.85f, 3.0f, 16.0f));
+            try
+            {
+                canvas.DrawPath(_perimeterPath, _strokePaint);
+            }
+            finally
+            {
+                _strokePaint.MaskFilter = null;
+                _strokePaint.Shader = null;
+            }
+        }
+
+        // Pass 3: Luminous sharp bezel hairline & traveling Neon Rush hotspot
+        var coreAlpha = Math.Clamp(0.84f * coreStrength, 0f, 0.98f);
+        if (coreAlpha <= 0.01f)
         {
             return;
         }
 
-        // Smooth C1/C2 envelope over stops [0..1] spanning one unbroken ~62% long glowing line,
-        // feathering seamlessly to 0% alpha at both ends so zero joints or blunt caps ever appear.
-        _sweepColors[0] = SKColors.Transparent;
-        _sweepColors[1] = SKColors.Transparent;
-        _sweepColors[2] = tailColor.ToSkColorWithAlpha(peakAlpha * 0.04f);
-        _sweepColors[3] = tailColor.ToSkColorWithAlpha(peakAlpha * 0.14f);
-        _sweepColors[4] = midColor.ToSkColorWithAlpha(peakAlpha * 0.32f);
-        _sweepColors[5] = midColor.ToSkColorWithAlpha(peakAlpha * 0.56f);
-        _sweepColors[6] = StyleLayoutHelper.BlendSrgb(midColor, peakColor, 0.5f).ToSkColorWithAlpha(peakAlpha * 0.80f);
-        _sweepColors[7] = peakColor.ToSkColorWithAlpha(peakAlpha * 0.96f);
-        _sweepColors[8] = peakColor.ToSkColorWithAlpha(peakAlpha);
-        _sweepColors[9] = StyleLayoutHelper.BlendSrgb(midColor, peakColor, 0.7f).ToSkColorWithAlpha(peakAlpha * 0.52f);
-        _sweepColors[10] = midColor.ToSkColorWithAlpha(peakAlpha * 0.12f);
-        _sweepColors[11] = SKColors.Transparent;
+        if (includeRushSpotlight)
+        {
+            _rushSweepColors[0] = whiteHotPrimary.ToSkColorWithAlpha(coreAlpha * 0.24f);
+            _rushSweepColors[1] = primaryColor.ToSkColorWithAlpha(coreAlpha * 0.30f);
+            _rushSweepColors[2] = secondaryColor.ToSkColorWithAlpha(coreAlpha * 0.34f);
+            _rushSweepColors[3] = secondaryColor.ToSkColorWithAlpha(coreAlpha * 0.48f);
+            _rushSweepColors[4] = whiteHotSecondary.ToSkColorWithAlpha(coreAlpha * 0.72f);
+            _rushSweepColors[5] = whiteHotPrimary.ToSkColorWithAlpha(Math.Min(1f, coreAlpha * 0.96f));
+            _rushSweepColors[6] = SKColors.White.WithAlpha((byte)Math.Clamp(coreAlpha * 255f, 0f, 255f));
+            _rushSweepColors[7] = whiteHotPrimary.ToSkColorWithAlpha(Math.Min(1f, coreAlpha * 0.92f));
+            _rushSweepColors[8] = primaryColor.ToSkColorWithAlpha(coreAlpha * 0.45f);
+            _rushSweepColors[9] = whiteHotPrimary.ToSkColorWithAlpha(coreAlpha * 0.24f);
 
-        using var shader = SKShader.CreateSweepGradient(sweepCenter, _sweepColors, _sweepStops, localMatrix);
-        _rimPaint.Shader = shader;
-        _rimPaint.StrokeWidth = strokeWidth;
+            using var rushShader = SKShader.CreateSweepGradient(
+                new SKPoint(cx, cy),
+                _rushSweepColors,
+                _rushSweepStops,
+                rotMatrix);
+            _rimPaint.Shader = rushShader;
+        }
+        else
+        {
+            PopulatePerimeterColors(_twoColorSweep, whiteHotPrimary, whiteHotSecondary, midBlend, coreAlpha * 0.78f);
+            using var staticShader = SKShader.CreateSweepGradient(
+                new SKPoint(cx, cy),
+                _twoColorSweep,
+                _twoColorStops,
+                rotMatrix);
+            _rimPaint.Shader = staticShader;
+        }
+
         _rimPaint.Color = SKColors.White;
+        _rimPaint.StrokeWidth = Math.Clamp(tubeStrokeWidth * 0.32f, 1.4f, 4.5f);
         try
         {
             canvas.DrawPath(_perimeterPath, _rimPaint);
@@ -336,53 +456,46 @@ public sealed class EdgeGlowRenderer : IDisposable
         }
     }
 
-    private void DrawRadialBloom(SKCanvas canvas, float cx, float cy, float radius, RgbColor color, float alpha)
+    private static void PopulatePerimeterColors(
+        SKColor[] target,
+        RgbColor primary,
+        RgbColor secondary,
+        RgbColor blend,
+        float alpha)
     {
-        if (alpha <= 0.004f || radius <= 2f)
-        {
-            return;
-        }
-
-        _cornerColors[0] = color.ToSkColorWithAlpha(alpha);
-        _cornerColors[1] = color.ToSkColorWithAlpha(alpha * 0.42f);
-        _cornerColors[2] = color.ToSkColorWithAlpha(alpha * 0.10f);
-        _cornerColors[3] = color.ToSkColorWithAlpha(0f);
-
-        using var shader = SKShader.CreateRadialGradient(new SKPoint(cx, cy), radius, _cornerColors, _cornerStops, SKShaderTileMode.Clamp);
-        _edgePaint.Shader = shader;
-        _edgePaint.Color = SKColors.White;
-        try
-        {
-            canvas.DrawCircle(cx, cy, radius, _edgePaint);
-        }
-        finally
-        {
-            _edgePaint.Shader = null;
-        }
+        // Primary covers ~60% of the rounded sweep, Secondary covers ~40% with smooth wrap at 0.0 / 1.0
+        target[0] = primary.ToSkColorWithAlpha(alpha);
+        target[1] = primary.ToSkColorWithAlpha(alpha);
+        target[2] = blend.ToSkColorWithAlpha(alpha);
+        target[3] = secondary.ToSkColorWithAlpha(alpha);
+        target[4] = primary.ToSkColorWithAlpha(alpha);
     }
 
-    private void DrawEdgeBand(SKCanvas canvas, SKRect rect, SKPoint start, SKPoint end, RgbColor color, float alpha)
+    private SKMaskFilter GetOrCreateSpillBlur(float sigma)
     {
-        if (alpha <= 0.004f || rect.Width <= 0f || rect.Height <= 0f)
+        var quantized = MathF.Round(sigma * 2f) * 0.5f;
+        if (_spillMaskFilter is not null && MathF.Abs(_cachedSpillSigma - quantized) < 0.01f)
         {
-            return;
+            return _spillMaskFilter;
         }
 
-        _edgeColors[0] = color.ToSkColorWithAlpha(alpha);
-        _edgeColors[1] = color.ToSkColorWithAlpha(alpha * 0.52f);
-        _edgeColors[2] = color.ToSkColorWithAlpha(alpha * 0.14f);
-        _edgeColors[3] = color.ToSkColorWithAlpha(0f);
+        _spillMaskFilter?.Dispose();
+        _cachedSpillSigma = quantized;
+        _spillMaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, Math.Max(0.8f, quantized));
+        return _spillMaskFilter;
+    }
 
-        using var shader = SKShader.CreateLinearGradient(start, end, _edgeColors, _edgeStops, SKShaderTileMode.Clamp);
-        _edgePaint.Shader = shader;
-        _edgePaint.Color = SKColors.White;
-        try
+    private SKMaskFilter GetOrCreateTubeBlur(float sigma)
+    {
+        var quantized = MathF.Round(sigma * 2f) * 0.5f;
+        if (_tubeMaskFilter is not null && MathF.Abs(_cachedTubeSigma - quantized) < 0.01f)
         {
-            canvas.DrawRect(rect, _edgePaint);
+            return _tubeMaskFilter;
         }
-        finally
-        {
-            _edgePaint.Shader = null;
-        }
+
+        _tubeMaskFilter?.Dispose();
+        _cachedTubeSigma = quantized;
+        _tubeMaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, Math.Max(0.8f, quantized));
+        return _tubeMaskFilter;
     }
 }

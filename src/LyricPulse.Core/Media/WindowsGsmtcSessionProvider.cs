@@ -527,6 +527,70 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
 
     private void SignalRefresh() => _refreshChannel.Writer.TryWrite(1);
 
+    public Task<bool> TryTogglePlayPauseAsync(CancellationToken cancellationToken = default) =>
+        InvokeMediaTransportCommandAsync(
+            session => session.TryTogglePlayPauseAsync().AsTask(cancellationToken),
+            "TryTogglePlayPauseAsync");
+
+    public Task<bool> TrySkipNextAsync(CancellationToken cancellationToken = default) =>
+        InvokeMediaTransportCommandAsync(
+            session => session.TrySkipNextAsync().AsTask(cancellationToken),
+            "TrySkipNextAsync");
+
+    public Task<bool> TrySkipPreviousAsync(CancellationToken cancellationToken = default) =>
+        InvokeMediaTransportCommandAsync(
+            session => session.TrySkipPreviousAsync().AsTask(cancellationToken),
+            "TrySkipPreviousAsync");
+
+    private async Task<bool> InvokeMediaTransportCommandAsync(
+        Func<GlobalSystemMediaTransportControlsSession, Task<bool>> command,
+        string operationName)
+    {
+        var session = TryGetActiveWinRtSession();
+        if (session is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var handled = await command(session).ConfigureAwait(false);
+            if (handled)
+            {
+                SignalRefresh();
+            }
+
+            return handled;
+        }
+        catch (Exception ex) when (IsTransientWinRtException(ex))
+        {
+            _logger.LogGsmtcComException(ex, operationName);
+            return false;
+        }
+    }
+
+    private GlobalSystemMediaTransportControlsSession? TryGetActiveWinRtSession()
+    {
+        var preferredAumid = _coordinator.CurrentSession?.SourceAppUserModelId;
+        lock (_sessionsLock)
+        {
+            if (!string.IsNullOrWhiteSpace(preferredAumid) &&
+                _trackedSessions.TryGetValue(preferredAumid, out var handle))
+            {
+                return handle.Session;
+            }
+
+            if (_trackedSessions.Count > 0)
+            {
+                return _trackedSessions.Values.First().Session;
+            }
+        }
+
+        return _manager is null
+            ? null
+            : TryInvokeWinRt(() => _manager.GetCurrentSession(), "GetCurrentSession");
+    }
+
     private void DetachAllSessions()
     {
         GsmtcSessionHandle[] toDetach;

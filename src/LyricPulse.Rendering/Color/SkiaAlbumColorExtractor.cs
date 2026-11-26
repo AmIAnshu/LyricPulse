@@ -257,6 +257,53 @@ public sealed class SkiaAlbumColorExtractor : IAlbumColorExtractor
         return (circularCover, ambientBlur);
     }
 
+    /// <summary>
+    /// Decodes album artwork once per track into (1) a crisp square cover texture and
+    /// (2) a full-bleed lightly-blurred backdrop texture (320x320 with gentle blur so cover art
+    /// details and color vibe stay recognizable across the Glass Stage room).
+    /// </summary>
+    public static (SKImage? CoverArt, SKImage? LightBlurBackdrop) DecodeGlassStageTextures(
+        ReadOnlySpan<byte> imageBytes,
+        int coverDimension = 360,
+        int backdropDimension = 320)
+    {
+        var coverSide = Math.Clamp(coverDimension, 96, 512);
+        var coverArt = DecodeBoundedCoverImage(imageBytes, coverSide);
+        if (coverArt is null)
+        {
+            return (null, null);
+        }
+
+        SKImage? lightBlurBackdrop = null;
+        var blurSide = Math.Clamp(backdropDimension, 128, 420);
+        var blurInfo = new SKImageInfo(blurSide, blurSide, SKColorType.Bgra8888, SKAlphaType.Premul);
+        using (var blurSurface = SKSurface.Create(blurInfo))
+        {
+            if (blurSurface is not null)
+            {
+                var canvas = blurSurface.Canvas;
+                canvas.Clear(SKColors.Black);
+                using var blurFilter = SKImageFilter.CreateBlur(7.5f, 7.5f);
+                using var blurPaint = new SKPaint
+                {
+                    IsAntialias = true,
+                    ImageFilter = blurFilter
+                };
+                var bleed = blurSide * 0.08f;
+                var dst = new SKRect(-bleed, -bleed, blurSide + bleed, blurSide + bleed);
+                canvas.DrawImage(
+                    coverArt,
+                    new SKRect(0f, 0f, coverArt.Width, coverArt.Height),
+                    dst,
+                    LinearSampling,
+                    blurPaint);
+                lightBlurBackdrop = blurSurface.Snapshot();
+            }
+        }
+
+        return (coverArt, lightBlurBackdrop);
+    }
+
     private static SKBitmap? DecodeSafeBitmap(SKCodec codec, SKImageInfo codecInfo)
     {
         // Request decoder-level downscaling for large covers (e.g. 4000x4000 JPEG) to avoid giant allocations.

@@ -280,7 +280,30 @@
                   Value="{Binding EdgeGlowIntensityPercent}"
                   AutomationProperties.Name="Edges glow intensity"/>
 
-          <StackPanel IsVisible="{Binding IsEdgeGlowActive}" Spacing="6">
+          <StackPanel IsVisible="{Binding IsEdgeGlowActive}" Spacing="8">
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel>
+                <TextBlock Text="System-Wide Monitor Glow (Lumn Mode)" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+                <TextBlock Text="Illuminate Windows display edges even with lyrics off" FontSize="11" Foreground="{DynamicResource LpTextTertiaryBrush}"/>
+              </StackPanel>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding EdgeGlowDesktopEnabled}" OnContent="" OffContent=""/>
+            </Grid>
+
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="2-Color Gradient (60% / 40%)" VerticalAlignment="Center" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding EdgeGlowTwoColorGradient}" OnContent="" OffContent=""/>
+            </Grid>
+
+            <TextBlock Text="Glow Animation" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
+            <Grid ColumnDefinitions="*,*,*" ColumnSpacing="6">
+              <Button Classes="seg" Classes.active="{Binding IsEdgeGlowAnimMusicSync}" Grid.Column="0" Content="Music Sync" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                      Command="{Binding SelectEdgeGlowAnimationCommand}" CommandParameter="{x:Static m:EdgeGlowAnimationMode.MusicSync}"/>
+              <Button Classes="seg" Classes.active="{Binding IsEdgeGlowAnimAmbientDrift}" Grid.Column="1" Content="Drift" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                      Command="{Binding SelectEdgeGlowAnimationCommand}" CommandParameter="{x:Static m:EdgeGlowAnimationMode.AmbientDrift}"/>
+              <Button Classes="seg" Classes.active="{Binding IsEdgeGlowAnimStill}" Grid.Column="2" Content="Still" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                      Command="{Binding SelectEdgeGlowAnimationCommand}" CommandParameter="{x:Static m:EdgeGlowAnimationMode.Still}"/>
+            </Grid>
+
             <Grid ColumnDefinitions="*,Auto">
               <TextBlock Text="Glow Thickness &amp; Depth" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
               <TextBlock Grid.Column="1" Text="{Binding EdgeGlowThicknessPercent, StringFormat='{}{0}%'}"
@@ -290,6 +313,32 @@
             <Slider Minimum="40" Maximum="250" TickFrequency="5" IsSnapToTickEnabled="True"
                     Value="{Binding EdgeGlowThicknessPercent}"
                     AutomationProperties.Name="Edge glow thickness"/>
+
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="Inward Glow Spill" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+              <TextBlock Grid.Column="1" Text="{Binding EdgeGlowSpillPercent, StringFormat='{}{0}%'}"
+                         FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="12"
+                         Foreground="{DynamicResource LpAccentTextBrush}"/>
+            </Grid>
+            <Slider Minimum="25" Maximum="200" TickFrequency="5" IsSnapToTickEnabled="True"
+                    Value="{Binding EdgeGlowSpillPercent}"
+                    AutomationProperties.Name="Inward glow spill"/>
+
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="Override Album Colors (Edge Glow)" VerticalAlignment="Center" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+              <ToggleSwitch Grid.Column="1" IsChecked="{Binding EdgeGlowOverrideAlbumColors}" OnContent="" OffContent=""/>
+            </Grid>
+
+            <StackPanel IsVisible="{Binding EdgeGlowOverrideAlbumColors}" Spacing="8">
+              <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                <TextBlock Text="Edge Primary Color (60%)" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
+                <ColorPicker Grid.Column="1" Color="{Binding EdgeGlowPrimaryColor, Mode=TwoWay}" IsAlphaEnabled="False" Height="32"/>
+              </Grid>
+              <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding EdgeGlowTwoColorGradient}" Margin="0,2">
+                <TextBlock Text="Edge Secondary Color (40%)" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
+                <ColorPicker Grid.Column="1" Color="{Binding EdgeGlowSecondaryColor, Mode=TwoWay}" IsAlphaEnabled="False" Height="32"/>
+              </Grid>
+            </StackPanel>
           </StackPanel>
 
           <StackPanel IsVisible="{Binding IsEdgeGlowNeonRush}" Spacing="6">

@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://lyricpulse.vercel.app"><img src="https://img.shields.io/badge/Live%20Demo-lyricpulse.vercel.app-5B54EC?style=for-the-badge&logo=vercel&logoColor=white" alt="Live Demo on Vercel"></a>
-  <a href="https://github.com/AmIAnshu/LyricPulse/releases/tag/v3.0"><img src="https://img.shields.io/badge/Download-v3.0%20(.EXE)-22C55E?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows v3.0 EXE"></a>
+  <a href="https://github.com/AmIAnshu/LyricPulse/releases/tag/v4.0"><img src="https://img.shields.io/badge/Download-v4.0%20(.EXE)-22C55E?style=for-the-badge&logo=windows&logoColor=white" alt="Download Windows v4.0 EXE"></a>
 </p>
 
 <p align="center">
@@ -30,10 +30,10 @@ Try **LyricPulse Studio** directly in your browser without installing anything:
 👉 **[Launch Live Web Demo — lyricpulse.vercel.app](https://lyricpulse.vercel.app)**
 
 What you can test right on the web demo:
-- Switch live across all **11 kinetic visualization styles** (including the **3D Vinyl Groove Listening Room** and **Kinetic Wall**)
+- Switch live across all **11 kinetic visualization styles** (including the flagship **Glass Stage**, **Kinetic Wall**, and **Constellation**)
 - Enable the built-in **Web Audio Synth Soundtrack** or upload your own **`.mp3` / album cover / `.lrc`** files locally in your browser
-- Watch **Vinyl Groove** bathe the entire 3D room in a **blurred album-color atmosphere** with harmonious accent cycling and a **strictly circular spinning vinyl center cover**
-- Adjust **Neon Rush** pitch-black edge glow speed & thickness, **Typography**, **Audio Visualizers**, **Overlay Simulation**, and **Reduced Motion**
+- Experience **Glass Stage**: lightly blurred full-bleed album cover background, a sleek medium Apple GlassOS cover card, and translucent hover transport controls (**Previous**, **Play / Pause**, **Next**)
+- Tune **Lumn-inspired Neon Rush** 1-color or 2-color (60% / 40%) rounded perimeter glow, inward spill, thickness, speed, animation mode, and custom color overrides
 
 ---
 
@@ -57,7 +57,7 @@ LyricPulse is a **transparent desktop overlay** that syncs real-time lyrics with
 | 8 | **Node Line** | Geometry | A flowing line draws itself as every word illuminates a glowing node |
 | 9 | **Kinetic Wall** | 3D Stage | Words land onto a typographic wall drifting in 3D perspective with depth |
 | 10 | **Messages** | Phone Screen | Song lines arrive as a sleek phone message thread with timed chat bubbles |
-| 11 | **Vinyl Groove** | Turntable | Spinning LP record in a 3D listening room with orbiting text and album art |
+| 11 | **Glass Stage** | Album Glass | Lightly blurred full-bleed album backdrop, medium Apple GlassOS cover card with hover transport controls, and 3D depth lyrics |
 
 ## 🎵 Key Features
 
@@ -67,9 +67,9 @@ LyricPulse is a **transparent desktop overlay** that syncs real-time lyrics with
 - 🔊 **WASAPI Audio FFT** — Real-time loopback audio capture with FFT spectrum analysis for reactive visuals
 - 🖥️ **Transparent Desktop Overlay** — Click-through glass overlay sits on top of everything, no window borders
 - ⚡ **GPU-Accelerated** — SkiaSharp hardware-accelerated rendering at 60+ FPS via ANGLE/D3D11 with lock-free song switching
-- 🎛️ **Neon Rush Edge Glow** — Adjustable speed and thickness animated edge lighting synced to music energy
+- 🎛️ **Lumn-Inspired Neon Rush Screen Glow** — System-wide rounded Windows monitor bezel lighting (even with lyrics hidden), 1-color or 2-color (60% / 40%) gradients, Music Sync / Drift / Still modes, inward spill, thickness, and custom color overrides
 - ♿ **ReducedMotion Support** — Respects system accessibility settings for motion-sensitive users
-- 🖼️ **Circular Album Art on Vinyl** — Vinyl Groove style masks your album cover cleanly into a spinning circular LP center with 3D front/back orbiting lyrics
+- 🪟 **Glass Stage & Apple GlassOS Controls** — Medium rounded album cover over a lightly-blurred full-bleed artwork backdrop, plus frosted hover transport buttons (`Previous`, `Play / Pause`, `Next`) wired to real Windows GSMTC players & Demo Mode
 - 🎭 **4 Color Themes** — Pure Studio, Vinyl Warm, Mint Pulse, and Monochrome
 - 🔄 **Demo Mode & Web Studio** — Built-in demo song for previewing all styles offline or live in the browser at **[lyricpulse.vercel.app](https://lyricpulse.vercel.app)**
 
@@ -81,7 +81,7 @@ LyricPulse is inspired by apps like [Verci](https://www.instagram.com/verci), br
 
 ### Option 1 — Download Ready-to-Run Windows Executable (No Setup Required)
 
-1. Download **`LyricPulse.App.exe`** from **[GitHub Releases (v3.0)](https://github.com/AmIAnshu/LyricPulse/releases/tag/v3.0)**.
+1. Download **`LyricPulse.App.exe`** from **[GitHub Releases (v4.0)](https://github.com/AmIAnshu/LyricPulse/releases/tag/v4.0)**.
 2. Double-click `LyricPulse.App.exe` on Windows 10 (1903+) / Windows 11 (x64) — self-contained single-file binary, no `.NET` install needed.
 
 ### Option 2 — Build from Source

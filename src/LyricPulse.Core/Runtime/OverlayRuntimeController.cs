@@ -189,6 +189,27 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
     public Task SetEdgeGlowThicknessAsync(float thickness, CancellationToken cancellationToken = default) =>
         UpdateSettingsAsync(s => s with { EdgeGlowThickness = thickness }, cancellationToken);
 
+    public Task ToggleEdgeGlowDesktopAsync(CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { EdgeGlowDesktopEnabled = !s.EdgeGlowDesktopEnabled }, cancellationToken);
+
+    public Task SetEdgeGlowAnimationAsync(EdgeGlowAnimationMode animation, CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { EdgeGlowAnimation = animation }, cancellationToken);
+
+    public Task SetEdgeGlowSpillAsync(float spill, CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { EdgeGlowSpill = spill }, cancellationToken);
+
+    public Task SetEdgeGlowTwoColorGradientAsync(bool twoColor, CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { EdgeGlowTwoColorGradient = twoColor }, cancellationToken);
+
+    public Task<bool> TogglePlayPauseAsync(CancellationToken cancellationToken = default) =>
+        TogglePlayPauseInternalAsync(cancellationToken);
+
+    public Task<bool> SkipNextAsync(CancellationToken cancellationToken = default) =>
+        SkipDemoOrLiveTrackAsync(step: 1, cancellationToken);
+
+    public Task<bool> SkipPreviousAsync(CancellationToken cancellationToken = default) =>
+        SkipDemoOrLiveTrackAsync(step: -1, cancellationToken);
+
     public Task SetAudioVisualizerModeAsync(AudioVisualizerMode mode, CancellationToken cancellationToken = default) =>
         UpdateSettingsAsync(s => s with { AudioVisualizerMode = mode }, cancellationToken);
 
@@ -349,6 +370,8 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         {
             IsDemoMode = true,
             DemoStartTimestamp = nowTicks,
+            IsDemoPaused = false,
+            DemoPausedPosition = TimeSpan.Zero,
             DemoDocument = demoDoc,
             DemoMoodVisual = demoMood,
             TimingOffset = resetOffset,
@@ -369,12 +392,108 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         return UpdateState(s => s with
         {
             IsDemoMode = false,
+            IsDemoPaused = false,
+            DemoPausedPosition = TimeSpan.Zero,
             TimingOffset = liveOffset,
             HasUserNudgedInCurrentTrack = false,
             LastOffsetNudgeUtc = null,
             PaletteMorph = OverlaySnapshotBuilder.CreatePaletteMorph(s, s.LiveTargetPalette, nowTicks, _timestampFrequency),
             TrackGeneration = s.TrackGeneration + 1
         });
+    }
+
+    private async Task<bool> TogglePlayPauseInternalAsync(CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var state = Volatile.Read(ref _state);
+        if (!state.IsDemoMode && state.LiveSession is not null)
+        {
+            return await _mediaProvider.TryTogglePlayPauseAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!state.IsDemoMode)
+        {
+            await SetDemoModeAsync(true, cancellationToken).ConfigureAwait(false);
+        }
+
+        var nowTicks = _timestampProvider();
+        var updated = UpdateState(s =>
+        {
+            var loopSec = DemoSongProvider.LoopDuration.TotalSeconds;
+            if (!s.IsDemoPaused)
+            {
+                var elapsed = Math.Max(0L, nowTicks - s.DemoStartTimestamp) / (double)_timestampFrequency;
+                var currentPos = TimeSpan.FromSeconds(elapsed % loopSec);
+                return s with
+                {
+                    IsDemoPaused = true,
+                    DemoPausedPosition = currentPos,
+                    PausedSinceUtc = DateTimeOffset.UtcNow
+                };
+            }
+
+            var resumeOffsetTicks = (long)Math.Round(s.DemoPausedPosition.TotalSeconds * _timestampFrequency);
+            return s with
+            {
+                IsDemoPaused = false,
+                DemoStartTimestamp = nowTicks - resumeOffsetTicks,
+                PausedSinceUtc = null
+            };
+        });
+
+        NotifyStateChanged(updated);
+        return true;
+    }
+
+    private async Task<bool> SkipDemoOrLiveTrackAsync(int step, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var state = Volatile.Read(ref _state);
+        if (!state.IsDemoMode && state.LiveSession is not null)
+        {
+            return step >= 0
+                ? await _mediaProvider.TrySkipNextAsync(cancellationToken).ConfigureAwait(false)
+                : await _mediaProvider.TrySkipPreviousAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!state.IsDemoMode)
+        {
+            await SetDemoModeAsync(true, cancellationToken).ConfigureAwait(false);
+        }
+
+        var nowTicks = _timestampProvider();
+        var updated = UpdateState(s =>
+        {
+            var doc = s.DemoDocument ?? GetOrCreateAnnotatedDemoDocument(s.Settings.VisualPreference);
+            var loopSec = DemoSongProvider.LoopDuration.TotalSeconds;
+            var currentPos = s.IsDemoPaused
+                ? s.DemoPausedPosition
+                : TimeSpan.FromSeconds((Math.Max(0L, nowTicks - s.DemoStartTimestamp) / (double)_timestampFrequency) % loopSec);
+
+            TimeSpan targetPos;
+            if (doc.Lines.IsEmpty)
+            {
+                targetPos = TimeSpan.FromSeconds(((currentPos.TotalSeconds + (step * 3.0)) % loopSec + loopSec) % loopSec);
+            }
+            else
+            {
+                var activeSlice = ActiveLyricSlice.Resolve(doc, currentPos, DemoSongProvider.LoopDuration);
+                var currentIdx = activeSlice.ActiveLineIndex >= 0 ? activeSlice.ActiveLineIndex : 0;
+                var targetIdx = ((currentIdx + step) % doc.Lines.Length + doc.Lines.Length) % doc.Lines.Length;
+                targetPos = doc.Lines[targetIdx].StartTime + TimeSpan.FromMilliseconds(120);
+            }
+
+            var startOffsetTicks = (long)Math.Round(targetPos.TotalSeconds * _timestampFrequency);
+            return s with
+            {
+                DemoPausedPosition = targetPos,
+                DemoStartTimestamp = nowTicks - startOffsetTicks,
+                SeekGeneration = s.SeekGeneration + 1
+            };
+        });
+
+        NotifyStateChanged(updated);
+        return true;
     }
 
     public void SetOsReducedMotion(bool enabled)

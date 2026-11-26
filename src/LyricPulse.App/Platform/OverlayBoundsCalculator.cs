@@ -14,7 +14,11 @@ public sealed record MonitorDescriptor(
     int WorkingWidthPx,
     int WorkingHeightPx,
     double EffectiveDpiScale,
-    bool IsPrimary);
+    bool IsPrimary,
+    int MonitorLeftPx = 0,
+    int MonitorTopPx = 0,
+    int MonitorWidthPx = 0,
+    int MonitorHeightPx = 0);
 
 /// <summary>
 /// Safe-zone rectangle inside an overlay window's logical DIP coordinate space.
@@ -91,17 +95,55 @@ public static class OverlayBoundsCalculator
             ? Math.Clamp(monitor.EffectiveDpiScale, MinDpiScale, MaxDpiScale)
             : 1.0;
 
-        var widthDip = Math.Max(1.0, monitor.WorkingWidthPx / scale);
-        var heightDip = Math.Max(1.0, monitor.WorkingHeightPx / scale);
+        var useFullMonitor = settings.EdgeGlowDesktopEnabled &&
+                             settings.EdgeGlowMode != EdgeGlowMode.Off &&
+                             monitor.MonitorWidthPx > 0 &&
+                             monitor.MonitorHeightPx > 0;
 
-        var boundsConfig = ResolveBoundsConfig(monitor.DisplayKey, settings);
-        var safeZone = ComputeSafeZoneDip(widthDip, heightDip, scale, boundsConfig);
+        var posXPx = useFullMonitor ? monitor.MonitorLeftPx : monitor.WorkingLeftPx;
+        var posYPx = useFullMonitor ? monitor.MonitorTopPx : monitor.WorkingTopPx;
+        var overlayWidthPx = useFullMonitor ? monitor.MonitorWidthPx : monitor.WorkingWidthPx;
+        var overlayHeightPx = useFullMonitor ? monitor.MonitorHeightPx : monitor.WorkingHeightPx;
+
+        var widthDip = Math.Max(1.0, overlayWidthPx / scale);
+        var heightDip = Math.Max(1.0, overlayHeightPx / scale);
+
+        var baseBounds = ResolveBoundsConfig(monitor.DisplayKey, settings);
+        var boundsConfig = baseBounds;
+        SafeZoneRect safeZone;
+
+        if (useFullMonitor)
+        {
+            var workWidthDip = Math.Max(1.0, monitor.WorkingWidthPx / scale);
+            var workHeightDip = Math.Max(1.0, monitor.WorkingHeightPx / scale);
+            var offsetXDip = (monitor.WorkingLeftPx - monitor.MonitorLeftPx) / scale;
+            var offsetYDip = (monitor.WorkingTopPx - monitor.MonitorTopPx) / scale;
+
+            var innerSafe = ComputeSafeZoneDip(workWidthDip, workHeightDip, scale, baseBounds);
+            safeZone = new SafeZoneRect(
+                LeftDip: offsetXDip + innerSafe.LeftDip,
+                TopDip: offsetYDip + innerSafe.TopDip,
+                WidthDip: innerSafe.WidthDip,
+                HeightDip: innerSafe.HeightDip,
+                AnchorCenterXDip: offsetXDip + innerSafe.AnchorCenterXDip,
+                AnchorCenterYDip: offsetYDip + innerSafe.AnchorCenterYDip);
+
+            boundsConfig = baseBounds with
+            {
+                AnchorX = Math.Clamp((offsetXDip + (workWidthDip * baseBounds.AnchorX)) / widthDip, 0.05, 0.95),
+                AnchorY = Math.Clamp((offsetYDip + (workHeightDip * baseBounds.AnchorY)) / heightDip, 0.05, 0.95)
+            };
+        }
+        else
+        {
+            safeZone = ComputeSafeZoneDip(widthDip, heightDip, scale, baseBounds);
+        }
 
         return new OverlayWindowPlacement(
             DisplayKey: monitor.DisplayKey,
             FriendlyName: string.IsNullOrWhiteSpace(monitor.FriendlyName) ? monitor.DisplayKey : monitor.FriendlyName,
-            PositionXPx: monitor.WorkingLeftPx,
-            PositionYPx: monitor.WorkingTopPx,
+            PositionXPx: posXPx,
+            PositionYPx: posYPx,
             WidthDip: widthDip,
             HeightDip: heightDip,
             DpiScale: scale,

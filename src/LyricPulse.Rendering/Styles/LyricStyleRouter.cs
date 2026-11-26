@@ -136,10 +136,24 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
             }
 
             var isNeonRushStage = IsNeonRushStage(in packet);
+            var settings = packet.PlaybackSnapshot?.Settings ?? AppSettings.Default;
+            var edgeGlowAnimating =
+                (packet.SurfaceMode == StageRenderSurfaceMode.StageCanvas ||
+                 (packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay && packet.AllowDesktopEdgeGlow)) &&
+                settings.EdgeGlowMode != EdgeGlowMode.Off &&
+                settings.EdgeGlowAnimation != EdgeGlowAnimationMode.Still &&
+                !packet.ReducedMotion;
+
+            if (packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay && !packet.RenderDesktopLyrics)
+            {
+                _lastLifecycle = new LifecycleFrameState(0f, false, 0f, 0f, null, 0f, false);
+                return edgeGlowAnimating;
+            }
+
             var backdropActive = !isNeonRushStage && _backdrop.Advance(in packet);
             _lastLifecycle = _lifecycle.Advance(in packet);
             var styleActive = _lastLifecycle.ShouldRenderLyrics && renderer.Advance(in packet, in _lastLifecycle);
-            return backdropActive || _lastLifecycle.IsAnimating || styleActive;
+            return backdropActive || _lastLifecycle.IsAnimating || styleActive || edgeGlowAnimating;
         }
     }
 
@@ -166,6 +180,12 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
             {
                 // Pitch-black OLED canvas so only Neon Rush racing beams illuminate the perimeter
                 canvas.Clear(SKColors.Black);
+            }
+
+            if (packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay && !packet.RenderDesktopLyrics)
+            {
+                _edgeGlow.Render(in context);
+                return;
             }
 
             var lifecycle = _lastLifecycle;

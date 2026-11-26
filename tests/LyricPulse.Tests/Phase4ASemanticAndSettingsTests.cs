@@ -668,6 +668,9 @@ public sealed class Phase4ASemanticAndSettingsTests : IDisposable
             _ = TrackChanged;
             _ = SeekDetected;
         }
+        public Task<bool> TryTogglePlayPauseAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task<bool> TrySkipNextAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task<bool> TrySkipPreviousAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

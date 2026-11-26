@@ -118,7 +118,9 @@ internal sealed record RuntimeStateBox(
     DateTimeOffset? LastOffsetNudgeUtc,
     long TrackGeneration,
     long SeekGeneration,
-    long OffsetGeneration)
+    long OffsetGeneration,
+    bool IsDemoPaused = false,
+    TimeSpan DemoPausedPosition = default)
 {
     public bool IsEffectiveReducedMotion => Settings.ReducedMotion || IsOsReducedMotion;
 
@@ -145,5 +147,7 @@ internal sealed record RuntimeStateBox(
         LastOffsetNudgeUtc: null,
         TrackGeneration: 0,
         SeekGeneration: 0,
-        OffsetGeneration: 0);
+        OffsetGeneration: 0,
+        IsDemoPaused: false,
+        DemoPausedPosition: TimeSpan.Zero);
 }

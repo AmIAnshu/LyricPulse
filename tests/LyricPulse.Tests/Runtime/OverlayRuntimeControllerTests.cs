@@ -456,6 +456,9 @@ public sealed class OverlayRuntimeControllerTests : IDisposable
 
         public void EmitTrackChanged(TrackIdentity? track) => TrackChanged?.Invoke(this, track);
         public void EmitSeekDetected(TimeSpan position) => SeekDetected?.Invoke(this, position);
+        public Task<bool> TryTogglePlayPauseAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task<bool> TrySkipNextAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task<bool> TrySkipPreviousAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 

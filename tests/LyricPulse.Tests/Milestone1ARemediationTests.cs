@@ -496,6 +496,9 @@ public sealed class Milestone1ARemediationTests : IDisposable
         }
 
         public void EmitSeekDetected(TimeSpan pos) => SeekDetected?.Invoke(this, pos);
+        public Task<bool> TryTogglePlayPauseAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task<bool> TrySkipNextAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task<bool> TrySkipPreviousAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

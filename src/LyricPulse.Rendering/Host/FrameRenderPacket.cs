@@ -74,7 +74,9 @@ public sealed record FrameRenderPacket(
     SecondaryLineMode SecondaryLineMode = SecondaryLineMode.Off,
     OverlayStyleId? StyleOverride = null,
     AudioFrameMetrics? AudioMetrics = null,
-    bool BottomFadeToBlack = false)
+    bool BottomFadeToBlack = false,
+    bool AllowDesktopEdgeGlow = false,
+    bool RenderDesktopLyrics = true)
 {
     public AudioFrameMetrics EffectiveAudioMetrics => AudioMetrics ?? AudioFrameMetrics.Silent;
     public OverlayStyleId EffectiveStyle => StyleOverride ?? ActiveStyle;

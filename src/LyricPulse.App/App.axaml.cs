@@ -70,6 +70,8 @@ public sealed class App : Application, IDisposable
     {
         if (previous.DesktopOverlayEnabled != current.DesktopOverlayEnabled ||
             previous.LyricsVisible != current.LyricsVisible ||
+            previous.EdgeGlowDesktopEnabled != current.EdgeGlowDesktopEnabled ||
+            (previous.EdgeGlowMode == EdgeGlowMode.Off) != (current.EdgeGlowMode == EdgeGlowMode.Off) ||
             previous.HideDuringFullscreen != current.HideDuringFullscreen ||
             previous.AnchorZone != current.AnchorZone ||
             previous.SafeMarginPx != current.SafeMarginPx ||
@@ -364,7 +366,9 @@ public sealed class App : Application, IDisposable
                     renderScaling: scale,
                     renderTimeSeconds: timeSec,
                     deltaSeconds: dt,
-                    boundsOverride: overlayWindow.CurrentBoundsConfig);
+                    boundsOverride: overlayWindow.CurrentBoundsConfig,
+                    allowDesktopEdgeGlow: snapshot.Settings.EdgeGlowDesktopEnabled,
+                    renderDesktopLyrics: snapshot.Settings.DesktopOverlayEnabled && snapshot.Settings.LyricsVisible);
             },
             ownsRenderer: true);
     }
@@ -405,7 +409,10 @@ public sealed class App : Application, IDisposable
         }
 
         _overlayCoordinator.SetFullscreenPaused(snapshot.IsFullscreenHidden);
-        if (snapshot.IsLyricsVisible && settings.DesktopOverlayEnabled)
+        var shouldWakeOverlays =
+            (snapshot.IsLyricsVisible && settings.DesktopOverlayEnabled) ||
+            (settings.EdgeGlowDesktopEnabled && settings.EdgeGlowMode != EdgeGlowMode.Off);
+        if (shouldWakeOverlays)
         {
             _overlayCoordinator.WakeAllCanvases();
         }

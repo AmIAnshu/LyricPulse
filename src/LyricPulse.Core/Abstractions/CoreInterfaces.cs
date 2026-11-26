@@ -29,6 +29,10 @@ public interface IMediaSessionProvider : IAsyncDisposable
         MediaSourcePolicy policy,
         ImmutableArray<string> blockedAppIds,
         bool ignoreBrowserVideoSessions = true);
+
+    Task<bool> TryTogglePlayPauseAsync(CancellationToken cancellationToken = default);
+    Task<bool> TrySkipNextAsync(CancellationToken cancellationToken = default);
+    Task<bool> TrySkipPreviousAsync(CancellationToken cancellationToken = default);
 }
 
 public interface ITitleNormalizer

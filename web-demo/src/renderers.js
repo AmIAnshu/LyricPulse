@@ -119,42 +119,29 @@ export class StudioRenderer {
     }));
   }
 
-  _ensureVinylCoverTextures(coverCanvas) {
+  _ensureGlassCoverTextures(coverCanvas) {
     if (!coverCanvas) return;
-    if (this._cachedCoverSrc === coverCanvas && this._circularCoverCanvas && this._blurredBgCanvas) return;
+    if (this._cachedCoverSrc === coverCanvas && this._glassCoverCanvas && this._lightBlurBgCanvas) return;
     this._cachedCoverSrc = coverCanvas;
 
-    const side = 256;
+    const side = 320;
     const cCan = document.createElement('canvas');
     cCan.width = side;
     cCan.height = side;
     const cCtx = cCan.getContext('2d');
-    const r = side * 0.5;
-    cCtx.save();
-    cCtx.beginPath();
-    cCtx.arc(r, r, r - 1.5, 0, Math.PI * 2);
-    cCtx.closePath();
-    cCtx.clip();
     cCtx.drawImage(coverCanvas, 0, 0, side, side);
-    cCtx.restore();
-    // Punch center spindle cutout cleanly
-    cCtx.save();
-    cCtx.globalCompositeOperation = 'destination-out';
-    cCtx.beginPath();
-    cCtx.arc(r, r, Math.max(4, side * 0.082), 0, Math.PI * 2);
-    cCtx.fill();
-    cCtx.restore();
-    this._circularCoverCanvas = cCan;
+    this._glassCoverCanvas = cCan;
 
-    // Pre-blurred 48x48 album wash texture (0.1ms GPU blit per frame)
+    // Lightly blurred 256x256 full cover texture so real artwork shapes + color vibe remain recognizable across stage
+    const bSide = 256;
     const bCan = document.createElement('canvas');
-    bCan.width = 48;
-    bCan.height = 48;
+    bCan.width = bSide;
+    bCan.height = bSide;
     const bCtx = bCan.getContext('2d');
-    bCtx.filter = 'blur(4px)';
-    bCtx.drawImage(coverCanvas, -5, -5, 58, 58);
+    bCtx.filter = 'blur(10px)';
+    bCtx.drawImage(coverCanvas, -14, -14, bSide + 28, bSide + 28);
     bCtx.filter = 'none';
-    this._blurredBgCanvas = bCan;
+    this._lightBlurBgCanvas = bCan;
   }
 
   _computeHarmoniousVinylTheme(palette, realTimeSec, beatPulse, reducedMotion) {
@@ -335,40 +322,81 @@ export class StudioRenderer {
   }
 
   drawEdgeGlow(ctx, w, h, dt, palette, metrics, settings) {
-    if (settings.reducedMotion && settings.edgeGlowMode !== 'SoftAmbient') return;
-    const speed = settings.rushSpeed;
-    const thick = settings.rushThickness;
+    const animMode = settings.reducedMotion ? 'Still' : (settings.edgeAnimMode || 'MusicSync');
+    const speed = settings.rushSpeed ?? 1.0;
+    const thick = settings.rushThickness ?? 1.0;
+    const spill = settings.edgeSpill ?? 1.0;
+    const twoColor = settings.edgeTwoColor !== false;
 
-    if (settings.edgeGlowMode === 'NeonRush') {
-      this.rushPhase = (this.rushPhase + dt * (0.28 * speed + metrics.bass * 0.35)) % 1;
-      const bandWidth = clamp(Math.min(w, h) * 0.022 * thick + metrics.beatPulse * 4, 3, 28);
-      ctx.save();
-      const grad = ctx.createConicGradient(this.rushPhase * Math.PI * 2, w * 0.5, h * 0.5);
-      grad.addColorStop(0.0, 'rgba(0,0,0,0)');
-      grad.addColorStop(0.45, 'rgba(0,0,0,0)');
-      grad.addColorStop(0.62, hexToRgba(palette.a3, 0.38));
-      grad.addColorStop(0.76, hexToRgba(palette.a2, 0.85));
-      grad.addColorStop(0.88, hexToRgba(palette.a1, 1.0));
-      grad.addColorStop(0.96, hexToRgba(palette.a2, 0.55));
-      grad.addColorStop(1.0, 'rgba(0,0,0,0)');
+    const cPrimary = settings.edgeOverrideColors ? (settings.edgePrimaryColor || palette.a1) : palette.a1;
+    const cSecondary = twoColor
+      ? (settings.edgeOverrideColors ? (settings.edgeSecondaryColor || palette.a2) : palette.a2)
+      : cPrimary;
 
-      ctx.strokeStyle = grad;
-      ctx.lineWidth = bandWidth;
-      ctx.shadowColor = palette.a2;
-      ctx.shadowBlur = bandWidth * 1.45;
-      ctx.strokeRect(bandWidth * 0.5, bandWidth * 0.5, w - bandWidth, h - bandWidth);
-      ctx.restore();
-      return;
+    if (animMode !== 'Still') {
+      const musicDrive = animMode === 'MusicSync' ? (0.55 + metrics.bass * 0.85 + metrics.beatPulse * 0.55) : 0.36;
+      this.rushPhase = (this.rushPhase + dt * 0.19 * speed * musicDrive) % 1;
     }
 
-    const reach = clamp(Math.min(w, h) * 0.08 * thick, 14, 90);
-    const alpha = settings.edgeGlowMode === 'NeonRim' ? 0.62 + metrics.beatPulse * 0.25 : 0.34;
+    const pulseScale = animMode === 'MusicSync'
+      ? (1.0 + metrics.bass * 0.36 + metrics.beatPulse * 0.48)
+      : animMode === 'AmbientDrift'
+        ? (1.0 + 0.08 * Math.sin(this.rushPhase * Math.PI * 2))
+        : 1.0;
+
+    const minSide = Math.min(w, h);
+    const radius = clamp(minSide * 0.026, 12, 28);
+    const mode = settings.edgeGlowMode;
+    const isRush = mode === 'NeonRush';
+    const isRim = mode === 'NeonRim';
+
     ctx.save();
-    ctx.strokeStyle = hexToRgba(palette.a2, clamp(alpha, 0, 0.95));
-    ctx.lineWidth = settings.edgeGlowMode === 'NeonRim' ? 4 * thick : 2;
-    ctx.shadowColor = palette.a1;
-    ctx.shadowBlur = reach;
-    ctx.strokeRect(2, 2, w - 4, h - 4);
+    ctx.beginPath();
+    ctx.roundRect(0, 0, w, h, radius);
+    ctx.clip();
+
+    // Pass 1: Wide inward Lumn Gaussian glow wash hugging rounded edges
+    const spillReach = clamp(minSide * 0.08 * spill * pulseScale, 16, minSide * 0.22);
+    const spillAlpha = isRush ? 0.62 : isRim ? 0.50 : 0.40;
+    const baseGrad = ctx.createConicGradient(this.rushPhase * Math.PI * 2, w * 0.5, h * 0.5);
+    baseGrad.addColorStop(0.00, hexToRgba(cPrimary, spillAlpha));
+    baseGrad.addColorStop(0.32, hexToRgba(cPrimary, spillAlpha * 0.92));
+    baseGrad.addColorStop(0.58, hexToRgba(cSecondary, spillAlpha * 0.92));
+    baseGrad.addColorStop(0.84, hexToRgba(cSecondary, spillAlpha * 0.88));
+    baseGrad.addColorStop(1.00, hexToRgba(cPrimary, spillAlpha));
+
+    ctx.strokeStyle = baseGrad;
+    ctx.lineWidth = clamp(12 * thick * spill * pulseScale, 6, 48);
+    ctx.shadowColor = cPrimary;
+    ctx.shadowBlur = spillReach;
+    ctx.beginPath();
+    ctx.roundRect(2, 2, w - 4, h - 4, Math.max(6, radius - 2));
+    ctx.stroke();
+
+    // Pass 2: Luminous bezel tube + Neon Rush moving spotlight
+    if (isRush || isRim) {
+      const tubeGrad = ctx.createConicGradient(this.rushPhase * Math.PI * 2, w * 0.5, h * 0.5);
+      if (isRush && animMode !== 'Still') {
+        tubeGrad.addColorStop(0.00, hexToRgba(cPrimary, 0.30));
+        tubeGrad.addColorStop(0.42, hexToRgba(cSecondary, 0.35));
+        tubeGrad.addColorStop(0.68, hexToRgba(cPrimary, 0.88));
+        tubeGrad.addColorStop(0.82, 'rgba(255, 255, 255, 0.96)');
+        tubeGrad.addColorStop(0.92, hexToRgba(cSecondary, 0.72));
+        tubeGrad.addColorStop(1.00, hexToRgba(cPrimary, 0.30));
+      } else {
+        tubeGrad.addColorStop(0.00, hexToRgba(cPrimary, 0.78));
+        tubeGrad.addColorStop(0.55, hexToRgba(cSecondary, 0.76));
+        tubeGrad.addColorStop(1.00, hexToRgba(cPrimary, 0.78));
+      }
+
+      ctx.shadowBlur = clamp(minSide * 0.025 * thick, 6, 22);
+      ctx.shadowColor = cSecondary;
+      ctx.strokeStyle = tubeGrad;
+      ctx.lineWidth = clamp(3.2 * thick * (0.95 + metrics.beatPulse * 0.25), 2, 12);
+      ctx.beginPath();
+      ctx.roundRect(3, 3, w - 6, h - 6, Math.max(4, radius - 3));
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
@@ -733,24 +761,26 @@ export class StudioRenderer {
     });
   }
 
-  // Style 11: Vinyl Groove v3.0 — Big Blurred Album Backdrop + Harmonious Theme Cycling + Circular Album Cover Cutout + 3D Room!
+  // Style 11: Glass Stage v4.0 — Lightly-Blurred Full Album Cover Room + Medium Apple GlassOS Cover Card + 3D Depth Lyrics!
   drawVinylGroove({ ctx, width, height, realTimeSec, slice, palette, metrics, settings, coverCanvas, baseSize, fontFamily, isCompact }) {
-    this._ensureVinylCoverTextures(coverCanvas);
+    this._ensureGlassCoverTextures(coverCanvas);
     const theme = this._computeHarmoniousVinylTheme(palette, realTimeSec, metrics.beatPulse, settings.reducedMotion);
 
-    const cx = width * (isCompact ? 0.28 : 0.30);
-    const cy = height * 0.50;
-    const platterR = Math.min(width * (isCompact ? 0.19 : 0.22), height * 0.38) * (1 + metrics.beatPulse * 0.02);
+    const cardSide = clamp(Math.min(width * (isCompact ? 0.26 : 0.23), height * (isCompact ? 0.48 : 0.44)), isCompact ? 48 : 112, isCompact ? 116 : 232);
+    const cardCx = width * (isCompact ? 0.28 : 0.29);
+    const cardCy = height * 0.50;
+    const cardX = cardCx - cardSide * 0.5;
+    const cardY = cardCy - cardSide * 0.5;
+    const cardRadius = clamp(cardSide * 0.115, 8, 22);
+
     const words = slice.line.words;
     const activeWord = words[slice.wordIdx].text;
-    const pivotX = cx;
-    const pivotY = cy;
     const yawDeg = settings.reducedMotion ? 0 : Math.sin(realTimeSec * 0.75) * 9.0;
-    const pitchDeg = settings.reducedMotion ? 0 : 6.0;
+    const pitchDeg = settings.reducedMotion ? 0 : 5.5;
     const rollDeg = settings.reducedMotion ? 0 : Math.cos(realTimeSec * 0.55) * 1.4;
     const focal = 1080;
 
-    // Pass 0: Big Blurred Album-Color Background Wash + 3D Listening Room Architecture
+    // Pass 0: Full-bleed lightly-blurred playing album cover background
     if (!settings.overlaySim || isCompact) {
       const bgGrad = ctx.createLinearGradient(0, 0, width, height);
       bgGrad.addColorStop(0, theme.deepAmbient);
@@ -758,213 +788,111 @@ export class StudioRenderer {
       ctx.fillStyle = bgGrad;
       ctx.fillRect(0, 0, width, height);
 
-      if (this._blurredBgCanvas) {
+      const coverBg = this._lightBlurBgCanvas || this._glassCoverCanvas;
+      if (coverBg) {
         ctx.save();
-        const bleed = Math.max(width, height) * 0.20;
-        const dx = settings.reducedMotion ? 0 : Math.sin(realTimeSec * 0.35) * width * 0.05;
-        const dy = settings.reducedMotion ? 0 : Math.cos(realTimeSec * 0.29) * height * 0.04;
-        ctx.globalAlpha = 0.55 + metrics.bass * 0.18;
-        ctx.drawImage(this._blurredBgCanvas, -bleed + dx, -bleed + dy, width + bleed * 2, height + bleed * 2);
+        const breathe = settings.reducedMotion ? 1.10 : 1.10 + metrics.bass * 0.03 + Math.sin(realTimeSec * 0.28) * 0.016;
+        const fillScale = Math.max(width / coverBg.width, height / coverBg.height) * breathe;
+        const drawW = coverBg.width * fillScale;
+        const drawH = coverBg.height * fillScale;
+        const dx = settings.reducedMotion ? 0 : Math.sin(realTimeSec * 0.22) * width * 0.022;
+        const dy = settings.reducedMotion ? 0 : Math.cos(realTimeSec * 0.19) * height * 0.020;
+        ctx.globalAlpha = 0.80 + metrics.bass * 0.10;
+        ctx.filter = isCompact ? 'blur(5px)' : 'blur(12px)';
+        ctx.drawImage(coverBg, (width - drawW) * 0.5 + dx, (height - drawH) * 0.5 + dy, drawW, drawH);
+        ctx.filter = 'none';
         ctx.restore();
       }
 
-      // Large harmonious blurred album clouds (keeps the room saturated in the album's hue family!)
-      const c1 = ctx.createRadialGradient(cx, cy, 12, cx, cy, Math.max(width, height) * 0.65);
-      c1.addColorStop(0, theme.washAlpha(0.56 + metrics.bass * 0.16));
-      c1.addColorStop(0.5, theme.primaryAlpha(0.22));
-      c1.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = c1;
-      ctx.fillRect(0, 0, width, height);
-
-      const c2 = ctx.createRadialGradient(width * 0.74, height * 0.42, 10, width * 0.74, height * 0.42, Math.max(width, height) * 0.55);
-      c2.addColorStop(0, theme.secondaryAlpha(0.38 + metrics.beatPulse * 0.12));
-      c2.addColorStop(1, 'rgba(0,0,0,0)');
-      ctx.fillStyle = c2;
+      // Soft GlassOS luminance wash preserving artwork vibe & guaranteeing readable lyric contrast
+      const scrim = ctx.createLinearGradient(0, 0, width, height);
+      scrim.addColorStop(0, theme.deepAlpha(0.20));
+      scrim.addColorStop(0.5, 'rgba(6, 7, 14, 0.28)');
+      scrim.addColorStop(1, theme.deepAlpha(0.42));
+      ctx.fillStyle = scrim;
       ctx.fillRect(0, 0, width, height);
     }
 
-    if (!isCompact) {
-      ctx.save();
-      ctx.strokeStyle = theme.primaryAlpha(0.18 + metrics.bass * 0.10);
-      ctx.lineWidth = 1;
-      for (let gz = 80; gz <= 460; gz += 95) {
-        const yFloor = height * 0.86;
-        const pL = project3D(width * 0.06, yFloor, gz, pitchDeg, yawDeg, 0, focal, width * 0.5, height * 0.5);
-        const pR = project3D(width * 0.94, yFloor, gz, pitchDeg, yawDeg, 0, focal, width * 0.5, height * 0.5);
-        ctx.beginPath();
-        ctx.moveTo(pL.x, pL.y);
-        ctx.lineTo(pR.x, pR.y);
-        ctx.stroke();
-
-        const pCL = project3D(width * 0.08, height * 0.14, gz, pitchDeg, yawDeg, 0, focal, width * 0.5, height * 0.5);
-        const pCR = project3D(width * 0.92, height * 0.14, gz, pitchDeg, yawDeg, 0, focal, width * 0.5, height * 0.5);
-        ctx.beginPath();
-        ctx.moveTo(pCL.x, pCL.y);
-        ctx.lineTo(pCR.x, pCR.y);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-
-    // Build orbiting 3D words sorted strictly back -> mid(Z=0 platter) -> front!
+    // Pass 1: Back-plane 3D words behind focal plane
+    const heroAnchorX = isCompact ? width * 0.68 : width * 0.67;
     const orbitAngle = settings.reducedMotion ? 0.5 : realTimeSec * 0.65;
     const wordOrbitItems = words.map((w, i) => {
       const ang = orbitAngle + (i / Math.max(1, words.length)) * Math.PI * 2;
-      const rx = platterR * 1.48;
-      const rz = 135;
-      const x = cx + Math.cos(ang) * rx;
+      const rx = cardSide * 0.95;
+      const rz = 120;
+      const x = heroAnchorX + Math.cos(ang) * rx;
       const z = Math.sin(ang) * rz;
-      const y = cy + ((i % 3) - 1) * baseSize * 0.95;
+      const y = cardCy + ((i % 3) - 1) * baseSize * 0.95;
       return { text: w.text, x, y, z, active: i === slice.wordIdx };
     });
 
     const backWords = wordOrbitItems.filter((w) => !w.active && w.z >= 10).sort((a, b) => b.z - a.z);
     const frontWords = wordOrbitItems.filter((w) => !w.active && w.z < 10).sort((a, b) => b.z - a.z);
 
-    // Pass 1: Back-plane 3D words BEHIND the vinyl disc (themed in cycling album colors!)
     if (!isCompact) {
       for (const bw of backWords) {
-        const p = project3D(bw.x, bw.y, bw.z, pitchDeg, yawDeg, rollDeg, focal, pivotX, pivotY);
+        const p = project3D(bw.x, bw.y, bw.z, pitchDeg, yawDeg, rollDeg, focal, heroAnchorX, cardCy);
         const fs = Math.round(baseSize * 0.62 * p.scale);
         drawLegibleWord(ctx, bw.text, p.x, p.y, `700 ${fs}px '${fontFamily}', sans-serif`, theme.tertiary, 0.45);
       }
-      drawLegibleWord(ctx, slice.prev.text, width * 0.72, cy - baseSize * 1.8, `600 ${Math.round(baseSize * 0.46)}px '${fontFamily}', sans-serif`, theme.secondaryAlpha(0.55), 0.4);
+      drawLegibleWord(ctx, slice.prev.text, heroAnchorX, cardCy - baseSize * 1.85, `600 ${Math.round(baseSize * 0.46)}px '${fontFamily}', sans-serif`, theme.secondaryAlpha(0.60), 0.42);
     }
 
-    // Pass 2: Turntable Plinth + Reactive EQ Halo + Spinning Vinyl Disc + Circular Cover Cutout + Tonearm
+    // Pass 2: Medium Apple GlassOS Album Cover Card (clean rounded square art, NO vinyl platter/tonearm)
     ctx.save();
-    const deckW = platterR * 2.52;
-    const deckH = platterR * 2.28;
-    const deckX = cx - platterR * 1.15;
-    const deckY = cy - deckH * 0.5;
-    const plinthGrad = ctx.createLinearGradient(deckX, deckY, deckX + deckW, deckY + deckH);
-    plinthGrad.addColorStop(0, theme.deepAlpha(0.92));
-    plinthGrad.addColorStop(1, 'rgba(12, 12, 18, 0.94)');
-    ctx.fillStyle = plinthGrad;
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.58)';
+    ctx.shadowBlur = isCompact ? 14 : 34;
+    ctx.shadowOffsetY = isCompact ? 6 : 14;
+    ctx.fillStyle = theme.deepAmbient;
     ctx.beginPath();
-    ctx.roundRect(deckX, deckY, deckW, deckH, 16);
+    ctx.roundRect(cardX, cardY, cardSide, cardSide, cardRadius);
     ctx.fill();
-    ctx.strokeStyle = theme.primaryAlpha(0.50 + metrics.beatPulse * 0.25);
-    ctx.lineWidth = 1.6;
-    ctx.stroke();
+    ctx.restore();
 
-    // Radial EQ bars around turntable platter
-    if (!isCompact && metrics.bands) {
-      const bars = 28;
-      const baseR = platterR * 1.04;
-      for (let i = 0; i < bars; i++) {
-        const a = (i / bars) * Math.PI * 2 - Math.PI * 0.5;
-        const mag = metrics.bands[i % metrics.bands.length] || 0.2;
-        const r2 = baseR + 3 + mag * platterR * 0.14;
-        ctx.strokeStyle = i % 2 === 0 ? theme.primaryAlpha(0.38 + mag * 0.5) : theme.secondaryAlpha(0.35 + mag * 0.45);
-        ctx.lineWidth = 2.0;
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(a) * baseR, cy + Math.sin(a) * baseR);
-        ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
-        ctx.stroke();
-      }
-    }
-
-    // Platter glow halo
-    const glow = ctx.createRadialGradient(cx, cy, platterR * 0.6, cx, cy, platterR * 1.25);
-    glow.addColorStop(0, theme.primaryAlpha(0.28 + metrics.beatPulse * 0.20));
-    glow.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = glow;
-    ctx.beginPath();
-    ctx.arc(cx, cy, platterR * 1.25, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Spinning Vinyl disc body
-    const spinRad = settings.reducedMotion ? 0 : realTimeSec * 2.2;
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(spinRad);
-
-    ctx.fillStyle = '#0B0B10';
-    ctx.beginPath();
-    ctx.arc(0, 0, platterR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = theme.primaryAlpha(0.45);
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Concentric LP micro-grooves tinted subtly by harmonious cycle
-    ctx.lineWidth = 1;
-    for (let r = platterR * 0.54; r < platterR * 0.95; r += Math.max(3.5, platterR * 0.052)) {
-      ctx.strokeStyle = theme.secondaryAlpha(0.14 + metrics.bass * 0.08);
-      ctx.beginPath();
-      ctx.arc(0, 0, r, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    // 0.46R Strictly CIRCULAR Cropped Song Album Cover Photo
-    const coverR = platterR * 0.46;
-    if (this._circularCoverCanvas) {
+    if (this._glassCoverCanvas) {
       ctx.save();
       ctx.beginPath();
-      ctx.arc(0, 0, coverR, 0, Math.PI * 2);
-      ctx.closePath();
+      ctx.roundRect(cardX, cardY, cardSide, cardSide, cardRadius);
       ctx.clip();
-      ctx.drawImage(this._circularCoverCanvas, -coverR, -coverR, coverR * 2, coverR * 2);
+      ctx.drawImage(this._glassCoverCanvas, cardX, cardY, cardSide, cardSide);
+
+      // Apple Liquid Glass top sheen overlay
+      const glaze = ctx.createLinearGradient(cardX, cardY, cardX + cardSide * 0.45, cardY + cardSide);
+      glaze.addColorStop(0, 'rgba(255, 255, 255, 0.22)');
+      glaze.addColorStop(0.32, 'rgba(255, 255, 255, 0.04)');
+      glaze.addColorStop(1, 'rgba(0, 0, 0, 0.14)');
+      ctx.fillStyle = glaze;
+      ctx.fillRect(cardX, cardY, cardSide, cardSide);
       ctx.restore();
     }
 
-    // Metallic rim collar around circular album cover
-    ctx.strokeStyle = theme.primary;
-    ctx.lineWidth = 2.4;
+    // Specular Glass rim outline
+    const rimGrad = ctx.createLinearGradient(cardX, cardY, cardX + cardSide, cardY + cardSide);
+    rimGrad.addColorStop(0, 'rgba(255, 255, 255, 0.62)');
+    rimGrad.addColorStop(1, theme.primaryAlpha(0.32));
+    ctx.strokeStyle = rimGrad;
+    ctx.lineWidth = isCompact ? 1.1 : 1.5;
     ctx.beginPath();
-    ctx.arc(0, 0, coverR, 0, Math.PI * 2);
+    ctx.roundRect(cardX, cardY, cardSide, cardSide, cardRadius);
     ctx.stroke();
 
-    // Punched center spindle cutout hole
-    const holeR = Math.max(4, platterR * 0.055);
-    ctx.fillStyle = '#07070C';
-    ctx.beginPath();
-    ctx.arc(0, 0, holeR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = theme.primary;
-    ctx.lineWidth = 1.6;
-    ctx.stroke();
-    ctx.restore();
-
-    // Chrome/themed tonearm
-    const armPivotX = cx + platterR * 1.12;
-    const armPivotY = cy - platterR * 0.92;
-    const stylusX = cx + platterR * 0.66;
-    const stylusY = cy + platterR * 0.25 + slice.lineProgress * 6;
-    ctx.strokeStyle = '#DCE2EC';
-    ctx.lineWidth = Math.max(2.5, platterR * 0.036);
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(armPivotX, armPivotY);
-    ctx.lineTo(stylusX + 4, stylusY - 12);
-    ctx.lineTo(stylusX, stylusY);
-    ctx.stroke();
-
-    ctx.fillStyle = theme.primary;
-    ctx.beginPath();
-    ctx.arc(stylusX, stylusY, 4.8, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    // Pass 3: Front-plane orbiting words & monumental extruded active hero word IN FRONT of platter!
+    // Pass 3: Front-plane orbiting words & extruded active hero word
     if (!isCompact) {
       for (const fw of frontWords) {
-        const p = project3D(fw.x, fw.y, fw.z, pitchDeg, yawDeg, rollDeg, focal, pivotX, pivotY);
+        const p = project3D(fw.x, fw.y, fw.z, pitchDeg, yawDeg, rollDeg, focal, heroAnchorX, cardCy);
         const fs = Math.round(baseSize * 0.68 * p.scale);
         drawLegibleWord(ctx, fw.text, p.x, p.y, `700 ${fs}px '${fontFamily}', sans-serif`, theme.secondary, 0.72);
       }
     }
 
-    const heroAnchorX = isCompact ? width * 0.68 : width * 0.67;
-    const heroProj = project3D(heroAnchorX, cy - baseSize * 0.15, -80, pitchDeg, yawDeg, rollDeg, focal, pivotX, pivotY);
+    const heroProj = project3D(heroAnchorX, cardCy - baseSize * 0.12, -78, pitchDeg, yawDeg, rollDeg, focal, heroAnchorX, cardCy);
     const heroSize = Math.round(baseSize * (isCompact ? 1.05 : 1.38) * heroProj.scale);
     drawLegibleWord(ctx, activeWord, heroProj.x + 6, heroProj.y + 6, `900 ${heroSize}px '${fontFamily}', sans-serif`, theme.secondaryAlpha(0.38), 0);
     drawLegibleWord(ctx, activeWord, heroProj.x + 3, heroProj.y + 3, `900 ${heroSize}px '${fontFamily}', sans-serif`, theme.primaryAlpha(0.56), 0);
     drawLegibleWord(ctx, activeWord, heroProj.x, heroProj.y, `900 ${heroSize}px '${fontFamily}', sans-serif`, '#FFFFFF', 0.88);
 
     if (!isCompact) {
-      drawLegibleWord(ctx, slice.line.text, width * 0.67, cy + baseSize * 1.48, `600 ${Math.round(baseSize * 0.46)}px '${fontFamily}', sans-serif`, theme.tertiary, 0.65);
+      drawLegibleWord(ctx, slice.line.text, heroAnchorX, cardCy + baseSize * 1.48, `600 ${Math.round(baseSize * 0.46)}px '${fontFamily}', sans-serif`, theme.tertiary, 0.68);
     }
   }
 }

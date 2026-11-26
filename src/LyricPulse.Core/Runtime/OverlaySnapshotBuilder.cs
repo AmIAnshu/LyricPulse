@@ -83,21 +83,26 @@ internal static class OverlaySnapshotBuilder
         Func<double, bool, float, AudioFrameMetrics>? audioMetricsResolver)
     {
         var demoDoc = state.DemoDocument ?? demoDocumentResolver(state.Settings.VisualPreference);
-        var elapsedSec = Math.Max(0L, nowTimestamp - state.DemoStartTimestamp) / (double)timestampFrequency;
-        var loopSec = elapsedSec % DemoSongProvider.LoopDuration.TotalSeconds;
-        var rawPos = TimeSpan.FromSeconds(loopSec);
+        var loopDurationSec = DemoSongProvider.LoopDuration.TotalSeconds;
+        var isPlaying = !state.IsDemoPaused;
+        var rawPos = state.IsDemoPaused
+            ? state.DemoPausedPosition
+            : TimeSpan.FromSeconds((Math.Max(0L, nowTimestamp - state.DemoStartTimestamp) / (double)timestampFrequency) % loopDurationSec);
+        var elapsedSec = state.IsDemoPaused
+            ? rawPos.TotalSeconds
+            : Math.Max(0L, nowTimestamp - state.DemoStartTimestamp) / (double)timestampFrequency;
         var effectivePos = TimingOffsetService.ComputeEffectiveLookupTime(rawPos, state.TimingOffset.Offset, DemoSongProvider.LoopDuration);
         var slice = ActiveLyricSlice.Resolve(demoDoc, effectivePos, DemoSongProvider.LoopDuration);
         var audioMetrics = state.IsEffectiveReducedMotion
             ? AudioFrameMetrics.Silent
-            : audioMetricsResolver?.Invoke(elapsedSec, true, state.Settings.PartyEnergyLevel)
-              ?? AudioSpectrumAnalyzer.ComputeSyntheticPulse(elapsedSec, true, state.Settings.PartyEnergyLevel);
+            : audioMetricsResolver?.Invoke(elapsedSec, isPlaying, state.Settings.PartyEnergyLevel)
+              ?? AudioSpectrumAnalyzer.ComputeSyntheticPulse(elapsedSec, isPlaying, state.Settings.PartyEnergyLevel);
 
         return new OverlayPlaybackSnapshot(
             Track: demoDoc.Track,
             Document: demoDoc,
             LyricsStatus: LyricsStatus.Synced,
-            PlaybackState: MediaPlaybackState.Playing,
+            PlaybackState: isPlaying ? MediaPlaybackState.Playing : MediaPlaybackState.Paused,
             PlayerKind: MediaPlayerKind.Unknown,
             SourceAppUserModelId: "LyricPulse.Demo",
             RawPosition: rawPos,
@@ -107,10 +112,10 @@ internal static class OverlaySnapshotBuilder
             TargetPalette: targetPalette,
             TimingOffset: state.TimingOffset,
             Settings: state.Settings,
-            IsPlaying: true,
+            IsPlaying: isPlaying,
             IsDemoMode: true,
             IsFullscreenHidden: state.IsFullscreenHidden,
-            PausedSinceUtc: null,
+            PausedSinceUtc: state.IsDemoPaused ? state.PausedSinceUtc : null,
             LastOffsetNudgeUtc: state.LastOffsetNudgeUtc,
             TrackGeneration: state.TrackGeneration,
             SeekGeneration: state.SeekGeneration,

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LyricPulse Studio — Interactive Kinetic Lyrics Demo</title>
-  <meta name="description" content="Interactive browser demo of LyricPulse v3.0: 11 real-time kinetic lyric visualization styles, Neon Rush edge glow, and 3D Vinyl Groove listening room with album-synced ambient aura." />
+  <meta name="description" content="Interactive browser demo of LyricPulse v4.0: 11 real-time kinetic lyric visualization styles, Lumn-inspired screen edge glow, and Glass Stage with Apple GlassOS hover controls." />
   <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -23,7 +23,7 @@
           </svg>
         </span>
         <span class="brand-name">LyricPulse</span>
-        <span class="version-pill">v3.0 Web Demo</span>
+        <span class="version-pill">v4.0 Web Demo</span>
       </div>
 
       <div class="status-group" aria-live="polite">
@@ -45,7 +45,7 @@
           </svg>
           <span>Settings</span>
         </button>
-        <a class="btn btn-primary" href="https://github.com/AmIAnshu/LyricPulse/releases/tag/v3.0" target="_blank" rel="noopener noreferrer">
+        <a class="btn btn-primary" href="https://github.com/AmIAnshu/LyricPulse/releases/tag/v4.0" target="_blank" rel="noopener noreferrer">
           Download .EXE
         </a>
         <a class="btn btn-icon" href="https://github.com/AmIAnshu/LyricPulse" target="_blank" rel="noopener noreferrer" title="View source on GitHub" aria-label="GitHub repository">
@@ -72,6 +72,24 @@
           </div>
 
           <canvas id="heroCanvas"></canvas>
+
+          <!-- Apple GlassOS Hover Controls over Medium Album Cover (active in Glass Stage) -->
+          <div class="glass-cover-zone" id="glassCoverZone" aria-label="Album cover playback controls">
+            <div class="glass-hover-scrim">
+              <div class="glass-transport-pill">
+                <button class="glass-btn" id="glassPrevBtn" type="button" title="Previous Lyric Section" aria-label="Previous section">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M5.75 4.5a.75.75 0 0 0-.75.75v13.5a.75.75 0 0 0 1.5 0V5.25a.75.75 0 0 0-.75-.75Zm12.47.43a1.25 1.25 0 0 0-1.32.1l-8.2 5.95a1.25 1.25 0 0 0 0 2.04l8.2 5.95A1.25 1.25 0 0 0 19 17.95V6.05a1.25 1.25 0 0 0-.78-1.12Z"/></svg>
+                </button>
+                <button class="glass-btn glass-btn-main" id="glassPlayBtn" type="button" title="Play / Pause" aria-label="Play or pause">
+                  <svg id="glassPlayIcon" viewBox="0 0 24 24" width="17" height="17" fill="currentColor" hidden><path d="M7 5.25a1.25 1.25 0 0 1 1.93-1.05l10.5 6.75a1.25 1.25 0 0 1 0 2.1l-10.5 6.75A1.25 1.25 0 0 1 7 18.75V5.25Z"/></svg>
+                  <svg id="glassPauseIcon" viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><path d="M6.75 4.5A1.75 1.75 0 0 0 5 6.25v11.5C5 18.72 5.78 19.5 6.75 19.5h1.5c.97 0 1.75-.78 1.75-1.75V6.25C10 5.28 9.22 4.5 8.25 4.5h-1.5Zm9 0A1.75 1.75 0 0 0 14 6.25v11.5c0 .97.78 1.75 1.75 1.75h1.5c.97 0 1.75-.78 1.75-1.75V6.25c0-.97-.78-1.75-1.75-1.75h-1.5Z"/></svg>
+                </button>
+                <button class="glass-btn" id="glassNextBtn" type="button" title="Next Lyric Section" aria-label="Next section">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M18.25 4.5a.75.75 0 0 1 .75.75v13.5a.75.75 0 0 1-1.5 0V5.25a.75.75 0 0 1 .75-.75ZM5.78 4.93A1.25 1.25 0 0 1 7.1 5.03l8.2 5.95a1.25 1.25 0 0 1 0 2.04l-8.2 5.95A1.25 1.25 0 0 1 5 17.95V6.05c0-.49.29-.94.78-1.12Z"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
 
           <!-- Style Quick Strip (top-right inside stage) -->
           <div class="stage-top-hud">
@@ -103,11 +121,11 @@
           <!-- Bottom-Left Style Metadata -->
           <div class="hero-caption">
             <div class="hero-meta-row">
-              <span class="hero-category" id="heroCategory">TURNTABLE · HI-FI VINYL</span>
+              <span class="hero-category" id="heroCategory">ALBUM GLASS · GLASSOS UI</span>
               <span class="hero-counter" id="heroCounter">11 / 11</span>
             </div>
-            <h1 class="hero-title" id="heroStyleTitle">Vinyl Groove</h1>
-            <p class="hero-desc" id="heroStyleDesc">Spinning LP record in a 3D listening room with orbiting 3D text and album cover art.</p>
+            <h1 class="hero-title" id="heroStyleTitle">Glass Stage</h1>
+            <p class="hero-desc" id="heroStyleDesc">Lightly blurred album cover room with an Apple GlassOS cover card, hover controls, and 3D depth lyrics.</p>
           </div>
 
           <!-- Centered 11-Dot Pagination -->
@@ -192,7 +210,7 @@
             Built &amp; open-sourced under MIT License by <a href="https://github.com/AmIAnshu" target="_blank" rel="noopener noreferrer">AmIAnshu</a>.
           </p>
           <div class="footer-links">
-            <a href="https://github.com/AmIAnshu/LyricPulse/releases/tag/v3.0" target="_blank" rel="noopener noreferrer">Download v3.0 (.exe)</a>
+            <a href="https://github.com/AmIAnshu/LyricPulse/releases/tag/v4.0" target="_blank" rel="noopener noreferrer">Download v4.0 (.exe)</a>
             <a href="https://github.com/AmIAnshu/LyricPulse" target="_blank" rel="noopener noreferrer">GitHub Source</a>
             <a href="https://github.com/AmIAnshu/LyricPulse/blob/master/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
           </div>
@@ -222,13 +240,22 @@
           </div>
 
           <div class="setting-group">
-            <h3>Edges Glow &amp; Neon Rush</h3>
+            <h3>Lumn Screen Glow &amp; Neon Rush</h3>
             <div class="seg-row" id="edgeGlowModeRow">
               <button class="seg" data-edge="Off" type="button">Off</button>
               <button class="seg" data-edge="SoftAmbient" type="button">Ambient</button>
               <button class="seg" data-edge="NeonRim" type="button">Neon Rim</button>
               <button class="seg active" data-edge="NeonRush" type="button">Neon Rush</button>
             </div>
+            <div class="seg-row" id="edgeAnimRow" style="margin-top:8px">
+              <button class="seg active" data-edgeanim="MusicSync" type="button">Music Sync</button>
+              <button class="seg" data-edgeanim="AmbientDrift" type="button">Drift</button>
+              <button class="seg" data-edgeanim="Still" type="button">Still</button>
+            </div>
+            <label class="toggle-row" style="margin-top:8px">
+              <span>2-Color Gradient (60% / 40%)</span>
+              <input id="edgeTwoColorToggle" type="checkbox" checked />
+            </label>
             <label class="slider-row">
               <span>Rush Speed <strong id="rushSpeedVal">100%</strong></span>
               <input id="rushSpeedSlider" type="range" min="25" max="240" value="100" />
@@ -237,6 +264,18 @@
               <span>Glow Thickness <strong id="rushThickVal">100%</strong></span>
               <input id="rushThickSlider" type="range" min="40" max="240" value="100" />
             </label>
+            <label class="slider-row">
+              <span>Inward Glow Spill <strong id="edgeSpillVal">100%</strong></span>
+              <input id="edgeSpillSlider" type="range" min="25" max="200" value="100" />
+            </label>
+            <label class="toggle-row">
+              <span>Override Album Colors</span>
+              <input id="edgeOverrideToggle" type="checkbox" />
+            </label>
+            <div class="edge-color-row" id="edgeCustomColorsRow" hidden>
+              <label><span>Primary</span><input id="edgePrimaryInput" type="color" value="#38bdf8" /></label>
+              <label><span>Secondary</span><input id="edgeSecondaryInput" type="color" value="#ec4899" /></label>
+            </div>
           </div>
 
           <div class="setting-group">

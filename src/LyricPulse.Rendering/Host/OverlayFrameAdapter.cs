@@ -24,7 +24,9 @@ public static class OverlayFrameAdapter
         StageBackdropMode? stageBackdropOverride = null,
         OverlayStyleId? styleOverride = null,
         float? heroScaleOverride = null,
-        bool bottomFadeToBlack = false)
+        bool bottomFadeToBlack = false,
+        bool allowDesktopEdgeGlow = false,
+        bool renderDesktopLyrics = true)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
 
@@ -83,7 +85,9 @@ public static class OverlayFrameAdapter
             SecondaryLineMode: settings.SecondaryLineMode,
             StyleOverride: styleOverride,
             AudioMetrics: snapshot.EffectiveAudioMetrics,
-            BottomFadeToBlack: bottomFadeToBlack);
+            BottomFadeToBlack: bottomFadeToBlack,
+            AllowDesktopEdgeGlow: allowDesktopEdgeGlow,
+            RenderDesktopLyrics: renderDesktopLyrics);
     }
 
     public static float ComputeRecommendedHeroScale(

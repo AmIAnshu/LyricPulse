@@ -42,7 +42,8 @@ public sealed record TrayMenuState(
     bool IsDemoMode,
     bool IsEffectiveReducedMotion,
     bool IsOsReducedMotion,
-    string ReducedMotionLabel)
+    string ReducedMotionLabel,
+    bool IsEdgeGlowDesktopEnabled = true)
 {
     public const int MaxHeaderChars = 38;
     public const int MaxTooltipChars = 96;
@@ -122,7 +123,8 @@ public sealed record TrayMenuState(
             IsDemoMode: snapshot.IsDemoMode,
             IsEffectiveReducedMotion: snapshot.IsEffectiveReducedMotion,
             IsOsReducedMotion: snapshot.IsOsReducedMotion,
-            ReducedMotionLabel: reducedLabel);
+            ReducedMotionLabel: reducedLabel,
+            IsEdgeGlowDesktopEnabled: settings.EdgeGlowDesktopEnabled);
     }
 
     public bool Equals(TrayMenuState? other)
@@ -154,6 +156,7 @@ public sealed record TrayMenuState(
                IsEffectiveReducedMotion == other.IsEffectiveReducedMotion &&
                IsOsReducedMotion == other.IsOsReducedMotion &&
                ReducedMotionLabel == other.ReducedMotionLabel &&
+               IsEdgeGlowDesktopEnabled == other.IsEdgeGlowDesktopEnabled &&
                PinnedStyles.SequenceEqual(other.PinnedStyles) &&
                AllStyles.SequenceEqual(other.AllStyles) &&
                OffsetOptions.SequenceEqual(other.OffsetOptions);
@@ -190,7 +193,7 @@ public sealed record TrayMenuState(
         OverlayStyleId.NodeLine => "Node Line",
         OverlayStyleId.KineticWall => "Kinetic Wall",
         OverlayStyleId.Messages => "Messages",
-        OverlayStyleId.VinylGroove => "Vinyl Groove",
+        OverlayStyleId.VinylGroove => "Glass Stage",
         _ => styleId.ToString()
     };
 

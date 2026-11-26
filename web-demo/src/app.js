@@ -15,7 +15,7 @@ const thumbRenderer = new StudioRenderer();
 
 const state = {
   doc: parseLrc(NEON_HORIZON_LRC, 36.0),
-  styleIdx: 10, // Start showcasing flagship v3.0 Vinyl Groove!
+  styleIdx: 10, // Start showcasing flagship v4.0 Glass Stage!
   isPlaying: true,
   songTime: 25.7,
   coverCanvas: createDefaultCoverCanvas(),
@@ -26,8 +26,14 @@ const state = {
     fontFamily: 'Jost',
     lyricScale: 1.0,
     edgeGlowMode: 'NeonRush',
+    edgeAnimMode: 'MusicSync',
+    edgeTwoColor: true,
     rushSpeed: 1.0,
     rushThickness: 1.0,
+    edgeSpill: 1.0,
+    edgeOverrideColors: false,
+    edgePrimaryColor: '#38bdf8',
+    edgeSecondaryColor: '#ec4899',
     visualizerMode: 'SpectrumBars',
     autoSyncColors: true,
     presetName: null,
@@ -58,6 +64,12 @@ const el = {
   playPauseBtn: document.getElementById('playPauseBtn'),
   playIcon: document.getElementById('playIcon'),
   pauseIcon: document.getElementById('pauseIcon'),
+  glassCoverZone: document.getElementById('glassCoverZone'),
+  glassPrevBtn: document.getElementById('glassPrevBtn'),
+  glassPlayBtn: document.getElementById('glassPlayBtn'),
+  glassNextBtn: document.getElementById('glassNextBtn'),
+  glassPlayIcon: document.getElementById('glassPlayIcon'),
+  glassPauseIcon: document.getElementById('glassPauseIcon'),
   soundToggleBtn: document.getElementById('soundToggleBtn'),
   soundToggleLabel: document.getElementById('soundToggleLabel'),
   playbackBadgeText: document.getElementById('playbackBadgeText'),
@@ -108,6 +120,7 @@ function selectStyle(idx) {
   document.querySelectorAll('.style-card').forEach((c) => {
     c.classList.toggle('active', Number(c.dataset.idx) === state.styleIdx);
   });
+  syncGlassCoverZone();
   updatePaletteSwatches();
 }
 
@@ -188,10 +201,46 @@ function resizeCanvasDpi(canvas) {
 function syncPlayUI() {
   el.playIcon.hidden = state.isPlaying;
   el.pauseIcon.hidden = !state.isPlaying;
+  if (el.glassPlayIcon && el.glassPauseIcon) {
+    el.glassPlayIcon.hidden = state.isPlaying;
+    el.glassPauseIcon.hidden = !state.isPlaying;
+  }
   if (engine.audioEl) {
     if (state.isPlaying && engine.audioEl.paused) engine.audioEl.play().catch(() => {});
     if (!state.isPlaying && !engine.audioEl.paused) engine.audioEl.pause();
   }
+}
+
+function syncGlassCoverZone() {
+  if (!el.glassCoverZone || !el.heroStage) return;
+  const isGlass = activeStyle().id === 'VinylGroove';
+  el.glassCoverZone.hidden = !isGlass;
+  if (!isGlass) return;
+  const rect = el.heroStage.getBoundingClientRect();
+  const w = Math.max(320, rect.width);
+  const h = Math.max(240, rect.height);
+  const cardSide = Math.max(112, Math.min(232, Math.min(w * 0.23, h * 0.44)));
+  const cardCx = w * 0.29;
+  const cardCy = h * 0.50;
+  const radius = Math.max(8, Math.min(22, cardSide * 0.115));
+  el.glassCoverZone.style.left = `${cardCx - cardSide * 0.5}px`;
+  el.glassCoverZone.style.top = `${cardCy - cardSide * 0.5}px`;
+  el.glassCoverZone.style.width = `${cardSide}px`;
+  el.glassCoverZone.style.height = `${cardSide}px`;
+  el.glassCoverZone.style.borderRadius = `${radius}px`;
+}
+
+function skipLyricSection(step) {
+  const lines = state.doc?.lines || [];
+  if (lines.length > 0) {
+    let cur = lines.findIndex((l) => state.songTime >= l.start && state.songTime < l.end);
+    if (cur < 0) cur = 0;
+    const nextIdx = ((cur + step) % lines.length + lines.length) % lines.length;
+    state.songTime = Math.min(state.doc.durationSec - 0.1, lines[nextIdx].start + 0.08);
+  } else {
+    state.songTime = ((state.songTime + step * 3) % state.doc.durationSec + state.doc.durationSec) % state.doc.durationSec;
+  }
+  if (engine.audioEl) engine.audioEl.currentTime = state.songTime;
 }
 
 // Event Listeners
@@ -206,6 +255,15 @@ el.playPauseBtn.addEventListener('click', () => {
   state.isPlaying = !state.isPlaying;
   syncPlayUI();
 });
+
+el.glassPlayBtn?.addEventListener('click', () => {
+  state.isPlaying = !state.isPlaying;
+  syncPlayUI();
+});
+el.glassPrevBtn?.addEventListener('click', () => skipLyricSection(-1));
+el.glassNextBtn?.addEventListener('click', () => skipLyricSection(1));
+window.addEventListener('resize', syncGlassCoverZone);
+document.addEventListener('fullscreenchange', () => setTimeout(syncGlassCoverZone, 40));
 
 el.soundToggleBtn.addEventListener('click', () => {
   const next = !engine.synthEnabled;
@@ -316,6 +374,38 @@ el.reducedMotionToggle.addEventListener('change', (e) => {
   state.settings.reducedMotion = e.target.checked;
 });
 
+document.querySelectorAll('#edgeAnimRow .seg').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#edgeAnimRow .seg').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.settings.edgeAnimMode = btn.dataset.edgeanim;
+  });
+});
+
+document.getElementById('edgeTwoColorToggle')?.addEventListener('change', (e) => {
+  state.settings.edgeTwoColor = e.target.checked;
+});
+
+document.getElementById('edgeSpillSlider')?.addEventListener('input', (e) => {
+  const val = Number(e.target.value);
+  state.settings.edgeSpill = val / 100;
+  document.getElementById('edgeSpillVal').textContent = `${val}%`;
+});
+
+const customColorsRow = document.getElementById('edgeCustomColorsRow');
+document.getElementById('edgeOverrideToggle')?.addEventListener('change', (e) => {
+  state.settings.edgeOverrideColors = e.target.checked;
+  if (customColorsRow) customColorsRow.hidden = !e.target.checked;
+});
+
+document.getElementById('edgePrimaryInput')?.addEventListener('input', (e) => {
+  state.settings.edgePrimaryColor = e.target.value;
+});
+
+document.getElementById('edgeSecondaryInput')?.addEventListener('input', (e) => {
+  state.settings.edgeSecondaryColor = e.target.value;
+});
+
 // File uploads (Local Audio / Cover Image / LRC)
 document.getElementById('coverPickerBtn').addEventListener('click', () => document.getElementById('coverUploadInput').click());
 document.getElementById('coverUploadInput').addEventListener('change', (e) => {
@@ -384,6 +474,7 @@ window.addEventListener('keydown', (e) => {
 
 // Initialize UI
 syncMiniCover();
+syncPlayUI();
 buildPaginationDots();
 buildStyleGallery();
 selectStyle(state.styleIdx);

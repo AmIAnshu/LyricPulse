@@ -120,6 +120,11 @@ public partial class StageWindow : Window, IDisposable
             UpdateHeroStageHeight();
             UpdateVisibleStripCards();
         };
+        if (HeroStageContainer is not null)
+        {
+            HeroStageContainer.SizeChanged += (_, _) => UpdateGlassCoverHoverSlot();
+        }
+        UpdateGlassCoverHoverSlot();
     }
 
     public void PrepareForShutdown() => _allowShutdownClose = true;
@@ -518,6 +523,14 @@ public partial class StageWindow : Window, IDisposable
         {
             SyncAlbumEnvironmentTheme(vm, force: false);
         }
+        else if (e.PropertyName == nameof(StageViewModel.IsGlassStageActive))
+        {
+            UpdateGlassCoverHoverSlot();
+            if (GlassCoverTransportScrim is not null)
+            {
+                GlassCoverTransportScrim.Opacity = 0.0;
+            }
+        }
         else if (e.PropertyName is nameof(StageViewModel.AutoSyncColors)
                  or nameof(StageViewModel.ThemeVariantMode))
         {
@@ -583,6 +596,46 @@ public partial class StageWindow : Window, IDisposable
         HeroStageContainer.Height = isFullscreen
             ? Math.Max(Bounds.Height, 360.0)
             : Math.Clamp(Bounds.Height * 0.76, 440.0, 680.0);
+        UpdateGlassCoverHoverSlot();
+    }
+
+    private void UpdateGlassCoverHoverSlot()
+    {
+        if (GlassCoverHoverZone is null || HeroStageContainer is null)
+        {
+            return;
+        }
+
+        var w = (float)Math.Max(HeroStageContainer.Bounds.Width > 1.0 ? HeroStageContainer.Bounds.Width : Bounds.Width, 320.0);
+        var h = (float)Math.Max(HeroStageContainer.Bounds.Height > 1.0 ? HeroStageContainer.Bounds.Height : HeroStageContainer.Height, 240.0);
+        var rect = VinylGrooveStyleRenderer.ResolveCoverCardBounds(w, h, StageRenderSurfaceMode.StageCanvas);
+        var radius = Math.Clamp(Math.Min(rect.Width, rect.Height) * 0.115f, 10f, 24f);
+
+        Canvas.SetLeft(GlassCoverHoverZone, rect.Left);
+        Canvas.SetTop(GlassCoverHoverZone, rect.Top);
+        GlassCoverHoverZone.Width = rect.Width;
+        GlassCoverHoverZone.Height = rect.Height;
+        GlassCoverHoverZone.CornerRadius = new CornerRadius(radius);
+        if (GlassCoverTransportScrim is not null)
+        {
+            GlassCoverTransportScrim.CornerRadius = new CornerRadius(radius);
+        }
+    }
+
+    private void OnGlassCoverPointerEntered(object? sender, PointerEventArgs e)
+    {
+        if (GlassCoverTransportScrim is not null)
+        {
+            GlassCoverTransportScrim.Opacity = 1.0;
+        }
+    }
+
+    private void OnGlassCoverPointerExited(object? sender, PointerEventArgs e)
+    {
+        if (GlassCoverTransportScrim is not null)
+        {
+            GlassCoverTransportScrim.Opacity = 0.0;
+        }
     }
 
     private void ApplyFullscreenWindowState(bool fullscreen)

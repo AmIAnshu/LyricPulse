@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using AwesomeAssertions;
+using LyricPulse.App.Platform;
 using LyricPulse.App.Tray;
 using LyricPulse.Core.Abstractions;
 using LyricPulse.Core.Audio;
@@ -265,13 +266,11 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
         CountLitPixels(artBmp).Should().BeGreaterThan(700);
         var artHash = Convert.ToHexString(SHA256.HashData(artBmp.GetPixelSpan()));
 
-        // Verify platter center region (0.30f) displays bright decoded album cover pixels with a punched center spindle hole
-        var platterCenterX = (int)(640 * 0.30f);
-        var platterCenterY = (int)(360 * 0.50f);
-        var sampleAboveSpindle = artBmp.GetPixel(platterCenterX, platterCenterY - 26);
-        (sampleAboveSpindle.Red + sampleAboveSpindle.Green + sampleAboveSpindle.Blue).Should().BeGreaterThan(90);
-        var sampleSpindleHole = artBmp.GetPixel(platterCenterX, platterCenterY);
-        Math.Max(sampleSpindleHole.Red, Math.Max(sampleSpindleHole.Green, sampleSpindleHole.Blue)).Should().BeLessThan(35);
+        // Verify medium GlassOS album cover card center displays bright decoded album cover pixels (no vinyl spindle hole)
+        var cardRect = VinylGrooveStyleRenderer.ResolveCoverCardBounds(640f, 360f, StageRenderSurfaceMode.StageCanvas);
+        var sampleCardCenter = artBmp.GetPixel((int)cardRect.MidX, (int)cardRect.MidY);
+        sampleCardCenter.Alpha.Should().BeGreaterThan(220);
+        (sampleCardCenter.Red + sampleCardCenter.Green + sampleCardCenter.Blue).Should().BeGreaterThan(90);
 
         // 2. Without AlbumArt -> circular procedural center label + TrackMoodVisual emblem
         var fallbackPkt = BuildPacket(demoDoc, settings, StageRenderSurfaceMode.StageCanvas, TimeSpan.FromSeconds(25.7), CreateAudio(), albumArt: null, null, moodVisual, renderTime: 1.25);
@@ -312,8 +311,8 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
     public async Task VinylGrooveCatalogWiring_AndSettingsBackCompat_WorkEndToEnd()
     {
         StyleCatalog.All.Should().HaveCount(11);
-        StyleCatalog.GetMetadata(OverlayStyleId.VinylGroove).DisplayName.Should().Be("Vinyl Groove");
-        TrayMenuState.GetStyleDisplayName(OverlayStyleId.VinylGroove).Should().Be("Vinyl Groove");
+        StyleCatalog.GetMetadata(OverlayStyleId.VinylGroove).DisplayName.Should().Be("Glass Stage");
+        TrayMenuState.GetStyleDisplayName(OverlayStyleId.VinylGroove).Should().Be("Glass Stage");
         DemoSongProvider.GetGalleryPreviewPhaseOffset(OverlayStyleId.VinylGroove).Should().Be(TimeSpan.FromSeconds(25.7));
 
         var tempDir = Path.Combine(Path.GetTempPath(), $"lp-test-{Guid.NewGuid():N}");
@@ -494,6 +493,228 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
         clock.GetInterpolatedPosition().Should().BeLessThan(TimeSpan.FromSeconds(1.2));
     }
 
+    [Fact]
+    public void SkiaAlbumColorExtractor_DecodeGlassStageTextures_ProducesHighResCoverAndSoftBackdrop()
+    {
+        var redCoverBytes = EncodeCover(240, 180, SKEncodedImageFormat.Png, (_, _) => new SKColor(228, 36, 58));
+        var (coverArt, lightBlur) = SkiaAlbumColorExtractor.DecodeGlassStageTextures(
+            redCoverBytes,
+            coverDimension: 200,
+            backdropDimension: 180);
+
+        coverArt.Should().NotBeNull();
+        lightBlur.Should().NotBeNull();
+        using (coverArt!)
+        using (lightBlur!)
+        {
+            coverArt.Width.Should().Be(coverArt.Height);
+            lightBlur.Width.Should().Be(180);
+            lightBlur.Height.Should().Be(180);
+
+            using var coverBmp = SKBitmap.FromImage(coverArt);
+            var center = coverBmp.GetPixel(coverBmp.Width / 2, coverBmp.Height / 2);
+            center.Alpha.Should().Be(255);
+            center.Red.Should().BeGreaterThan((byte)(center.Green + 80));
+
+            using var backdropBmp = SKBitmap.FromImage(lightBlur);
+            var backPx = backdropBmp.GetPixel(90, 90);
+            backPx.Red.Should().BeGreaterThan((byte)(backPx.Green + 60));
+        }
+    }
+
+    [Fact]
+    public async Task OverlayRuntimeController_TransportControls_ToggleDemoPauseAndSkipLines_AndDelegateLiveGsmtc()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"lp-transport-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var normalizer = new TitleNormalizer();
+            var demo = new DemoSongProvider(new LyricsParser(), normalizer);
+            var demoDoc = demo.GetDemoDocument();
+
+            var media = Substitute.For<IMediaSessionProvider>();
+            media.TryTogglePlayPauseAsync(Arg.Any<CancellationToken>()).Returns(true);
+            media.TrySkipNextAsync(Arg.Any<CancellationToken>()).Returns(true);
+            media.TrySkipPreviousAsync(Arg.Any<CancellationToken>()).Returns(true);
+
+            var lyrics = Substitute.For<ILyricsOrchestrator>();
+            var matcher = new StarterLexiconVisualMatcher();
+            await matcher.InitializeAsync();
+            using var store = new JsonSettingsStore(Path.Combine(tempDir, "settings.json"));
+            var offsetStore = Substitute.For<ITrackOffsetStore>();
+            offsetStore.TryGetOffsetAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns((TimeSpan?)null);
+            var timing = new TimingOffsetService(offsetStore);
+
+            await using var controller = new OverlayRuntimeController(media, lyrics, matcher, store, timing, demo);
+            await controller.StartAsync();
+
+            // 1. Demo Mode pause/resume & skip next/previous
+            await controller.SetDemoModeAsync(true);
+            var playingSnap = controller.SampleFrame();
+            playingSnap.IsPlaying.Should().BeTrue();
+            playingSnap.PlaybackState.Should().Be(MediaPlaybackState.Playing);
+
+            (await controller.TogglePlayPauseAsync()).Should().BeTrue();
+            var pausedSnap = controller.SampleFrame();
+            pausedSnap.IsPlaying.Should().BeFalse();
+            pausedSnap.PlaybackState.Should().Be(MediaPlaybackState.Paused);
+
+            var seekBefore = pausedSnap.SeekGeneration;
+            (await controller.SkipNextAsync()).Should().BeTrue();
+            var skippedSnap = controller.SampleFrame();
+            skippedSnap.SeekGeneration.Should().Be(seekBefore + 1);
+            skippedSnap.ActiveLineIndex.Should().BeGreaterThanOrEqualTo(0);
+
+            (await controller.SkipPreviousAsync()).Should().BeTrue();
+            controller.SampleFrame().SeekGeneration.Should().Be(seekBefore + 2);
+
+            (await controller.TogglePlayPauseAsync()).Should().BeTrue();
+            controller.SampleFrame().IsPlaying.Should().BeTrue();
+
+            // 2. Live session delegation -> invokes GSMTC transport commands
+            await controller.SetDemoModeAsync(false);
+            var liveTrack = normalizer.CreateIdentity("Midnight Drive", "Synth Artist", "Night Album", TimeSpan.FromMinutes(3));
+            var liveSession = new MediaSessionSnapshot(
+                SourceAppUserModelId: "Spotify.exe",
+                PlayerKind: MediaPlayerKind.Spotify,
+                ItemKind: MediaItemKind.Music,
+                PlaybackState: MediaPlaybackState.Playing,
+                Track: liveTrack,
+                ReportedPosition: TimeSpan.FromSeconds(5),
+                StartTime: TimeSpan.Zero,
+                EndTime: TimeSpan.FromMinutes(3),
+                PlaybackRate: 1.0,
+                LastUpdatedUtc: DateTimeOffset.UtcNow,
+                AlbumArtHash: null);
+
+            lyrics.GetLyricsAsync(Arg.Any<TrackIdentity>(), Arg.Any<CancellationToken>())
+                .Returns(new LyricsResult(LyricsStatus.Synced, demoDoc with { Track = liveTrack }));
+            media.SessionChanged += Raise.Event<EventHandler<MediaSessionSnapshot?>>(media, liveSession);
+            await Task.Delay(50);
+
+            (await controller.TogglePlayPauseAsync()).Should().BeTrue();
+            (await controller.SkipNextAsync()).Should().BeTrue();
+            (await controller.SkipPreviousAsync()).Should().BeTrue();
+
+            await media.Received(1).TryTogglePlayPauseAsync(Arg.Any<CancellationToken>());
+            await media.Received(1).TrySkipNextAsync(Arg.Any<CancellationToken>());
+            await media.Received(1).TrySkipPreviousAsync(Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void EdgeGlowRenderer_LumnPerimeterMode_SupportsTwoColorOneColorAndSystemWideDesktopOverlay()
+    {
+        var doc = new DemoSongProvider(new LyricsParser(), new TitleNormalizer()).GetDemoDocument();
+        using var fonts = new FontAssetRegistry();
+        using var shaders = new ShaderLibrary();
+        using var pool = new OffscreenSurfacePool();
+        using var legibility = new LegibilityPipeline();
+        using var edgeGlow = new EdgeGlowRenderer();
+
+        var settings = AppSettings.Default with
+        {
+            EdgeGlowMode = EdgeGlowMode.NeonRush,
+            EdgeGlowDesktopEnabled = true,
+            EdgeGlowTwoColorGradient = true,
+            EdgeGlowOverrideAlbumColors = true,
+            EdgeGlowPrimaryColor = new RgbColor(0x00, 0xD2, 0xFF),
+            EdgeGlowSecondaryColor = new RgbColor(0xFF, 0x2A, 0x7A),
+            EdgeGlowIntensity = 1.20f,
+            EdgeGlowThickness = 1.50f,
+            EdgeGlowSpill = 1.25f
+        };
+
+        var snap = new OverlayPlaybackSnapshot(
+            Track: doc.Track,
+            Document: doc,
+            LyricsStatus: LyricsStatus.Synced,
+            PlaybackState: MediaPlaybackState.Playing,
+            PlayerKind: MediaPlayerKind.Unknown,
+            SourceAppUserModelId: "Demo",
+            RawPosition: TimeSpan.FromSeconds(5),
+            EffectivePosition: TimeSpan.FromSeconds(5),
+            ActiveSlice: ActiveLyricSlice.Resolve(doc, TimeSpan.FromSeconds(5)),
+            ActivePalette: AlbumAccentPalette.DemoNeonHorizon,
+            TargetPalette: AlbumAccentPalette.DemoNeonHorizon,
+            TimingOffset: new TimingOffsetState(null, TimeSpan.Zero, false),
+            Settings: settings,
+            IsPlaying: true,
+            IsDemoMode: true,
+            IsFullscreenHidden: false,
+            PausedSinceUtc: null,
+            LastOffsetNudgeUtc: null,
+            TrackGeneration: 1,
+            SeekGeneration: 0,
+            AudioMetrics: CreateAudio());
+
+        var info = new SKImageInfo(640, 360, SKColorType.Bgra8888, SKAlphaType.Premul);
+
+        // 1. Default DesktopOverlay without AllowDesktopEdgeGlow keeps screen perimeter clean/transparent
+        var gatedPkt = OverlayFrameAdapter.FromPlaybackSnapshot(snap, 640f, 360f, 1.0f, 1.5, 1f / 60f, surfaceMode: StageRenderSurfaceMode.DesktopOverlay, allowDesktopEdgeGlow: false);
+        using (var s0 = SKSurface.Create(info))
+        {
+            s0.Canvas.Clear(SKColors.Transparent);
+            var ctx0 = new StyleRenderContext(s0.Canvas, null, fonts, shaders, pool, legibility, gatedPkt, false, false);
+            edgeGlow.Render(in ctx0);
+            using var b0 = SKBitmap.FromImage(s0.Snapshot());
+            b0.GetPixel(320, 4).Alpha.Should().Be(0);
+        }
+
+        // 2. System-wide Lumn DesktopOverlay (AllowDesktopEdgeGlow = true) glows brightly along screen edges while center stays clear!
+        var lumnPkt = OverlayFrameAdapter.FromPlaybackSnapshot(snap, 640f, 360f, 1.0f, 1.5, 1f / 60f, surfaceMode: StageRenderSurfaceMode.DesktopOverlay, allowDesktopEdgeGlow: true, renderDesktopLyrics: false);
+        using var s1 = SKSurface.Create(info);
+        s1.Canvas.Clear(SKColors.Transparent);
+        var ctx1 = new StyleRenderContext(s1.Canvas, null, fonts, shaders, pool, legibility, lumnPkt, false, false);
+        edgeGlow.Render(in ctx1);
+        using var b1 = SKBitmap.FromImage(s1.Snapshot());
+
+        b1.GetPixel(320, 4).Alpha.Should().BeGreaterThan(80, "top screen edge must emit Lumn bezel glow");
+        b1.GetPixel(4, 180).Alpha.Should().BeGreaterThan(80, "left screen edge must emit Lumn bezel glow");
+        b1.GetPixel(635, 180).Alpha.Should().BeGreaterThan(80, "right screen edge must emit Lumn bezel glow");
+        b1.GetPixel(320, 355).Alpha.Should().BeGreaterThan(80, "bottom screen edge must emit Lumn bezel glow");
+        b1.GetPixel(320, 180).Alpha.Should().Be(0, "center desktop apps must remain unobstructed");
+    }
+
+    [Fact]
+    public void OverlayBoundsCalculator_ExpandsLumnEdgeGlowToFullMonitor_WhileKeepingSafeZoneInsideWorkingArea()
+    {
+        var monitor = new MonitorDescriptor(
+            DisplayKey: @"\\.\DISPLAY1",
+            FriendlyName: "Primary Studio",
+            WorkingLeftPx: 0,
+            WorkingTopPx: 0,
+            WorkingWidthPx: 1920,
+            WorkingHeightPx: 1032,
+            EffectiveDpiScale: 1.0,
+            IsPrimary: true,
+            MonitorLeftPx: 0,
+            MonitorTopPx: 0,
+            MonitorWidthPx: 1920,
+            MonitorHeightPx: 1080);
+
+        var lumnSettings = AppSettings.Default with
+        {
+            EdgeGlowDesktopEnabled = true,
+            EdgeGlowMode = EdgeGlowMode.NeonRush,
+            AnchorZone = AnchorZone.BottomThird,
+            SafeMarginPx = 32
+        };
+
+        var placements = OverlayBoundsCalculator.ComputePlacements([monitor], lumnSettings);
+        placements.Should().HaveCount(1);
+        var p = placements[0];
+
+        p.WidthDip.Should().BeApproximately(1920.0, 0.01);
+        p.HeightDip.Should().BeApproximately(1080.0, 0.01, "Lumn edge glow covers the full 1080px monitor bezel behind taskbar edge");
+        (p.SafeZoneDip.TopDip + p.SafeZoneDip.HeightDip).Should().BeLessThanOrEqualTo(1032.0 - 32.0 + 0.01, "lyric SafeZone remains inside WorkingArea above taskbar");
+    }
+
     private sealed class FakeSlowArtMediaProvider : IMediaSessionProvider
     {
         private readonly TaskCompletionSource<AlbumArtPayload?> _artTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -524,6 +745,10 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
             _ = SeekDetected; // silence unused event warning
             _artTcs.TrySetResult(payload);
         }
+
+        public Task<bool> TryTogglePlayPauseAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task<bool> TrySkipNextAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
+        public Task<bool> TrySkipPreviousAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
 
         public ValueTask DisposeAsync()
         {

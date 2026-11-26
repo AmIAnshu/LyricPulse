@@ -189,10 +189,13 @@ public sealed class MultiMonitorOverlayCoordinator : IDisposable
         _overlays.Clear();
     }
 
-    private bool ShouldOverlaysBeVisible() =>
-        _currentSettings.DesktopOverlayEnabled &&
-        _currentSettings.LyricsVisible &&
-        !(_isFullscreenPaused && _currentSettings.HideDuringFullscreen);
+    private bool ShouldOverlaysBeVisible()
+    {
+        var lyricsActive = _currentSettings.DesktopOverlayEnabled && _currentSettings.LyricsVisible;
+        var lumnEdgeActive = _currentSettings.EdgeGlowDesktopEnabled && _currentSettings.EdgeGlowMode != EdgeGlowMode.Off;
+        return (lyricsActive || lumnEdgeActive) &&
+               !(_isFullscreenPaused && _currentSettings.HideDuringFullscreen);
+    }
 
     private void ApplyVisibilityState()
     {
@@ -227,6 +230,7 @@ public sealed class MultiMonitorOverlayCoordinator : IDisposable
         {
             var screen = screens[i];
             var work = screen.WorkingArea;
+            var bounds = screen.Bounds;
             var centerX = work.X + (work.Width / 2);
             var centerY = work.Y + (work.Height / 2);
 
@@ -251,7 +255,11 @@ public sealed class MultiMonitorOverlayCoordinator : IDisposable
                 WorkingWidthPx: work.Width,
                 WorkingHeightPx: work.Height,
                 EffectiveDpiScale: dpiScale,
-                IsPrimary: screen.IsPrimary));
+                IsPrimary: screen.IsPrimary,
+                MonitorLeftPx: bounds.X,
+                MonitorTopPx: bounds.Y,
+                MonitorWidthPx: bounds.Width,
+                MonitorHeightPx: bounds.Height));
         }
 
         return result;

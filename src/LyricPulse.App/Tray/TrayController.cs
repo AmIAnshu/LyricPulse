@@ -36,6 +36,7 @@ public sealed class TrayController : IDisposable
     private NativeMenuItem? _conflictItem;
     private NativeMenuItem? _showLyricsItem;
     private NativeMenuItem? _desktopOverlayItem;
+    private NativeMenuItem? _edgeGlowDesktopItem;
     private readonly Dictionary<OverlayStyleId, NativeMenuItem> _pinnedItems = new();
     private readonly Dictionary<OverlayStyleId, NativeMenuItem> _allStyleItems = new();
     private NativeMenuItem? _timingOffsetParent;
@@ -204,6 +205,7 @@ public sealed class TrayController : IDisposable
         }
 
         if (_desktopOverlayItem is not null) _desktopOverlayItem.IsChecked = state.IsDesktopOverlayEnabled;
+        if (_edgeGlowDesktopItem is not null) _edgeGlowDesktopItem.IsChecked = state.IsEdgeGlowDesktopEnabled;
 
         foreach (var opt in state.PinnedStyles)
         {
@@ -280,6 +282,14 @@ public sealed class TrayController : IDisposable
         };
         _desktopOverlayItem.Click += (_, _) => _ = SafeInvokeAsync(() => _runtime.ToggleDesktopOverlayAsync(), "ToggleDesktopOverlay");
         menu.Add(_desktopOverlayItem);
+
+        _edgeGlowDesktopItem = new NativeMenuItem("Screen Edge Glow (Lumn Mode)")
+        {
+            ToggleType = NativeMenuItemToggleType.CheckBox,
+            IsChecked = state.IsEdgeGlowDesktopEnabled
+        };
+        _edgeGlowDesktopItem.Click += (_, _) => _ = SafeInvokeAsync(() => _runtime.ToggleEdgeGlowDesktopAsync(), "ToggleEdgeGlowDesktop");
+        menu.Add(_edgeGlowDesktopItem);
 
         menu.Add(new NativeMenuItemSeparator());
 

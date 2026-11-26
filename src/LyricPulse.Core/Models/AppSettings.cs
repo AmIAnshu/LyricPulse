@@ -50,6 +50,13 @@ public enum EdgeGlowMode
     NeonRush = 4
 }
 
+public enum EdgeGlowAnimationMode
+{
+    MusicSync = 0,
+    AmbientDrift = 1,
+    Still = 2
+}
+
 public enum AudioVisualizerMode
 {
     None = 0,
@@ -117,6 +124,9 @@ public sealed record AppSettings
     public const float MinEdgeGlowThickness = 0.40f;
     public const float MaxEdgeGlowThickness = 2.50f;
     public const float DefaultEdgeGlowThickness = 1.35f;
+    public const float MinEdgeGlowSpill = 0.25f;
+    public const float MaxEdgeGlowSpill = 2.00f;
+    public const float DefaultEdgeGlowSpill = 0.85f;
     public const float MinVisualizerIntensity = 0.2f;
     public const float MaxVisualizerIntensity = 1.5f;
     public const float DefaultVisualizerIntensity = 0.75f;
@@ -177,6 +187,13 @@ public sealed record AppSettings
     public float EdgeGlowIntensity { get; init; } = DefaultEdgeGlowIntensity;
     public float EdgeGlowSpeed { get; init; } = DefaultEdgeGlowSpeed;
     public float EdgeGlowThickness { get; init; } = DefaultEdgeGlowThickness;
+    public bool EdgeGlowDesktopEnabled { get; init; } = true;
+    public EdgeGlowAnimationMode EdgeGlowAnimation { get; init; } = EdgeGlowAnimationMode.MusicSync;
+    public bool EdgeGlowTwoColorGradient { get; init; } = true;
+    public float EdgeGlowSpill { get; init; } = DefaultEdgeGlowSpill;
+    public bool EdgeGlowOverrideAlbumColors { get; init; }
+    public RgbColor EdgeGlowPrimaryColor { get; init; } = new(0x38, 0xBD, 0xF8);
+    public RgbColor EdgeGlowSecondaryColor { get; init; } = new(0xEC, 0x48, 0x99);
     public AudioVisualizerMode AudioVisualizerMode { get; init; } = AudioVisualizerMode.RadialHalo;
     public float AudioVisualizerIntensity { get; init; } = DefaultVisualizerIntensity;
 
@@ -233,6 +250,12 @@ public sealed record AppSettings
         var normalizedEdgeGlowThickness = !float.IsFinite(EdgeGlowThickness) || EdgeGlowThickness <= 0f
             ? DefaultEdgeGlowThickness
             : Math.Clamp(EdgeGlowThickness, MinEdgeGlowThickness, MaxEdgeGlowThickness);
+        var normalizedEdgeGlowAnimation = Enum.IsDefined(EdgeGlowAnimation)
+            ? EdgeGlowAnimation
+            : EdgeGlowAnimationMode.MusicSync;
+        var normalizedEdgeGlowSpill = !float.IsFinite(EdgeGlowSpill) || EdgeGlowSpill <= 0f
+            ? DefaultEdgeGlowSpill
+            : Math.Clamp(EdgeGlowSpill, MinEdgeGlowSpill, MaxEdgeGlowSpill);
         var normalizedVisualizerMode = Enum.IsDefined(AudioVisualizerMode)
             ? AudioVisualizerMode
             : AudioVisualizerMode.RadialHalo;
@@ -267,6 +290,8 @@ public sealed record AppSettings
             EdgeGlowIntensity = normalizedEdgeGlowIntensity,
             EdgeGlowSpeed = normalizedEdgeGlowSpeed,
             EdgeGlowThickness = normalizedEdgeGlowThickness,
+            EdgeGlowAnimation = normalizedEdgeGlowAnimation,
+            EdgeGlowSpill = normalizedEdgeGlowSpill,
             AudioVisualizerMode = normalizedVisualizerMode,
             AudioVisualizerIntensity = normalizedVisualizerIntensity,
             PerDisplayBounds = bounds,

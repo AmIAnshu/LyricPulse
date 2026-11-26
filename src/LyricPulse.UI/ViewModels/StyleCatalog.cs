@@ -46,8 +46,8 @@ public static class StyleCatalog
             "Words land sequentially onto a typographic wall drifting smoothly in 3D perspective.", false, 28.6),
         new(OverlayStyleId.Messages, "Messages", "Phone Screen", "Chat Thread",
             "Song lines arrive as a sleek phone message thread with timed chat bubbles per line.", false, 22.9),
-        new(OverlayStyleId.VinylGroove, "Vinyl Groove", "Turntable", "Hi-Fi Vinyl",
-            "Spinning LP record synced to song progress with a glowing stylus arm and warm studio sheen.", false, 25.7)
+        new(OverlayStyleId.VinylGroove, "Glass Stage", "Album Glass", "GlassOS UI",
+            "Lightly blurred album cover room with an Apple GlassOS cover card, hover controls, and 3D depth lyrics.", false, 25.7)
     ];
 
     public static ImmutableArray<ColorPresetOption> StudioPresets { get; } =
