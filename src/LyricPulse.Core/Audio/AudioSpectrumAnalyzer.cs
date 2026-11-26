@@ -36,6 +36,7 @@ public sealed class AudioSpectrumAnalyzer
     // Multi-timescale Beat Drop / Chorus Climax detector state
     private float _dropSensitivity = AppSettings.DefaultBeatDropSensitivity;
     private float _fastSubBass;
+    private float _slowRawSubBass = 0.012f;
     private float _medEnergy;
     private float _slowBaseline = 0.22f;
     private float _buildupTension;
@@ -100,6 +101,7 @@ public sealed class AudioSpectrumAnalyzer
         lock (_sync)
         {
             _fastSubBass = 0f;
+            _slowRawSubBass = 0.012f;
             _medEnergy = 0f;
             _slowBaseline = 0.22f;
             _buildupTension = 0f;
@@ -503,8 +505,10 @@ public sealed class AudioSpectrumAnalyzer
             _beatPulse = MathF.Max(0f, _beatPulse - (dtSec * 3.4f));
         }
 
-        // Multi-timescale Beat Drop / Song Climax detector (buildup scoop + sub-bass/energy-wall surge)
+        // Multi-timescale Beat Drop / Song Climax detector (buildup scoop + mastered sub-bass ratio + energy-wall surge)
         var instantOverall = Math.Clamp((targetBass * 0.48f) + (targetMid * 0.32f) + (targetTreble * 0.20f), 0f, 1f);
+        var rawSubBassAvg = subBassBins > 0 ? (subBassRaw / subBassBins) : 0f;
+        var rawSubBassRatio = rawSubBassAvg / MathF.Max(0.002f, _slowRawSubBass);
         var subBassDelta = targetSubBass - _fastSubBass;
         _fastSubBass += subBassDelta * Math.Clamp(dtSec * 16f, 0.18f, 0.78f);
         _medEnergy += (instantOverall - _medEnergy) * Math.Clamp(dtSec * 1.15f, 0.01f, 0.22f);
@@ -513,11 +517,11 @@ public sealed class AudioSpectrumAnalyzer
             0.12f,
             0.72f);
 
-        var isPreDropScoop = targetSubBass < (_medEnergy * 0.82f) && targetSubBass < 0.38f;
+        var isPreDropScoop = targetSubBass < (_medEnergy * 0.82f) && targetSubBass < 0.42f;
         var isRiserBuild = targetTreble > (_slowBaseline * 1.05f) && targetTreble >= targetSubBass;
         if (isPreDropScoop || isRiserBuild)
         {
-            _buildupTension = Math.Min(1f, _buildupTension + (dtSec * 0.45f));
+            _buildupTension = Math.Min(1f, _buildupTension + (dtSec * 0.48f));
         }
         else
         {
@@ -525,27 +529,35 @@ public sealed class AudioSpectrumAnalyzer
         }
 
         _dropCooldownSec = MathF.Max(0f, _dropCooldownSec - dtSec);
-        _dropTrigger = MathF.Max(0f, _dropTrigger - (dtSec / 0.48f));
-        _climaxIntensity = MathF.Max(0f, _climaxIntensity - (dtSec / 3.60f));
+        _dropTrigger = MathF.Max(0f, _dropTrigger - (dtSec / 0.50f));
+        _climaxIntensity = MathF.Max(0f, _climaxIntensity - (dtSec / 3.80f));
 
         var sens = _dropSensitivity;
-        var surgeThreshold = 0.15f / MathF.Sqrt(sens);
-        var wallRatioThreshold = 1.42f - ((sens - 1.0f) * 0.24f);
-        var minImpactFloor = Math.Clamp(0.45f / MathF.Pow(sens, 0.35f), 0.28f, 0.62f);
+        var surgeThreshold = 0.14f / MathF.Sqrt(sens);
+        var wallRatioThreshold = 1.40f - ((sens - 1.0f) * 0.24f);
+        var minImpactFloor = Math.Clamp(0.44f / MathF.Pow(sens, 0.35f), 0.28f, 0.62f);
 
-        var buildupDrop = _buildupTension >= 0.18f &&
-                          subBassDelta >= surgeThreshold &&
-                          targetSubBass >= minImpactFloor;
-        var energyWallDrop = subBassDelta >= (surgeThreshold * 1.12f) &&
+        var buildupDrop = _buildupTension >= 0.14f &&
+                          subBassDelta >= (surgeThreshold * 0.85f) &&
+                          targetSubBass >= (minImpactFloor * 0.90f);
+        var energyWallDrop = subBassDelta >= (surgeThreshold * 1.08f) &&
                              targetSubBass >= Math.Max(minImpactFloor, _slowBaseline * wallRatioThreshold) &&
-                             instantOverall >= (_slowBaseline * 1.24f);
+                             instantOverall >= (_slowBaseline * 1.20f);
+        var masteredSubDrop = rawSubBassRatio >= (1.58f / MathF.Sqrt(sens)) &&
+                              subBassDelta >= (surgeThreshold * 0.72f) &&
+                              targetSubBass >= (minImpactFloor * 0.85f);
 
-        if (_dropCooldownSec <= 0f && (buildupDrop || energyWallDrop))
+        _slowRawSubBass = Math.Clamp(
+            _slowRawSubBass + ((rawSubBassAvg - _slowRawSubBass) * Math.Clamp(dtSec * 0.16f, 0.003f, 0.05f)),
+            0.004f,
+            0.45f);
+
+        if (_dropCooldownSec <= 0f && (buildupDrop || energyWallDrop || masteredSubDrop))
         {
             _dropTrigger = 1.0f;
             _climaxIntensity = 1.0f;
             _buildupTension = 0f;
-            _dropCooldownSec = Math.Clamp(11.5f - (sens * 3.5f), 5.5f, 13.0f);
+            _dropCooldownSec = Math.Clamp(11.0f - (sens * 3.4f), 5.0f, 12.5f);
         }
 
         var overall = Math.Clamp((_smoothedBass * 0.45f) + (_smoothedMid * 0.35f) + (_smoothedTreble * 0.20f), 0f, 1f);

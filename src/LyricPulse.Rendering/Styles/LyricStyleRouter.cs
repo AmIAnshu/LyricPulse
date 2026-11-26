@@ -185,12 +185,14 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
                 if (effectiveOpacity > 0.004f)
                 {
                     var opacitySave = context.Legibility.BeginGlobalOpacityLayer(canvas, effectiveOpacity);
-                    var dropZoom = _beatDrop.GetLyricZoomMultiplier(in packet);
-                    var zoomSave = dropZoom > 1.002f ? canvas.Save() : -1;
+                    var (dropZoom, dropDx, dropDy) = _beatDrop.GetLyricMotionTransform(in packet);
+                    var hasDropTransform = dropZoom > 1.002f || MathF.Abs(dropDx) > 0.05f || MathF.Abs(dropDy) > 0.05f;
+                    var zoomSave = hasDropTransform ? canvas.Save() : -1;
                     try
                     {
                         if (zoomSave >= 0)
                         {
+                            canvas.Translate(dropDx, dropDy);
                             canvas.Scale(dropZoom, dropZoom, packet.ViewportWidthDip * 0.5f, packet.ViewportHeightDip * 0.5f);
                         }
 

@@ -7,15 +7,17 @@ using SkiaSharp;
 namespace LyricPulse.Rendering.Styles;
 
 /// <summary>
-/// Concert Drop Suite renderer reacting to real-time FFT / manual Beat Drop climaxes:
-/// expanding concentric bass shockwave rings, 72 supersonic tapered energy sparks,
-/// photosensitive-safe radial spotlight surge, and centered spring lyric zoom kick.
-/// Zero per-frame SKPaint/SKPath allocations; strictly skipped on ReducedMotion and DesktopOverlay corners.
+/// Arena Concert Drop Suite reacting to real-time FFT &amp; manual Beat Drop climaxes:
+/// sweeping volumetric stadium light cones, heavy dual-pass bass shockwaves, perimeter edge
+/// energy surges, 110 swirl-curled glowing sparks, photosensitive-safe spotlight swell, and
+/// elastic scale slam + bass micro-tremor applied cleanly to lyrics.
+/// Zero per-frame SKPaint/blur allocations; skipped cleanly on ReducedMotion and DesktopOverlay corners.
 /// </summary>
 public sealed class BeatDropEffectRenderer : IDisposable
 {
-    private const int MaxSparks = 72;
+    private const int MaxSparks = 110;
     private const int MaxRings = 4;
+    private const int SpotlightConeCount = 12;
 
     private struct DropSpark
     {
@@ -25,6 +27,7 @@ public sealed class BeatDropEffectRenderer : IDisposable
         public float PrevY;
         public float Vx;
         public float Vy;
+        public float SwirlRadPerSec;
         public float Age;
         public float LifeSec;
         public float Width;
@@ -45,14 +48,19 @@ public sealed class BeatDropEffectRenderer : IDisposable
     private readonly SKPaint _bloomPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKPaint _ringPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke };
     private readonly SKPaint _sparkPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round };
+    private readonly SKPath _conePath = new();
     private readonly SKColor[] _bloomColors = new SKColor[3];
-    private readonly float[] _bloomStops = [0f, 0.45f, 1f];
+    private readonly float[] _bloomStops = [0f, 0.44f, 1f];
+    private readonly SKColor[] _beamColors = new SKColor[2];
+    private readonly float[] _beamStops = [0f, 1f];
 
     private int _activeSparks;
     private int _activeRings;
     private float _edgeCooldownSec;
     private float _lyricPunch;
+    private float _slamElapsedSec = 1.0f;
     private float _bloomAlpha;
+    private float _beamSweepPhase;
     private uint _rngState = 0x9E3779B9u;
     private bool _disposed;
 
@@ -73,7 +81,9 @@ public sealed class BeatDropEffectRenderer : IDisposable
         _activeRings = 0;
         _edgeCooldownSec = 0f;
         _lyricPunch = 0f;
+        _slamElapsedSec = 1.0f;
         _bloomAlpha = 0f;
+        _beamSweepPhase = 0f;
     }
 
     public bool Advance(in FrameRenderPacket packet)
@@ -95,28 +105,30 @@ public sealed class BeatDropEffectRenderer : IDisposable
         var dropIntensity = ResolveDropIntensity(in packet);
 
         _edgeCooldownSec = MathF.Max(0f, _edgeCooldownSec - dt);
-        _lyricPunch *= MathF.Exp(-dt * 8.2f);
+        _slamElapsedSec = MathF.Min(1.5f, _slamElapsedSec + dt);
+        _beamSweepPhase = (_beamSweepPhase + (dt * (0.45f + (audio.ClimaxIntensity * 1.15f)))) % MathF.Tau;
+
+        _lyricPunch *= MathF.Exp(-dt * 6.8f);
         if (_lyricPunch < 0.002f)
         {
             _lyricPunch = 0f;
         }
 
-        _bloomAlpha *= MathF.Exp(-dt * 3.4f);
+        _bloomAlpha *= MathF.Exp(-dt * 2.75f);
         if (audio.IsClimaxActive)
         {
-            _bloomAlpha = MathF.Max(_bloomAlpha, audio.ClimaxIntensity * 0.14f * dropIntensity);
+            _bloomAlpha = MathF.Max(_bloomAlpha, MathF.Min(0.24f, audio.ClimaxIntensity * 0.20f * dropIntensity));
         }
 
-        // Trigger shockwave + sparks on drop surge rising edge
-        if (audio.DropTrigger >= 0.55f && _edgeCooldownSec <= 0f)
+        if (audio.DropTrigger >= 0.50f && _edgeCooldownSec <= 0f)
         {
             _edgeCooldownSec = 0.42f;
-            _lyricPunch = MathF.Min(1.2f, 0.85f + (0.20f * dropIntensity));
-            _bloomAlpha = MathF.Max(_bloomAlpha, MathF.Min(0.22f, 0.18f * dropIntensity));
+            _slamElapsedSec = 0f;
+            _lyricPunch = MathF.Min(1.35f, 0.95f + (0.28f * dropIntensity));
+            _bloomAlpha = MathF.Max(_bloomAlpha, MathF.Min(0.26f, 0.22f * dropIntensity));
             SpawnDropExplosion(packet.ViewportWidthDip, packet.ViewportHeightDip, packet.IsCompactCard, dropIntensity);
         }
 
-        // Advance shockwave rings
         var writeRing = 0;
         for (var i = 0; i < _activeRings; i++)
         {
@@ -129,8 +141,7 @@ public sealed class BeatDropEffectRenderer : IDisposable
         }
         _activeRings = writeRing;
 
-        // Advance velocity sparks with quadratic aerodynamic drag
-        var drag = MathF.Exp(-dt * 2.15f);
+        var drag = MathF.Exp(-dt * 1.85f);
         var writeSpark = 0;
         for (var i = 0; i < _activeSparks; i++)
         {
@@ -143,6 +154,19 @@ public sealed class BeatDropEffectRenderer : IDisposable
 
             sp.PrevX = sp.X;
             sp.PrevY = sp.Y;
+
+            // Gentle rotational curl so sparks spiral like euphoric stadium embers
+            if (MathF.Abs(sp.SwirlRadPerSec) > 0.001f)
+            {
+                var angleStep = sp.SwirlRadPerSec * dt;
+                var c = MathF.Cos(angleStep);
+                var s = MathF.Sin(angleStep);
+                var rvx = (sp.Vx * c) - (sp.Vy * s);
+                var rvy = (sp.Vx * s) + (sp.Vy * c);
+                sp.Vx = rvx;
+                sp.Vy = rvy;
+            }
+
             sp.X += sp.Vx * dt;
             sp.Y += sp.Vy * dt;
             sp.Vx *= drag;
@@ -151,24 +175,41 @@ public sealed class BeatDropEffectRenderer : IDisposable
         }
         _activeSparks = writeSpark;
 
-        return _activeRings > 0 || _activeSparks > 0 || _lyricPunch > 0.002f || _bloomAlpha > 0.005f;
+        return _activeRings > 0 || _activeSparks > 0 || _lyricPunch > 0.002f || _bloomAlpha > 0.005f || audio.IsClimaxActive;
     }
 
-    public float GetLyricZoomMultiplier(in FrameRenderPacket packet)
+    public float GetLyricZoomMultiplier(in FrameRenderPacket packet) =>
+        GetLyricMotionTransform(in packet).Scale;
+
+    public (float Scale, float OffsetX, float OffsetY) GetLyricMotionTransform(in FrameRenderPacket packet)
     {
-        if (packet.ReducedMotion || !IsEnabled(in packet) || _lyricPunch <= 0.002f)
+        if (packet.ReducedMotion || !IsEnabled(in packet))
         {
-            return 1.0f;
+            return (1.0f, 0f, 0f);
         }
 
         var dropIntensity = ResolveDropIntensity(in packet);
-        var scaleBoost = 0.062f * _lyricPunch * dropIntensity;
-        if (packet.IsCompactCard || packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay)
+        var audio = packet.EffectiveAudioMetrics;
+        var scaleBoost = (0.115f * _lyricPunch * dropIntensity) +
+                         (audio.IsClimaxActive ? (audio.ClimaxIntensity * 0.025f * audio.BeatPulse * dropIntensity) : 0f);
+        var offsetX = 0f;
+        var offsetY = 0f;
+
+        // Crisp concert bass tremor during the first 360ms of drop impact (StageCanvas only)
+        if (_slamElapsedSec < 0.36f && packet.SurfaceMode == StageRenderSurfaceMode.StageCanvas && !packet.IsCompactCard)
         {
-            scaleBoost *= 0.45f;
+            var env = MathF.Exp(-9.5f * _slamElapsedSec) * dropIntensity;
+            offsetX = 4.2f * env * MathF.Sin(52f * _slamElapsedSec);
+            offsetY = 3.2f * env * MathF.Cos(64f * _slamElapsedSec);
         }
 
-        return Math.Clamp(1.0f + scaleBoost, 1.0f, 1.08f);
+        if (packet.IsCompactCard || packet.SurfaceMode == StageRenderSurfaceMode.DesktopOverlay)
+        {
+            scaleBoost *= 0.42f;
+        }
+
+        var scale = Math.Clamp(1.0f + scaleBoost, 1.0f, 1.14f);
+        return (scale, offsetX, offsetY);
     }
 
     public void RenderStageDrops(in StyleRenderContext context)
@@ -192,17 +233,25 @@ public sealed class BeatDropEffectRenderer : IDisposable
 
         var dropIntensity = ResolveDropIntensity(in packet);
         var intensityFactor = packet.IsCompactCard ? dropIntensity * 0.55f : dropIntensity;
+        var audio = packet.EffectiveAudioMetrics;
         var cx = w * 0.5f;
         var cy = h * 0.48f;
         var palette = packet.Palette;
         var canvas = context.Canvas;
 
-        // 1. Photosensitive-safe spotlight surge glow (capped <= 22% alpha)
+        // 1. Volumetric Arena Light Cones sweeping cleanly during Climax windows
+        var climaxLevel = MathF.Max(audio.IsClimaxActive ? audio.ClimaxIntensity : 0f, _lyricPunch * 0.85f);
+        if (!packet.IsCompactCard && climaxLevel > 0.05f)
+        {
+            DrawArenaLightCones(canvas, w, h, cx, cy, palette, climaxLevel * intensityFactor);
+        }
+
+        // 2. Photosensitive-safe spotlight surge bloom (capped <= 26% alpha)
         if (_bloomAlpha > 0.006f)
         {
-            var capped = Math.Clamp(_bloomAlpha * intensityFactor, 0f, 0.22f);
-            var radius = MathF.Max(w, h) * 0.68f;
-            _bloomColors[0] = palette.AccentColor1.ToSkColorWithAlpha(capped * 0.70f);
+            var capped = Math.Clamp(_bloomAlpha * intensityFactor, 0f, 0.26f);
+            var radius = MathF.Max(w, h) * 0.74f;
+            _bloomColors[0] = palette.AccentColor1.ToSkColorWithAlpha(capped * 0.78f);
             _bloomColors[1] = palette.AccentColor2.ToSkColorWithAlpha(capped);
             _bloomColors[2] = palette.AccentColor2.ToSkColorWithAlpha(0f);
 
@@ -224,46 +273,55 @@ public sealed class BeatDropEffectRenderer : IDisposable
             }
         }
 
-        // 2. Expanding concentric acoustic shockwave rings (blur-free multi-pass glow)
+        // 3. Expanding Dual-Layer Acoustic Shockwaves (outer plasma halo + white-hot wavefront)
         for (var i = 0; i < _activeRings; i++)
         {
             ref readonly var ring = ref _rings[i];
+            if (ring.Age < 0f)
+            {
+                continue;
+            }
+
             var p = Math.Clamp(ring.Age / Math.Max(0.05f, ring.DurationSec), 0f, 1f);
-            var eased = 1f - MathF.Pow(1f - p, 2.4f);
+            var eased = 1f - MathF.Pow(1f - p, 2.3f);
             var r = ring.StartRadius + ((ring.EndRadius - ring.StartRadius) * eased);
-            var fade = MathF.Pow(1f - p, 1.5f);
+            var fade = MathF.Pow(1f - p, 1.35f);
             var color = PickPaletteColor(palette, ring.ColorSlot);
 
-            _ringPaint.StrokeWidth = (packet.IsCompactCard ? 6f : 14f) * (1f - (p * 0.55f)) * MathF.Min(1.25f, intensityFactor);
-            _ringPaint.Color = color.ToSkColorWithAlpha(0.20f * fade * intensityFactor);
+            _ringPaint.StrokeWidth = (packet.IsCompactCard ? 8f : 22f) * (1f - (p * 0.5f)) * MathF.Min(1.3f, intensityFactor);
+            _ringPaint.Color = color.ToSkColorWithAlpha(0.24f * fade * intensityFactor);
             canvas.DrawCircle(cx, cy, r, _ringPaint);
 
-            _ringPaint.StrokeWidth = (packet.IsCompactCard ? 1.5f : 2.8f) * MathF.Min(1.25f, intensityFactor);
-            _ringPaint.Color = SKColors.White.WithAlpha((byte)Math.Clamp(MathF.Round(205f * fade * MathF.Min(1.1f, intensityFactor)), 0f, 255f));
+            _ringPaint.StrokeWidth = (packet.IsCompactCard ? 2.2f : 5.5f) * (1f - (p * 0.35f)) * MathF.Min(1.3f, intensityFactor);
+            _ringPaint.Color = palette.AccentColor2.ToSkColorWithAlpha(0.55f * fade * intensityFactor);
+            canvas.DrawCircle(cx, cy, r, _ringPaint);
+
+            _ringPaint.StrokeWidth = (packet.IsCompactCard ? 1.4f : 2.6f) * MathF.Min(1.25f, intensityFactor);
+            _ringPaint.Color = SKColors.White.WithAlpha((byte)Math.Clamp(MathF.Round(235f * fade * MathF.Min(1.15f, intensityFactor)), 0f, 255f));
             canvas.DrawCircle(cx, cy, r, _ringPaint);
         }
 
-        // 3. Radial supersonic spark burst
+        // 4. Radial Supersonic Swirling Ember Sparks
         for (var i = 0; i < _activeSparks; i++)
         {
             ref readonly var sp = ref _sparks[i];
             var p = Math.Clamp(sp.Age / Math.Max(0.05f, sp.LifeSec), 0f, 1f);
-            var alpha = (1f - p) * (1f - p) * MathF.Min(1.2f, intensityFactor);
+            var alpha = (1f - p) * (1f - p) * MathF.Min(1.3f, intensityFactor);
             if (alpha <= 0.02f)
             {
                 continue;
             }
 
             var color = PickPaletteColor(palette, sp.ColorSlot);
-            var tailDx = (sp.X - sp.PrevX) * 2.2f;
-            var tailDy = (sp.Y - sp.PrevY) * 2.2f;
+            var tailDx = (sp.X - sp.PrevX) * 3.1f;
+            var tailDy = (sp.Y - sp.PrevY) * 3.1f;
 
-            _sparkPaint.StrokeWidth = sp.Width * 2.1f;
-            _sparkPaint.Color = color.ToSkColorWithAlpha(0.36f * alpha);
+            _sparkPaint.StrokeWidth = sp.Width * 2.4f;
+            _sparkPaint.Color = color.ToSkColorWithAlpha(0.45f * alpha);
             canvas.DrawLine(sp.X - tailDx, sp.Y - tailDy, sp.X, sp.Y, _sparkPaint);
 
             _sparkPaint.StrokeWidth = sp.Width;
-            _sparkPaint.Color = SKColors.White.WithAlpha((byte)Math.Clamp(MathF.Round(235f * alpha), 0f, 255f));
+            _sparkPaint.Color = SKColors.White.WithAlpha((byte)Math.Clamp(MathF.Round(245f * alpha), 0f, 255f));
             canvas.DrawLine(sp.X - (tailDx * 0.45f), sp.Y - (tailDy * 0.45f), sp.X, sp.Y, _sparkPaint);
         }
     }
@@ -279,38 +337,94 @@ public sealed class BeatDropEffectRenderer : IDisposable
         _bloomPaint.Dispose();
         _ringPaint.Dispose();
         _sparkPaint.Dispose();
+        _conePath.Dispose();
+    }
+
+    private void DrawArenaLightCones(
+        SKCanvas canvas,
+        float w,
+        float h,
+        float cx,
+        float cy,
+        AlbumAccentPalette palette,
+        float strength)
+    {
+        var beamLen = MathF.Sqrt((w * w) + (h * h)) * 0.65f;
+        var coneSpreadRad = 0.085f + (0.045f * MathF.Min(1.2f, strength));
+        var peakAlpha = Math.Clamp(0.11f * strength, 0f, 0.20f);
+
+        for (var i = 0; i < SpotlightConeCount; i++)
+        {
+            var dirSign = (i % 2 == 0) ? 1f : -1f;
+            var baseAngle = (MathF.Tau * i / SpotlightConeCount) + (_beamSweepPhase * 0.45f * dirSign);
+            var a1 = baseAngle - coneSpreadRad;
+            var a2 = baseAngle + coneSpreadRad;
+
+            var x1 = cx + (MathF.Cos(a1) * beamLen);
+            var y1 = cy + (MathF.Sin(a1) * beamLen);
+            var x2 = cx + (MathF.Cos(a2) * beamLen);
+            var y2 = cy + (MathF.Sin(a2) * beamLen);
+            var midX = cx + (MathF.Cos(baseAngle) * beamLen);
+            var midY = cy + (MathF.Sin(baseAngle) * beamLen);
+
+            var color = PickPaletteColor(palette, (byte)(i % 3));
+            _beamColors[0] = color.ToSkColorWithAlpha(peakAlpha);
+            _beamColors[1] = color.ToSkColorWithAlpha(0f);
+
+            using var coneShader = SKShader.CreateLinearGradient(
+                new SKPoint(cx, cy),
+                new SKPoint(midX, midY),
+                _beamColors,
+                _beamStops,
+                SKShaderTileMode.Clamp);
+
+            _conePath.Rewind();
+            _conePath.MoveTo(cx, cy);
+            _conePath.LineTo(x1, y1);
+            _conePath.LineTo(x2, y2);
+            _conePath.Close();
+
+            _bloomPaint.Shader = coneShader;
+            _bloomPaint.Color = SKColors.White;
+            try
+            {
+                canvas.DrawPath(_conePath, _bloomPaint);
+            }
+            finally
+            {
+                _bloomPaint.Shader = null;
+            }
+        }
     }
 
     private void SpawnDropExplosion(float width, float height, bool isCompact, float intensity)
     {
         var cx = width * 0.5f;
         var cy = height * 0.48f;
-        var maxExtent = MathF.Sqrt((cx * cx) + (cy * cy)) * 1.08f;
+        var maxExtent = MathF.Sqrt((cx * cx) + (cy * cy)) * 1.15f;
 
-        // Spawn 3 staggered concentric shockwave rings
         _activeRings = 0;
-        for (var i = 0; i < 3 && _activeRings < MaxRings; i++)
+        for (var i = 0; i < 4 && _activeRings < MaxRings; i++)
         {
             _rings[_activeRings++] = new ShockwaveRing
             {
-                Age = -i * 0.09f,
-                DurationSec = 0.85f + (i * 0.24f),
-                StartRadius = MathF.Min(width, height) * (0.04f + (i * 0.03f)),
-                EndRadius = maxExtent * (0.88f + (i * 0.14f)),
-                ColorSlot = (byte)i
+                Age = -i * 0.08f,
+                DurationSec = 0.88f + (i * 0.22f),
+                StartRadius = MathF.Min(width, height) * (0.03f + (i * 0.025f)),
+                EndRadius = maxExtent * (0.85f + (i * 0.14f)),
+                ColorSlot = (byte)(i % 3)
             };
         }
 
-        // Launch radial supersonic sparks (capped cleanly for compact cards)
-        var sparkCount = isCompact ? 24 : MaxSparks;
+        var sparkCount = isCompact ? 30 : MaxSparks;
         _activeSparks = 0;
-        var baseSpeed = MathF.Max(width, height) * (0.58f + (0.28f * intensity));
+        var baseSpeed = MathF.Max(width, height) * (0.68f + (0.34f * intensity));
 
         for (var i = 0; i < sparkCount && _activeSparks < MaxSparks; i++)
         {
-            var angle = (MathF.PI * 2f * i / sparkCount) + ((NextFloat01() - 0.5f) * 0.22f);
-            var speed = baseSpeed * (0.45f + (0.75f * NextFloat01()));
-            var startOffset = MathF.Min(width, height) * (0.03f + (0.08f * NextFloat01()));
+            var angle = (MathF.Tau * i / sparkCount) + ((NextFloat01() - 0.5f) * 0.24f);
+            var speed = baseSpeed * (0.42f + (0.88f * NextFloat01()));
+            var startOffset = MathF.Min(width, height) * (0.02f + (0.07f * NextFloat01()));
             var sx = cx + (MathF.Cos(angle) * startOffset);
             var sy = cy + (MathF.Sin(angle) * startOffset);
 
@@ -322,9 +436,10 @@ public sealed class BeatDropEffectRenderer : IDisposable
                 PrevY = sy,
                 Vx = MathF.Cos(angle) * speed,
                 Vy = MathF.Sin(angle) * speed,
+                SwirlRadPerSec = (NextFloat01() - 0.5f) * 1.15f,
                 Age = 0f,
-                LifeSec = 1.15f + (1.15f * NextFloat01()),
-                Width = isCompact ? 1.2f : (1.5f + (NextFloat01() * 1.4f)),
+                LifeSec = 1.25f + (1.25f * NextFloat01()),
+                Width = isCompact ? 1.3f : (1.7f + (NextFloat01() * 1.7f)),
                 ColorSlot = (byte)(i % 3)
             };
         }

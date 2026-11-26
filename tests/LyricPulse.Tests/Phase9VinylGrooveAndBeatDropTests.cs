@@ -48,7 +48,11 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
             IsClimaxActive: climaxIntensity >= 0.15f);
     }
 
-    private static byte[] EncodePng(int width, int height, Func<int, int, SKColor> pixelAt)
+    private static byte[] EncodeCover(
+        int width,
+        int height,
+        SKEncodedImageFormat format,
+        Func<int, int, SKColor> pixelAt)
     {
         var info = new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul);
         using var surface = SKSurface.Create(info);
@@ -63,7 +67,7 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
 
         surface.Canvas.DrawBitmap(bmp, 0, 0);
         using var img = surface.Snapshot();
-        using var data = img.Encode(SKEncodedImageFormat.Png, 100);
+        using var data = img.Encode(format, 92);
         return data.ToArray();
     }
 
@@ -152,25 +156,25 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
     }
 
     [Fact]
-    public void AudioSpectrumAnalyzer_DetectsBuildupToSubBassDrop_RespectsCooldownAndResets()
+    public void AudioSpectrumAnalyzer_DetectsBuildupAndMasteredSubBassDrop_RespectsCooldownAndResets()
     {
         var analyzer = new AudioSpectrumAnalyzer(48_000) { DropSensitivity = 1.0f };
 
-        // 1. Pre-drop breakdown / riser (high-frequency shimmer, low sub-bass)
+        // 1. Mastered medium-level buildup (loud vocal/riser without sub-bass)
         AudioFrameMetrics buildupMetrics = null!;
         for (var i = 0; i < 18; i++)
         {
-            PushSineWavePcm(analyzer, freqHz: 4200.0, amplitude: 0.14f);
+            PushSineWavePcm(analyzer, freqHz: 3600.0, amplitude: 0.42f);
             buildupMetrics = analyzer.ComputeMetrics(i * 0.05, isPlaying: true, partyEnergy: 1.0f, dtSecondsOverride: 0.05f);
         }
 
         buildupMetrics.DropTrigger.Should().Be(0f);
 
-        // 2. Sudden 55 Hz heavy sub-bass + kick drop explosion
+        // 2. Sudden 55 Hz sub-bass drop surge (even at similar mastered LUFS ceiling)
         AudioFrameMetrics dropMetrics = null!;
         for (var i = 0; i < 4; i++)
         {
-            PushSineWavePcm(analyzer, freqHz: 55.0, amplitude: 0.92f);
+            PushSineWavePcm(analyzer, freqHz: 55.0, amplitude: 0.62f);
             dropMetrics = analyzer.ComputeMetrics(1.0 + (i * 0.02), isPlaying: true, partyEnergy: 1.0f, dtSecondsOverride: 0.02f);
         }
 
@@ -178,7 +182,7 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
         dropMetrics.ClimaxIntensity.Should().BeGreaterThan(0.75f);
         dropMetrics.IsClimaxActive.Should().BeTrue();
 
-        // 3. Advancing past climax resets cleanly & ResetBeatDropState clears timers
+        // 3. ResetBeatDropState clears accumulators cleanly
         analyzer.ResetBeatDropState();
         PushSineWavePcm(analyzer, freqHz: 440.0, amplitude: 0.10f);
         var postReset = analyzer.ComputeMetrics(2.0, isPlaying: true, partyEnergy: 1.0f, dtSecondsOverride: 0.02f);
@@ -193,7 +197,7 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
     }
 
     [Fact]
-    public void BeatDropEffectRenderer_SpawnsStageExplosion_SkipsReducedMotion_AndPreservesDesktopCorners()
+    public void BeatDropEffectRenderer_SpawnsArenaStageExplosionAndTremor_SkipsReducedMotion_AndPreservesDesktopCorners()
     {
         var doc = new DemoSongProvider(new LyricsParser(), new TitleNormalizer()).GetDemoDocument();
         using var fonts = new FontAssetRegistry();
@@ -207,9 +211,10 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
         var triggerPkt = BuildPacket(doc, settingsOn, StageRenderSurfaceMode.StageCanvas, TimeSpan.FromSeconds(1.5), CreateAudio(dropTrigger: 1.0f, climaxIntensity: 1.0f));
 
         dropFx.Advance(in triggerPkt).Should().BeTrue();
-        dropFx.GetLyricZoomMultiplier(in triggerPkt).Should().BeGreaterThan(1.01f);
+        var (slamScale, dx, dy) = dropFx.GetLyricMotionTransform(in triggerPkt);
+        slamScale.Should().BeGreaterThan(1.04f);
+        (MathF.Abs(dx) + MathF.Abs(dy)).Should().BeGreaterThan(0.1f);
 
-        // Advance a couple frames so shockwaves & sparks expand outward
         for (var i = 0; i < 4; i++)
         {
             var stepPkt = BuildPacket(doc, settingsOn, StageRenderSurfaceMode.StageCanvas, TimeSpan.FromSeconds(1.5 + (i * 0.016)), CreateAudio(dropTrigger: 0f, climaxIntensity: 0.9f), renderTime: 2.0 + (i * 0.02));
@@ -221,7 +226,7 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
         var stageCtx = new StyleRenderContext(stageSurf.Canvas, null, fonts, shaders, pool, legibility, triggerPkt, false, false);
         dropFx.RenderStageDrops(in stageCtx);
         using var stageBmp = SKBitmap.FromImage(stageSurf.Snapshot());
-        CountLitPixels(stageBmp).Should().BeGreaterThan(500);
+        CountLitPixels(stageBmp).Should().BeGreaterThan(1200, "arena light cones, shockwaves, and 110 sparks should richly energize StageCanvas");
 
         // DesktopOverlay skips full-screen drops so all 4 corners remain strictly transparent
         var desktopPkt = BuildPacket(doc, settingsOn, StageRenderSurfaceMode.DesktopOverlay, TimeSpan.FromSeconds(1.5), CreateAudio(dropTrigger: 1.0f, climaxIntensity: 1.0f));
@@ -239,7 +244,7 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
     }
 
     [Fact]
-    public async Task VinylGrooveStyleRenderer_RendersAlbumArtAndMoodFallback_WithTransparentDesktopCorners()
+    public async Task VinylGrooveStyleRenderer_DecodesJpegCoverArtIntoCenterAndRenders3DText_WithTransparentDesktopCorners()
     {
         using var matcher = new StarterLexiconVisualMatcher();
         await matcher.InitializeAsync();
@@ -254,12 +259,13 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
         using var legibility = new LegibilityPipeline();
         using var router = new LyricStyleRouter();
 
-        var coverBytes = EncodePng(96, 96, (x, y) => x < 48 ? new SKColor(232, 48, 96) : new SKColor(28, 178, 245));
-        var artPayload = new AlbumArtPayload("vinyl-cover-v1", coverBytes);
+        // Non-square 360x240 JPEG (realistic browser/Spotify cover) exercises SKCodec scaled center-crop decode
+        var jpegCoverBytes = EncodeCover(360, 240, SKEncodedImageFormat.Jpeg, (x, y) => x < 180 ? new SKColor(238, 42, 92) : new SKColor(22, 186, 248));
+        var artPayload = new AlbumArtPayload("vinyl-jpeg-cover-v2", jpegCoverBytes);
         var info = new SKImageInfo(640, 360, SKColorType.Bgra8888, SKAlphaType.Premul);
         var settings = AppSettings.Default with { ActiveStyle = OverlayStyleId.VinylGroove, StageBackdropMode = StageBackdropMode.AmbientPartyMesh };
 
-        // 1. With AlbumArt center label
+        // 1. Live JPEG album cover in center of platter + 3D perspective text on right
         FrameRenderPacket artPkt = null!;
         for (var i = 0; i < 8; i++)
         {
@@ -271,17 +277,23 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
         var artCtx = new StyleRenderContext(artSurf.Canvas, null, fonts, shaders, pool, legibility, artPkt, false, false);
         router.Render(in artCtx);
         using var artBmp = SKBitmap.FromImage(artSurf.Snapshot());
-        CountLitPixels(artBmp).Should().BeGreaterThan(600);
+        CountLitPixels(artBmp).Should().BeGreaterThan(700);
         var artHash = Convert.ToHexString(SHA256.HashData(artBmp.GetPixelSpan()));
 
-        // 2. Without AlbumArt -> procedural studio record label + TrackMoodVisual emblem
+        // Verify platter center region actually displays bright pixels from decoded cover art
+        var platterCenterX = (int)(640 * 0.28f);
+        var platterCenterY = (int)(360 * 0.50f);
+        var sampleAboveSpindle = artBmp.GetPixel(platterCenterX, platterCenterY - 22);
+        (sampleAboveSpindle.Red + sampleAboveSpindle.Green + sampleAboveSpindle.Blue).Should().BeGreaterThan(90);
+
+        // 2. Without AlbumArt -> procedural sleeve cover + TrackMoodVisual emblem
         var fallbackPkt = BuildPacket(demoDoc, settings, StageRenderSurfaceMode.StageCanvas, TimeSpan.FromSeconds(25.7), CreateAudio(), albumArt: null, moodVisual, renderTime: 1.25);
         router.AdvancePhysics(in fallbackPkt);
         using var fbSurf = SKSurface.Create(info);
         var fbCtx = new StyleRenderContext(fbSurf.Canvas, null, fonts, shaders, pool, legibility, fallbackPkt, false, false);
         router.Render(in fbCtx);
         using var fbBmp = SKBitmap.FromImage(fbSurf.Snapshot());
-        CountLitPixels(fbBmp).Should().BeGreaterThan(600);
+        CountLitPixels(fbBmp).Should().BeGreaterThan(700);
         Convert.ToHexString(SHA256.HashData(fbBmp.GetPixelSpan())).Should().NotBe(artHash);
 
         // 3. DesktopOverlay preserves all 4 viewport corners alpha == 0
@@ -306,7 +318,7 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
         var rmCtx = new StyleRenderContext(rmSurf.Canvas, null, fonts, shaders, pool, legibility, rmPkt, false, false);
         router.Render(in rmCtx);
         using var rmBmp = SKBitmap.FromImage(rmSurf.Snapshot());
-        CountLitPixels(rmBmp).Should().BeGreaterThan(500);
+        CountLitPixels(rmBmp).Should().BeGreaterThan(600);
     }
 
     [Fact]
