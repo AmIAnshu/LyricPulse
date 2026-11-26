@@ -228,6 +228,41 @@ public sealed class Phase4V2EffectsTests
             using var bmp = SKBitmap.FromImage(desktopSurf.Snapshot());
             CountLitPixels(bmp, out _).Should().Be(0);
         }
+
+        // Adjustable EdgeGlowThickness increases beam footprint while keeping center unobstructed
+        int thinCount;
+        int thickCount;
+        using (var thinSurf = SKSurface.Create(info))
+        {
+            thinSurf.Canvas.Clear(SKColors.Transparent);
+            var pkt = CreatePacket(
+                AppSettings.Default with { EdgeGlowMode = EdgeGlowMode.NeonRush, EdgeGlowIntensity = 1.0f, EdgeGlowThickness = 0.45f, EdgeGlowSpeed = 0.50f },
+                StageRenderSurfaceMode.StageCanvas,
+                audio,
+                bottomFadeToBlack: false);
+            var ctx = new StyleRenderContext(thinSurf.Canvas, null, fonts, shaders, pool, legibility, pkt, false, false);
+            edgeGlow.Render(in ctx);
+            using var bmp = SKBitmap.FromImage(thinSurf.Snapshot());
+            thinCount = CountLitPixels(bmp, out _);
+            bmp.GetPixel(320, 180).Alpha.Should().Be(0);
+        }
+
+        using (var thickSurf = SKSurface.Create(info))
+        {
+            thickSurf.Canvas.Clear(SKColors.Transparent);
+            var pkt = CreatePacket(
+                AppSettings.Default with { EdgeGlowMode = EdgeGlowMode.NeonRush, EdgeGlowIntensity = 1.0f, EdgeGlowThickness = 2.20f, EdgeGlowSpeed = 0.50f },
+                StageRenderSurfaceMode.StageCanvas,
+                audio,
+                bottomFadeToBlack: false);
+            var ctx = new StyleRenderContext(thickSurf.Canvas, null, fonts, shaders, pool, legibility, pkt, false, false);
+            edgeGlow.Render(in ctx);
+            using var bmp = SKBitmap.FromImage(thickSurf.Snapshot());
+            thickCount = CountLitPixels(bmp, out _);
+            bmp.GetPixel(320, 180).Alpha.Should().Be(0);
+        }
+
+        thickCount.Should().BeGreaterThan(thinCount);
     }
 
     [Fact]

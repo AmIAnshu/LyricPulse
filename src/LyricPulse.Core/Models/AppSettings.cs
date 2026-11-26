@@ -111,6 +111,12 @@ public sealed record AppSettings
     public const float MinGlowIntensity = 0.2f;
     public const float MaxGlowIntensity = 1.5f;
     public const float DefaultEdgeGlowIntensity = 0.90f;
+    public const float MinEdgeGlowSpeed = 0.20f;
+    public const float MaxEdgeGlowSpeed = 2.50f;
+    public const float DefaultEdgeGlowSpeed = 0.70f;
+    public const float MinEdgeGlowThickness = 0.40f;
+    public const float MaxEdgeGlowThickness = 2.50f;
+    public const float DefaultEdgeGlowThickness = 1.35f;
     public const float MinVisualizerIntensity = 0.2f;
     public const float MaxVisualizerIntensity = 1.5f;
     public const float DefaultVisualizerIntensity = 0.75f;
@@ -169,6 +175,8 @@ public sealed record AppSettings
     public bool DesktopOverlayEnabled { get; init; }
     public EdgeGlowMode EdgeGlowMode { get; init; } = EdgeGlowMode.NeonRush;
     public float EdgeGlowIntensity { get; init; } = DefaultEdgeGlowIntensity;
+    public float EdgeGlowSpeed { get; init; } = DefaultEdgeGlowSpeed;
+    public float EdgeGlowThickness { get; init; } = DefaultEdgeGlowThickness;
     public AudioVisualizerMode AudioVisualizerMode { get; init; } = AudioVisualizerMode.RadialHalo;
     public float AudioVisualizerIntensity { get; init; } = DefaultVisualizerIntensity;
 
@@ -219,6 +227,12 @@ public sealed record AppSettings
         var normalizedEdgeGlowIntensity = float.IsFinite(EdgeGlowIntensity)
             ? Math.Clamp(EdgeGlowIntensity, MinGlowIntensity, MaxGlowIntensity)
             : DefaultEdgeGlowIntensity;
+        var normalizedEdgeGlowSpeed = !float.IsFinite(EdgeGlowSpeed) || EdgeGlowSpeed <= 0f
+            ? DefaultEdgeGlowSpeed
+            : Math.Clamp(EdgeGlowSpeed, MinEdgeGlowSpeed, MaxEdgeGlowSpeed);
+        var normalizedEdgeGlowThickness = !float.IsFinite(EdgeGlowThickness) || EdgeGlowThickness <= 0f
+            ? DefaultEdgeGlowThickness
+            : Math.Clamp(EdgeGlowThickness, MinEdgeGlowThickness, MaxEdgeGlowThickness);
         var normalizedVisualizerMode = Enum.IsDefined(AudioVisualizerMode)
             ? AudioVisualizerMode
             : AudioVisualizerMode.RadialHalo;
@@ -251,6 +265,8 @@ public sealed record AppSettings
             FullscreenStageScale = normalizedStageScale,
             EdgeGlowMode = normalizedEdgeGlowMode,
             EdgeGlowIntensity = normalizedEdgeGlowIntensity,
+            EdgeGlowSpeed = normalizedEdgeGlowSpeed,
+            EdgeGlowThickness = normalizedEdgeGlowThickness,
             AudioVisualizerMode = normalizedVisualizerMode,
             AudioVisualizerIntensity = normalizedVisualizerIntensity,
             PerDisplayBounds = bounds,

@@ -798,6 +798,7 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
     public bool IsEdgeGlowBeatPulse => EdgeGlowMode == EdgeGlowMode.BeatPulse;
     public bool IsEdgeGlowNeonRim => EdgeGlowMode == EdgeGlowMode.NeonRim;
     public bool IsEdgeGlowNeonRush => EdgeGlowMode == EdgeGlowMode.NeonRush;
+    public bool IsEdgeGlowActive => EdgeGlowMode != EdgeGlowMode.Off;
 
     public int EdgeGlowIntensityPercent
     {
@@ -808,6 +809,32 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
             if (Math.Abs(_snapshot.Settings.EdgeGlowIntensity - clamped) > 0.01f)
             {
                 _ = SafeRunAsync(() => _runtime.SetEdgeGlowIntensityAsync(clamped));
+            }
+        }
+    }
+
+    public int EdgeGlowSpeedPercent
+    {
+        get => (int)Math.Round(_snapshot.Settings.EdgeGlowSpeed * 100f);
+        set
+        {
+            var clamped = Math.Clamp(value, 20, 250) / 100f;
+            if (Math.Abs(_snapshot.Settings.EdgeGlowSpeed - clamped) > 0.01f)
+            {
+                _ = SafeRunAsync(() => _runtime.SetEdgeGlowSpeedAsync(clamped));
+            }
+        }
+    }
+
+    public int EdgeGlowThicknessPercent
+    {
+        get => (int)Math.Round(_snapshot.Settings.EdgeGlowThickness * 100f);
+        set
+        {
+            var clamped = Math.Clamp(value, 40, 250) / 100f;
+            if (Math.Abs(_snapshot.Settings.EdgeGlowThickness - clamped) > 0.01f)
+            {
+                _ = SafeRunAsync(() => _runtime.SetEdgeGlowThicknessAsync(clamped));
             }
         }
     }
@@ -1083,7 +1110,10 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(IsEdgeGlowBeatPulse));
         OnPropertyChanged(nameof(IsEdgeGlowNeonRim));
         OnPropertyChanged(nameof(IsEdgeGlowNeonRush));
+        OnPropertyChanged(nameof(IsEdgeGlowActive));
         OnPropertyChanged(nameof(EdgeGlowIntensityPercent));
+        OnPropertyChanged(nameof(EdgeGlowSpeedPercent));
+        OnPropertyChanged(nameof(EdgeGlowThicknessPercent));
         OnPropertyChanged(nameof(AudioVisualizerMode));
         OnPropertyChanged(nameof(IsVisNone));
         OnPropertyChanged(nameof(IsVisSpectrumBars));

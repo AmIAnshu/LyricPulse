@@ -279,6 +279,30 @@
           <Slider Minimum="0" Maximum="150" TickFrequency="5" IsSnapToTickEnabled="True"
                   Value="{Binding EdgeGlowIntensityPercent}"
                   AutomationProperties.Name="Edges glow intensity"/>
+
+          <StackPanel IsVisible="{Binding IsEdgeGlowActive}" Spacing="6">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="Glow Thickness &amp; Depth" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+              <TextBlock Grid.Column="1" Text="{Binding EdgeGlowThicknessPercent, StringFormat='{}{0}%'}"
+                         FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="12"
+                         Foreground="{DynamicResource LpAccentTextBrush}"/>
+            </Grid>
+            <Slider Minimum="40" Maximum="250" TickFrequency="5" IsSnapToTickEnabled="True"
+                    Value="{Binding EdgeGlowThicknessPercent}"
+                    AutomationProperties.Name="Edge glow thickness"/>
+          </StackPanel>
+
+          <StackPanel IsVisible="{Binding IsEdgeGlowNeonRush}" Spacing="6">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Text="Neon Rush Speed" FontSize="13" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+              <TextBlock Grid.Column="1" Text="{Binding EdgeGlowSpeedPercent, StringFormat='{}{0}%'}"
+                         FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="12"
+                         Foreground="{DynamicResource LpAccentTextBrush}"/>
+            </Grid>
+            <Slider Minimum="20" Maximum="250" TickFrequency="5" IsSnapToTickEnabled="True"
+                    Value="{Binding EdgeGlowSpeedPercent}"
+                    AutomationProperties.Name="Neon Rush speed"/>
+          </StackPanel>
         </StackPanel>
 
         <Border Height="1" Background="{DynamicResource LpBorderDefaultBrush}"/>

@@ -331,5 +331,22 @@ public sealed class Phase5StageAndSettingsTests
         await Task.Delay(60);
         vm.ApplySnapshot(runtime.SampleFrame());
         vm.IsEdgeGlowNeonRush.Should().BeTrue();
+        vm.IsEdgeGlowActive.Should().BeTrue();
+
+        // Speed and thickness sliders default cleanly and clamp bounds
+        vm.EdgeGlowSpeedPercent.Should().Be(70);
+        vm.EdgeGlowThicknessPercent.Should().Be(135);
+
+        vm.EdgeGlowSpeedPercent = 45;
+        vm.EdgeGlowThicknessPercent = 195;
+        await Task.Delay(60);
+        vm.ApplySnapshot(runtime.SampleFrame());
+        vm.EdgeGlowSpeedPercent.Should().Be(45);
+        vm.EdgeGlowThicknessPercent.Should().Be(195);
+
+        vm.SelectEdgeGlowModeCommand.Execute(EdgeGlowMode.Off);
+        await Task.Delay(60);
+        vm.ApplySnapshot(runtime.SampleFrame());
+        vm.IsEdgeGlowActive.Should().BeFalse();
     }
 }

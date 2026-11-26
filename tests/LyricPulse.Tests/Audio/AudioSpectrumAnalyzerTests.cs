@@ -79,6 +79,8 @@ public sealed class AudioSpectrumAnalyzerTests
         {
             EdgeGlowMode = EdgeGlowMode.NeonRim,
             EdgeGlowIntensity = 9.0f,
+            EdgeGlowSpeed = 9.0f,
+            EdgeGlowThickness = 0.1f,
             AudioVisualizerMode = AudioVisualizerMode.FluidWave,
             AudioVisualizerIntensity = -1.0f
         };
@@ -86,13 +88,22 @@ public sealed class AudioSpectrumAnalyzerTests
         var normalized = raw.ValidateAndNormalize();
         normalized.EdgeGlowMode.Should().Be(EdgeGlowMode.NeonRim);
         normalized.EdgeGlowIntensity.Should().Be(AppSettings.MaxGlowIntensity);
+        normalized.EdgeGlowSpeed.Should().Be(AppSettings.MaxEdgeGlowSpeed);
+        normalized.EdgeGlowThickness.Should().Be(AppSettings.MinEdgeGlowThickness);
         normalized.AudioVisualizerMode.Should().Be(AudioVisualizerMode.FluidWave);
         normalized.AudioVisualizerIntensity.Should().Be(AppSettings.MinVisualizerIntensity);
+
+        // Uninitialized 0f fields on upgraded JSON snap to v2.4 defaults cleanly
+        var upgraded = (AppSettings.Default with { EdgeGlowSpeed = 0f, EdgeGlowThickness = 0f }).ValidateAndNormalize();
+        upgraded.EdgeGlowSpeed.Should().Be(AppSettings.DefaultEdgeGlowSpeed);
+        upgraded.EdgeGlowThickness.Should().Be(AppSettings.DefaultEdgeGlowThickness);
 
         var json = JsonSerializer.Serialize(normalized, LyricPulseJsonContext.Default.AppSettings);
         var roundTripped = JsonSerializer.Deserialize(json, LyricPulseJsonContext.Default.AppSettings);
         roundTripped.Should().NotBeNull();
         roundTripped!.EdgeGlowMode.Should().Be(EdgeGlowMode.NeonRim);
+        roundTripped.EdgeGlowSpeed.Should().Be(AppSettings.MaxEdgeGlowSpeed);
+        roundTripped.EdgeGlowThickness.Should().Be(AppSettings.MinEdgeGlowThickness);
         roundTripped.AudioVisualizerMode.Should().Be(AudioVisualizerMode.FluidWave);
     }
 }

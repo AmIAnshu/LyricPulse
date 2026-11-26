@@ -183,6 +183,12 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
     public Task SetEdgeGlowIntensityAsync(float intensity, CancellationToken cancellationToken = default) =>
         UpdateSettingsAsync(s => s with { EdgeGlowIntensity = intensity }, cancellationToken);
 
+    public Task SetEdgeGlowSpeedAsync(float speed, CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { EdgeGlowSpeed = speed }, cancellationToken);
+
+    public Task SetEdgeGlowThicknessAsync(float thickness, CancellationToken cancellationToken = default) =>
+        UpdateSettingsAsync(s => s with { EdgeGlowThickness = thickness }, cancellationToken);
+
     public Task SetAudioVisualizerModeAsync(AudioVisualizerMode mode, CancellationToken cancellationToken = default) =>
         UpdateSettingsAsync(s => s with { AudioVisualizerMode = mode }, cancellationToken);
 

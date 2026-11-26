@@ -581,6 +581,22 @@
               <TextBlock Grid.Column="1" Text="{Binding EdgeGlowIntensityPercent, StringFormat='{}{0}%'}" FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="12" Foreground="{DynamicResource LpAccentTextBrush}"/>
             </Grid>
             <Slider Minimum="0" Maximum="150" TickFrequency="5" IsSnapToTickEnabled="True" Value="{Binding EdgeGlowIntensityPercent}"/>
+
+            <StackPanel IsVisible="{Binding IsEdgeGlowActive}" Spacing="6">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="Glow Thickness" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
+                <TextBlock Grid.Column="1" Text="{Binding EdgeGlowThicknessPercent, StringFormat='{}{0}%'}" FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="12" Foreground="{DynamicResource LpAccentTextBrush}"/>
+              </Grid>
+              <Slider Minimum="40" Maximum="250" TickFrequency="5" IsSnapToTickEnabled="True" Value="{Binding EdgeGlowThicknessPercent}"/>
+            </StackPanel>
+
+            <StackPanel IsVisible="{Binding IsEdgeGlowNeonRush}" Spacing="6">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="Neon Rush Speed" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
+                <TextBlock Grid.Column="1" Text="{Binding EdgeGlowSpeedPercent, StringFormat='{}{0}%'}" FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="12" Foreground="{DynamicResource LpAccentTextBrush}"/>
+              </Grid>
+              <Slider Minimum="20" Maximum="250" TickFrequency="5" IsSnapToTickEnabled="True" Value="{Binding EdgeGlowSpeedPercent}"/>
+            </StackPanel>
           </StackPanel>
 
           <!-- Diagnostics & Sync Offset Flyout -->

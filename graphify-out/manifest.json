@@ -330,9 +330,9 @@
     "semantic_hash": ""
   },
   "src/LyricPulse.Core/Models/AppSettings.cs": {
-    "mtime": 1795677184.2164586,
-    "seen": 1795677811.8729198,
-    "ast_hash": "d28f7b66b164d446d98b9abce85c522d",
+    "mtime": 1795678223.1895678,
+    "seen": 1795678420.8132303,
+    "ast_hash": "7876a2a781d629808500f6c62f8543c1",
     "semantic_hash": ""
   },
   "src/LyricPulse.Core/Models/ColorModels.cs": {
@@ -372,9 +372,9 @@
     "semantic_hash": ""
   },
   "src/LyricPulse.Core/Runtime/OverlayRuntimeController.cs": {
-    "mtime": 1795677265.488005,
-    "seen": 1795677811.8729198,
-    "ast_hash": "ada4d3871ff9341ff1b499b55f7487a1",
+    "mtime": 1795678224.9889584,
+    "seen": 1795678420.8132303,
+    "ast_hash": "1d940cc9db8a3e73f08c6a72d9bad186",
     "semantic_hash": ""
   },
   "src/LyricPulse.Core/Runtime/OverlaySnapshotBuilder.cs": {
@@ -714,9 +714,9 @@
     "semantic_hash": ""
   },
   "src/LyricPulse.UI/ViewModels/StageViewModel.cs": {
-    "mtime": 1795677323.3482594,
-    "seen": 1795677811.8729198,
-    "ast_hash": "a4d2ddcd9f364843d53e2fb236985acd",
+    "mtime": 1795678230.1604583,
+    "seen": 1795678420.8132303,
+    "ast_hash": "a330abe2ad893596ddfe4033bda1659e",
     "semantic_hash": ""
   },
   "src/LyricPulse.UI/ViewModels/StyleCardViewModel.cs": {
@@ -936,9 +936,9 @@
     "semantic_hash": ""
   },
   "tests/LyricPulse.Tests/UI/Phase5StageAndSettingsTests.cs": {
-    "mtime": 1795677463.5483522,
-    "seen": 1795677811.8729198,
-    "ast_hash": "ec2c3a710222958f3bf279214e49d272",
+    "mtime": 1795678267.8416028,
+    "seen": 1795678420.8132303,
+    "ast_hash": "bfb4e9dfd003deb05b63d7f13d28e0ec",
     "semantic_hash": ""
   },
   "tests/LyricPulse.Tests/Visuals/StarterLexiconVisualMatcherTests.cs": {
@@ -972,9 +972,9 @@
     "semantic_hash": ""
   },
   ".planning/STATE.md": {
-    "mtime": 1795676438.9580054,
-    "seen": 1795677811.8729198,
-    "ast_hash": "2f02ec813d434217b6a849d644017579",
+    "mtime": 1795677827.059427,
+    "seen": 1795678420.8132303,
+    "ast_hash": "1eea2dc6bfec94bb466f481232e9bcc5",
     "semantic_hash": ""
   },
   ".planning/UI_AUDIT.md": {
@@ -1032,9 +1032,9 @@
     "semantic_hash": ""
   },
   "src/LyricPulse.Rendering/Styles/EdgeGlowRenderer.cs": {
-    "mtime": 1795677313.0157702,
-    "seen": 1795677811.8729198,
-    "ast_hash": "45d637deccf032c3139a2449e2f70db6",
+    "mtime": 1795678237.3123746,
+    "seen": 1795678420.8132303,
+    "ast_hash": "fef8019ef4a37602406e7b2ce4232be2",
     "semantic_hash": ""
   },
   "src/LyricPulse.Rendering/Styles/ReactiveVisualIconRenderer.cs": {
@@ -1044,15 +1044,15 @@
     "semantic_hash": ""
   },
   "tests/LyricPulse.Tests/Audio/AudioSpectrumAnalyzerTests.cs": {
-    "mtime": 1795639298.283481,
-    "seen": 1795640899.298149,
-    "ast_hash": "c7701dfc432f544a65cf5da13686ba24",
+    "mtime": 1795678263.6027029,
+    "seen": 1795678420.8132303,
+    "ast_hash": "9332b53f999fa39f9a4749cf05ead5cc",
     "semantic_hash": ""
   },
   "tests/LyricPulse.Tests/Rendering/Phase4V2EffectsTests.cs": {
-    "mtime": 1795677461.204815,
-    "seen": 1795677811.8729198,
-    "ast_hash": "7d42175174e3262df36fc1edbd64efe0",
+    "mtime": 1795678265.7393742,
+    "seen": 1795678420.8132303,
+    "ast_hash": "437e650787d696de929c9ba1065a56be",
     "semantic_hash": ""
   },
   "tests/LyricPulse.Tests/Rendering/ConstellationOverhaulTests.cs": {
