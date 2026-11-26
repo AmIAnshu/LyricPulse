@@ -46,6 +46,9 @@ public static class OverlayFrameAdapter
             : ComputeRecommendedHeroScale(surfaceMode, settings, safeW, safeH);
 
         var effectiveBackdrop = ResolveBackdropMode(surfaceMode, settings, stageBackdropOverride);
+        var effectivePalette = surfaceMode == StageRenderSurfaceMode.StageCanvas && settings.EdgeGlowMode == EdgeGlowMode.NeonRush
+            ? snapshot.ActivePalette with { ScrimTint = new RgbColor(0, 0, 0) }
+            : snapshot.ActivePalette;
         var effectiveOpacity = surfaceMode is StageRenderSurfaceMode.StageCanvas or StageRenderSurfaceMode.GalleryCard
             ? 1.0f
             : (float)Math.Clamp(settings.OverlayOpacity, AppSettings.MinOverlayOpacity, AppSettings.MaxOverlayOpacity);
@@ -63,7 +66,7 @@ public static class OverlayFrameAdapter
             ScrimIntensity: settings.ScrimIntensity,
             ActiveFontId: FontAssetRegistry.ResolveFontId(settings.FontFamily),
             BaseFontSizeDip: (float)settings.ComputeEffectiveFontSizeDip(),
-            Palette: snapshot.ActivePalette,
+            Palette: effectivePalette,
             BoundsConfig: bounds,
             SceneSnapshot: scene,
             PlaybackSnapshot: snapshot,

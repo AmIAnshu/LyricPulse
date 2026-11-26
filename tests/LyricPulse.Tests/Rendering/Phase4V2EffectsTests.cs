@@ -183,7 +183,7 @@ public sealed class Phase4V2EffectsTests
         var info = new SKImageInfo(640, 360, SKColorType.Bgra8888, SKAlphaType.Premul);
         var audio = CreateLiveAudioMetrics();
 
-        // Fullscreen / closed perimeter renders vivid beams while keeping center unobstructed
+        // Fullscreen / closed perimeter renders vivid beams while keeping center & interior purely unobstructed
         using (var surf = SKSurface.Create(info))
         {
             surf.Canvas.Clear(SKColors.Transparent);
@@ -196,8 +196,9 @@ public sealed class Phase4V2EffectsTests
             edgeGlow.Render(in ctx);
             using var bmp = SKBitmap.FromImage(surf.Snapshot());
             CountLitPixels(bmp, out _).Should().BeGreaterThan(200);
-            bmp.GetPixel(1, 1).Alpha.Should().BeGreaterThan(0);
             bmp.GetPixel(320, 180).Alpha.Should().Be(0);
+            bmp.GetPixel(220, 180).Alpha.Should().Be(0);
+            bmp.GetPixel(420, 180).Alpha.Should().Be(0);
         }
 
         // Windowed Top-U perimeter preserves bottomFadeToBlack so bottom row remains alpha=0
@@ -263,6 +264,36 @@ public sealed class Phase4V2EffectsTests
         }
 
         thickCount.Should().BeGreaterThan(thinCount);
+
+        // Full StageCanvas router pipeline with NeonRush clears backdrop to true #000000 pitch black
+        // and sets ScrimTint to #000000 so neither AmbientPartyMesh nor ScrimTint clouds the dark background
+        using var router = new LyricStyleRouter();
+        using var pitchSurf = SKSurface.Create(info);
+        var stagePkt = CreatePacket(
+            AppSettings.Default with
+            {
+                EdgeGlowMode = EdgeGlowMode.NeonRush,
+                StageBackdropMode = StageBackdropMode.AmbientPartyMesh,
+                AudioVisualizerMode = AudioVisualizerMode.None,
+                ScrimIntensity = ScrimIntensity.Strong
+            },
+            StageRenderSurfaceMode.StageCanvas,
+            audio,
+            bottomFadeToBlack: false);
+        stagePkt.Palette.ScrimTint.Should().Be(new RgbColor(0, 0, 0));
+        var emptyScenePkt = stagePkt with
+        {
+            PlaybackSnapshot = stagePkt.PlaybackSnapshot! with { PlaybackState = MediaPlaybackState.Stopped }
+        };
+        router.AdvancePhysics(in emptyScenePkt);
+        var routerCtx = new StyleRenderContext(pitchSurf.Canvas, null, fonts, shaders, pool, legibility, emptyScenePkt, false, false);
+        router.Render(in routerCtx);
+        using var pitchBmp = SKBitmap.FromImage(pitchSurf.Snapshot());
+        var centerPx = pitchBmp.GetPixel(320, 180);
+        centerPx.Red.Should().Be(0);
+        centerPx.Green.Should().Be(0);
+        centerPx.Blue.Should().Be(0);
+        centerPx.Alpha.Should().Be(255);
     }
 
     [Fact]

@@ -130,12 +130,18 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
                 _backdrop.Reset();
             }
 
-            var backdropActive = _backdrop.Advance(in packet);
+            var isNeonRushStage = IsNeonRushStage(in packet);
+            var backdropActive = !isNeonRushStage && _backdrop.Advance(in packet);
             _lastLifecycle = _lifecycle.Advance(in packet);
             var styleActive = _lastLifecycle.ShouldRenderLyrics && renderer.Advance(in packet, in _lastLifecycle);
             return backdropActive || _lastLifecycle.IsAnimating || styleActive;
         }
     }
+
+    private static bool IsNeonRushStage(in FrameRenderPacket packet) =>
+        packet.ShouldDrawStageBackdrop
+        && packet.SurfaceMode == StageRenderSurfaceMode.StageCanvas
+        && (packet.PlaybackSnapshot?.Settings.EdgeGlowMode ?? AppSettings.Default.EdgeGlowMode) == EdgeGlowMode.NeonRush;
 
     public void Render(in StyleRenderContext context)
     {
@@ -145,15 +151,21 @@ public sealed class LyricStyleRouter : ILyricSceneRenderer, IDisposable
 
             var canvas = context.Canvas;
             var packet = context.Packet;
+            var isNeonRushStage = IsNeonRushStage(in packet);
             if (!packet.ShouldDrawStageBackdrop)
             {
                 canvas.Clear(SKColors.Transparent);
             }
+            else if (isNeonRushStage)
+            {
+                // Pitch-black OLED canvas so only Neon Rush racing beams illuminate the perimeter
+                canvas.Clear(SKColors.Black);
+            }
 
             var lifecycle = _lastLifecycle;
 
-            // Stage Canvas / Gallery Card backdrop (automatically skipped on transparent DesktopOverlay!)
-            if (packet.ShouldDrawStageBackdrop)
+            // Stage Canvas / Gallery Card backdrop (skipped on transparent DesktopOverlay & pitch-black Neon Rush stage)
+            if (packet.ShouldDrawStageBackdrop && !isNeonRushStage)
             {
                 _backdrop.Render(in context);
             }

@@ -14,8 +14,8 @@ namespace LyricPulse.Rendering.Styles;
 /// </summary>
 public sealed class StageBackdropRenderer : IDisposable
 {
-    public static readonly SKColor PureBlackStageColor = new(0x05, 0x05, 0x08, 0xFF); // #050508
-    public static readonly SKColor ObsidianMeshBase = new(0x09, 0x0A, 0x10, 0xFF);    // #090A10
+    public static readonly SKColor PureBlackStageColor = SKColors.Black; // #000000 true OLED pitch black
+    public static readonly SKColor ObsidianMeshBase = new(0x09, 0x0A, 0x10, 0xFF); // #090A10
 
     private readonly SKPaint _fillPaint = new() { IsAntialias = true, Style = SKPaintStyle.Fill };
     private readonly SKColor[] _radialColors = new SKColor[3];
@@ -161,32 +161,10 @@ public sealed class StageBackdropRenderer : IDisposable
 
     private void DrawPureBlackBackdrop(SKCanvas canvas, SKRect rect, AlbumAccentPalette palette)
     {
+        _ = palette;
         _fillPaint.Shader = null;
         _fillPaint.Color = PureBlackStageColor;
         canvas.DrawRect(rect, _fillPaint);
-
-        var radius = MathF.Max(rect.Width, rect.Height) * 0.55f;
-        _radialColors[0] = palette.ScrimTint.ToSkColorWithAlpha(0.28f);
-        _radialColors[1] = palette.ScrimTint.ToSkColorWithAlpha(0.08f);
-        _radialColors[2] = SKColors.Transparent;
-
-        using var vignette = SKShader.CreateRadialGradient(
-            new SKPoint(rect.MidX, rect.MidY),
-            Math.Max(radius, 1f),
-            _radialColors,
-            _radialStops,
-            SKShaderTileMode.Clamp);
-
-        _fillPaint.Shader = vignette;
-        _fillPaint.Color = SKColors.White;
-        try
-        {
-            canvas.DrawRect(rect, _fillPaint);
-        }
-        finally
-        {
-            _fillPaint.Shader = null;
-        }
     }
 
     private void DrawStaticGradientFallback(

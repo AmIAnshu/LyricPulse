@@ -104,7 +104,14 @@ public sealed class EdgeGlowRenderer : IDisposable
 
         var canvas = context.Canvas;
 
-        // 1. Multi-stop silky perimeter edge washes
+        // Neon Rush keeps unlit borders & interior pitch black (#000000); only chasing beams glow around the bezel.
+        if (mode == EdgeGlowMode.NeonRush)
+        {
+            DrawNeonRushPerimeter(canvas, w, h, packet, palette, intensity, thicknessSetting);
+            return;
+        }
+
+        // 1. Multi-stop silky perimeter edge washes (SoftAmbient / BeatPulse / NeonRim)
         DrawEdgeBand(canvas, new SKRect(0f, 0f, w, reachY), new SKPoint(0f, 0f), new SKPoint(0f, reachY), cTop, alpha * 0.90f);
         if (!packet.BottomFadeToBlack)
         {
@@ -117,7 +124,7 @@ public sealed class EdgeGlowRenderer : IDisposable
         // 2. Soft corner bass blooms
         var minDim = MathF.Min(w, h);
         var cornerRadius = Math.Clamp(minDim * (0.24f + (_smoothedBass * 0.07f) + (thicknessSetting * 0.03f)), 32f, minDim * 0.36f);
-        var cornerAlpha = Math.Clamp(alpha * (mode == EdgeGlowMode.NeonRush ? 0.94f : 0.72f), 0f, 0.74f);
+        var cornerAlpha = Math.Clamp(alpha * 0.72f, 0f, 0.74f);
         DrawRadialBloom(canvas, 0f, 0f, cornerRadius, cTop, cornerAlpha);
         DrawRadialBloom(canvas, w, 0f, cornerRadius, cRight, cornerAlpha);
         if (!packet.BottomFadeToBlack)
@@ -126,12 +133,8 @@ public sealed class EdgeGlowRenderer : IDisposable
             DrawRadialBloom(canvas, w, h, cornerRadius, cBottom, cornerAlpha);
         }
 
-        // 3. Rim & Neon Rush liquid plasma perimeter
-        if (mode == EdgeGlowMode.NeonRush)
-        {
-            DrawNeonRushPerimeter(canvas, w, h, packet, palette, intensity, thicknessSetting);
-        }
-        else if (rimAlpha > 0.01f && !packet.BottomFadeToBlack)
+        // 3. Rim strokes for BeatPulse / NeonRim
+        if (rimAlpha > 0.01f && !packet.BottomFadeToBlack)
         {
             var outerAlpha = Math.Clamp(rimAlpha * 0.30f * intensity * packet.GlobalOpacity, 0f, 0.50f);
             _rimPaint.Shader = null;
@@ -211,8 +214,8 @@ public sealed class EdgeGlowRenderer : IDisposable
     {
         var isOpenArch = packet.BottomFadeToBlack;
         var minDim = MathF.Min(w, h);
-        var inset = Math.Clamp(4.0f * thickness, 3.0f, Math.Min(12.0f, minDim * 0.06f));
-        var cornerR = Math.Clamp(12f + (thickness * 4f), 8f, minDim * 0.08f);
+        var inset = Math.Clamp(2.5f * thickness, 2.0f, Math.Min(8.0f, minDim * 0.04f));
+        var cornerR = Math.Clamp(8f + (thickness * 2.5f), 5f, minDim * 0.05f);
 
         _perimeterPath.Rewind();
         if (isOpenArch)
@@ -247,17 +250,7 @@ public sealed class EdgeGlowRenderer : IDisposable
 
         try
         {
-            // Continuous frosted glass diffuser rail so racing ribbons live inside a luminous frame
-            _rimPaint.Shader = null;
-            _rimPaint.StrokeWidth = Math.Clamp(18.0f * thickness, 7f, 44f);
-            _rimPaint.Color = palette.AccentColor2.ToSkColorWithAlpha(Math.Clamp(0.09f * intensity * packet.GlobalOpacity, 0f, 0.22f));
-            canvas.DrawPath(_perimeterPath, _rimPaint);
-
-            _rimPaint.StrokeWidth = Math.Clamp(3.2f * thickness, 1.5f, 8.5f);
-            _rimPaint.Color = palette.AccentColor1.ToSkColorWithAlpha(Math.Clamp(0.18f * intensity * packet.GlobalOpacity, 0f, 0.36f));
-            canvas.DrawPath(_perimeterPath, _rimPaint);
-
-            // Asymmetric lush beam lengths (38% and 32% of perimeter) for graceful liquid sweep
+            // Asymmetric lush beam lengths (38% and 32% of perimeter) while leaving unlit borders pure black #000000
             var beamLen1 = totalLen * (0.38f + (_smoothedBeat * 0.08f));
             var beamLen2 = totalLen * (0.32f + (_smoothedBass * 0.07f));
 
@@ -315,13 +308,13 @@ public sealed class EdgeGlowRenderer : IDisposable
         var clampedHead = Math.Clamp(headDist, 0f, totalLen);
         _pathMeasure.GetPosition(clampedHead, out var headPos);
 
-        // 1. Dynamic inward light spill tracking the beam head across the glass stage
+        // 1. Tight perimeter-hugged inward light spill strictly around active beam heads (center stays pitch black)
         var minDim = MathF.Min(w, h);
         var poolRadius = Math.Clamp(
-            minDim * (0.20f + (thickness * 0.055f) + (_smoothedBeat * 0.04f)),
-            36f,
-            minDim * 0.42f);
-        DrawRadialBloom(canvas, headPos.X, headPos.Y, poolRadius, neonColor, Math.Clamp(0.28f * opacityIntensity, 0f, 0.42f));
+            minDim * (0.11f + (thickness * 0.03f) + (_smoothedBeat * 0.025f)),
+            24f,
+            minDim * 0.22f);
+        DrawRadialBloom(canvas, headPos.X, headPos.Y, poolRadius, neonColor, Math.Clamp(0.20f * opacityIntensity, 0f, 0.32f));
 
         // 2. Tapered 8-segment multi-layer plasma trail (feathers smoothly to 0% alpha & thin tip)
         var coreWidthBase = (28.0f + (_smoothedBeat * 12.0f) + (_smoothedBass * 6.0f)) * thickness * Math.Clamp(opacityIntensity, 0.45f, 1.35f);
