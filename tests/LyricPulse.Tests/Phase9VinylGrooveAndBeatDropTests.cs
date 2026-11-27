@@ -1057,6 +1057,396 @@ public sealed class Phase9VinylGrooveAndBeatDropTests
         fullCrop.Width.Should().BeApproximately(200f, 0.1f, "normal full-bleed cover must retain full bounds");
     }
 
+    [Fact]
+    public void Win32StageChromeAndGlassStage3DTypography_ExecuteCleanlyWithoutAllocOrErrors()
+    {
+        // Zero-handle guard works safely without crashing in headless test runners
+        Win32OverlayInterop.ApplyStageWindowDarkChrome(0);
+
+        var doc = new DemoSongProvider(new LyricsParser(), new TitleNormalizer()).GetDemoDocument();
+        using var fonts = new FontAssetRegistry();
+        using var shaders = new ShaderLibrary();
+        using var pool = new OffscreenSurfacePool();
+        using var legibility = new LegibilityPipeline();
+        using var router = new LyricStyleRouter();
+
+        var settings = AppSettings.Default with
+        {
+            ActiveStyle = OverlayStyleId.VinylGroove,
+            StageBackdropMode = StageBackdropMode.AlbumArtBlur
+        };
+
+        // Transition across line boundary so scroll spring, word lift spring, 3D extrusion & DOF blurs exercise cleanly
+        var snap1 = new OverlayPlaybackSnapshot(
+            Track: doc.Track,
+            Document: doc,
+            LyricsStatus: LyricsStatus.Synced,
+            PlaybackState: MediaPlaybackState.Playing,
+            PlayerKind: MediaPlayerKind.Unknown,
+            SourceAppUserModelId: "Demo",
+            RawPosition: TimeSpan.FromSeconds(1.5),
+            EffectivePosition: TimeSpan.FromSeconds(1.5),
+            ActiveSlice: ActiveLyricSlice.Resolve(doc, TimeSpan.FromSeconds(1.5)),
+            ActivePalette: AlbumAccentPalette.DemoNeonHorizon,
+            TargetPalette: AlbumAccentPalette.DemoNeonHorizon,
+            TimingOffset: new TimingOffsetState(null, TimeSpan.Zero, false),
+            Settings: settings,
+            IsPlaying: true,
+            IsDemoMode: true,
+            IsFullscreenHidden: false,
+            PausedSinceUtc: null,
+            LastOffsetNudgeUtc: null,
+            TrackGeneration: 1,
+            SeekGeneration: 0,
+            AudioMetrics: CreateAudio());
+
+        for (var step = 0; step < 12; step++)
+        {
+            var warmupPkt = OverlayFrameAdapter.FromPlaybackSnapshot(snap1, 1280f, 720f, 1.0f, 1.0 + (step * 0.04), 0.04f, surfaceMode: StageRenderSurfaceMode.StageCanvas);
+            router.AdvancePhysics(in warmupPkt);
+        }
+
+        var snap2 = snap1 with
+        {
+            RawPosition = TimeSpan.FromSeconds(6.2),
+            EffectivePosition = TimeSpan.FromSeconds(6.2),
+            ActiveSlice = ActiveLyricSlice.Resolve(doc, TimeSpan.FromSeconds(6.2))
+        };
+        var pkt2 = OverlayFrameAdapter.FromPlaybackSnapshot(snap2, 1280f, 720f, 1.0f, 2.2, 0.03f, surfaceMode: StageRenderSurfaceMode.StageCanvas);
+        router.AdvancePhysics(in pkt2).Should().BeTrue("carousel scroll & 3D word springs stay active after line transition");
+
+        for (var step = 1; step <= 4; step++)
+        {
+            pkt2 = OverlayFrameAdapter.FromPlaybackSnapshot(snap2, 1280f, 720f, 1.0f, 2.2 + (step * 0.03), 0.03f, surfaceMode: StageRenderSurfaceMode.StageCanvas);
+            router.AdvancePhysics(in pkt2);
+        }
+
+        var info = new SKImageInfo(1280, 720, SKColorType.Bgra8888, SKAlphaType.Premul);
+        using var surface = SKSurface.Create(info);
+        surface.Canvas.Clear(SKColors.Black);
+        var ctx = new StyleRenderContext(surface.Canvas, null, fonts, shaders, pool, legibility, pkt2, false, false);
+        router.Render(in ctx);
+
+        using var bmp = SKBitmap.FromImage(surface.Snapshot());
+        var rightBrightPixels = 0;
+        for (var y = 120; y < 620; y += 3)
+        {
+            for (var x = 610; x < 1190; x += 4)
+            {
+                var px = bmp.GetPixel(x, y);
+                if (px.Red > 180 && px.Green > 180 && px.Blue > 180)
+                {
+                    rightBrightPixels++;
+                }
+            }
+        }
+        rightBrightPixels.Should().BeGreaterThan(80, "Glass Stage 3D extruded active word & context lines must render brightly");
+    }
+
+    [Fact]
+    public async Task HindiAndHinglishVisualMatcher_ResolvesDevanagariNuktaVariantsHinglishWordsBigramsAndTrackMood()
+    {
+        using var starter = new StarterLexiconVisualMatcher();
+        await starter.InitializeAsync();
+
+        using var semantic = new GloveSemanticVisualMatcher();
+        await semantic.InitializeAsync();
+
+        // Romanized Hinglish & Devanagari exact matches across both Balanced & EmojiOnly modes
+        var hinglishCases = new (string Word, string ExpectedConcept)[]
+        {
+            ("dil", "heart"),
+            ("pyaar", "heart"),
+            ("baarish", "rain"),
+            ("chaand", "night"),
+            ("aag", "fire"),
+            ("aansu", "cry"),
+            ("zindagi", "life"),
+            ("dhadkan", "heartbeat_pulse"),
+            ("दिल", "heart"),
+            ("प्यार", "heart"),
+            ("बारिश", "rain"),
+            ("आग", "fire"),
+            ("धड़कन", "heartbeat_pulse")
+        };
+
+        foreach (var (word, expectedConcept) in hinglishCases)
+        {
+            var mStarter = starter.MatchWord(word, VisualPreference.Balanced);
+            mStarter.Should().NotBeNull($"Starter matcher must match Hindi/Hinglish word '{word}'");
+            mStarter!.ConceptName.Should().Be(expectedConcept);
+
+            var mEmoji = semantic.MatchWord(word, VisualPreference.EmojiOnly);
+            mEmoji.Should().NotBeNull($"Semantic matcher must produce an emoji for '{word}'");
+            mEmoji!.ConceptName.Should().Be(expectedConcept);
+            mEmoji.Kind.Should().Be(VisualKind.Emoji);
+            mEmoji.Value.Should().NotBeNullOrWhiteSpace();
+        }
+
+        // Nukta & chandrabindu folding guarantees spelling variants map to the exact same concept
+        semantic.MatchWord("इश्क़", VisualPreference.EmojiOnly)!.ConceptName
+            .Should().Be(semantic.MatchWord("इश्क", VisualPreference.EmojiOnly)!.ConceptName)
+            .And.Be("heart");
+        semantic.MatchWord("चाँद", VisualPreference.EmojiOnly)!.ConceptName
+            .Should().Be(semantic.MatchWord("चांद", VisualPreference.EmojiOnly)!.ConceptName)
+            .And.Be("night");
+        semantic.MatchWord("आँसू", VisualPreference.EmojiOnly)!.ConceptName
+            .Should().Be(semantic.MatchWord("आंसू", VisualPreference.EmojiOnly)!.ConceptName)
+            .And.Be("cry");
+        semantic.MatchWord("ज़िंदगी", VisualPreference.EmojiOnly)!.ConceptName
+            .Should().Be(semantic.MatchWord("जिंदगी", VisualPreference.EmojiOnly)!.ConceptName)
+            .And.Be("life");
+
+        // Common Hindi & Hinglish grammatical stopwords must not spawn noisy icons
+        foreach (var stopword in new[] { "hai", "mera", "nahi", "है", "मेरा", "नहीं" })
+        {
+            starter.MatchWord(stopword, VisualPreference.EmojiOnly).Should().BeNull($"Stopword '{stopword}' should be filtered");
+            semantic.MatchWord(stopword, VisualPreference.EmojiOnly).Should().BeNull($"Stopword '{stopword}' should be filtered");
+        }
+
+        // Poetic Hindi & Hinglish bigrams via Layer-1 MatchLine
+        var bigramLine = new[]
+        {
+            new LyricWord("dil", TimeSpan.Zero, TimeSpan.FromSeconds(1), true),
+            new LyricWord("toota", TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), true),
+            new LyricWord("चाँद", TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(3), true),
+            new LyricWord("तारे", TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(4), true),
+            new LyricWord("दिल", TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(5), true),
+            new LyricWord("धड़के", TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(6), true)
+        };
+        var matches = semantic.MatchLine(bigramLine, VisualPreference.EmojiOnly);
+        matches[0].Should().BeNull();
+        matches[1]!.ConceptName.Should().Be("broken_heart");
+        matches[2].Should().BeNull();
+        matches[3]!.ConceptName.Should().Be("star");
+        matches[4].Should().BeNull();
+        matches[5]!.ConceptName.Should().Be("heartbeat_pulse");
+
+        // Hindi track mood fallback inference
+        var hindiTrack = new TrackIdentity("दिल ये मेरा", "Arijit Singh", "दिल ये मेरा", "arijit singh", "Love Songs", TimeSpan.FromMinutes(4), "arijit-dil-ye-mera");
+        var parser = new LyricsParser();
+        var hindiLrc = parser.ParseLrc(
+            hindiTrack,
+            "[00:01.00]दिल में प्यार और इश्क़ है\n[00:04.00]चाँद रात और सपने हैं",
+            LyricsSourceKind.Demo,
+            "Test",
+            false);
+        var mood = semantic.InferTrackMoodVisual(hindiTrack, hindiLrc, VisualPreference.EmojiOnly);
+        mood.Should().NotBeNull();
+        mood!.ConceptName.Should().Be("heart");
+        mood.Kind.Should().Be(VisualKind.Emoji);
+    }
+
+    [Fact]
+    public async Task GlassStage3D_RendersHindiLyricsWithFloatingVisualOrbAndPreservesDesktopTransparency()
+    {
+        using var matcher = new GloveSemanticVisualMatcher();
+        await matcher.InitializeAsync();
+
+        var track = new TrackIdentity("Tum Hi Ho", "Arijit Singh", "tum hi ho", "arijit singh", "Aashiqui 2", TimeSpan.FromSeconds(210), "arijit-tum-hi-ho");
+        var rawDoc = new LyricsParser().ParseLrc(
+            track,
+            "[00:01.00]दिल ये मेरा चाँद तारे\n" +
+            "[00:04.00]pyaar aur baarish ki raat\n" +
+            "[00:08.00]aag jale khwaabon mein",
+            LyricsSourceKind.Demo,
+            "Test",
+            false);
+
+        var annotatedLines = rawDoc.Lines.Select(line =>
+        {
+            var matched = matcher.MatchLine(line.Words, VisualPreference.EmojiOnly);
+            var words = line.Words.Select((w, idx) => w with { Visual = matched[idx] }).ToImmutableArray();
+            return line with { Words = words };
+        }).ToImmutableArray();
+        var doc = rawDoc with { Lines = annotatedLines };
+        doc.Lines[0].Words[0].Visual.Should().NotBeNull("Hindi active word 'दिल' must carry an attached visual for the 3D floating orb");
+
+        using var fonts = new FontAssetRegistry();
+        using var shaders = new ShaderLibrary();
+        using var pool = new OffscreenSurfacePool();
+        using var legibility = new LegibilityPipeline();
+        using var router = new LyricStyleRouter();
+
+        var redCoverBytes = EncodeCover(128, 128, SKEncodedImageFormat.Png, (_, _) => new SKColor(0xD6, 0x28, 0x39));
+        var albumArt = new AlbumArtPayload("hindi-red-cover", redCoverBytes);
+
+        var settings = AppSettings.Default with
+        {
+            ActiveStyle = OverlayStyleId.VinylGroove,
+            StageBackdropMode = StageBackdropMode.AlbumArtBlur,
+            VisualPreference = VisualPreference.EmojiOnly,
+            ReducedMotion = false
+        };
+
+        byte[] RenderStage(double tSec, StageRenderSurfaceMode mode, bool reducedMotion = false)
+        {
+            var effectiveSettings = settings with { ReducedMotion = reducedMotion };
+            var pkt = BuildPacket(
+                doc,
+                effectiveSettings,
+                mode,
+                TimeSpan.FromSeconds(1.2),
+                audio: CreateAudio(bass: 0.84f, beat: 0.90f),
+                albumArt: albumArt,
+                renderTime: tSec);
+            router.AdvancePhysics(in pkt);
+
+            var info = new SKImageInfo(640, 360, SKColorType.Bgra8888, SKAlphaType.Premul);
+            using var surface = SKSurface.Create(info);
+            surface.Canvas.Clear(mode == StageRenderSurfaceMode.DesktopOverlay ? SKColors.Transparent : SKColors.Black);
+            var ctx = new StyleRenderContext(surface.Canvas, null, fonts, shaders, pool, legibility, pkt, false, false);
+            router.Render(in ctx);
+
+            using var bmp = SKBitmap.FromImage(surface.Snapshot());
+            if (mode == StageRenderSurfaceMode.DesktopOverlay)
+            {
+                bmp.GetPixel(0, 0).Alpha.Should().Be(0);
+                bmp.GetPixel(639, 0).Alpha.Should().Be(0);
+                bmp.GetPixel(0, 359).Alpha.Should().Be(0);
+                bmp.GetPixel(639, 359).Alpha.Should().Be(0);
+            }
+            else
+            {
+                var card = VinylGrooveStyleRenderer.ResolveCoverCardBounds(640f, 360f, StageRenderSurfaceMode.StageCanvas);
+                var centerPx = bmp.GetPixel((int)card.MidX, (int)card.MidY);
+                centerPx.Alpha.Should().BeGreaterThan(220);
+                centerPx.Red.Should().BeGreaterThan(100);
+            }
+
+            return SHA256.HashData(bmp.Bytes);
+        }
+
+        var hash1 = RenderStage(1.0, StageRenderSurfaceMode.StageCanvas);
+        var hash2 = RenderStage(2.4, StageRenderSurfaceMode.StageCanvas);
+        hash1.Should().NotEqual(hash2, "Spatial 3D orbital rings, motes, and active word lighting must animate across frames");
+
+        _ = RenderStage(2.6, StageRenderSurfaceMode.DesktopOverlay);
+        _ = RenderStage(2.8, StageRenderSurfaceMode.StageCanvas, reducedMotion: true);
+    }
+
+    [Fact]
+    public async Task GlassStageSpatialPrismStage_RendersBoldDevanagariFocusDeckPersistentCharmsAndSmoothFluidWaves()
+    {
+        using var matcher = new GloveSemanticVisualMatcher();
+        await matcher.InitializeAsync();
+
+        // Newly expanded Tum Ho / Hindi poetic vocabulary
+        matcher.MatchWord("महसूस", VisualPreference.EmojiOnly)!.ConceptName.Should().Be("heartbeat_pulse");
+        matcher.MatchWord("फ़िकर", VisualPreference.EmojiOnly)!.ConceptName.Should().Be("peace");
+        matcher.MatchWord("वफ़ा", VisualPreference.EmojiOnly)!.ConceptName.Should().Be("heart");
+        matcher.MatchWord("सजदा", VisualPreference.EmojiOnly)!.ConceptName.Should().Be("angel");
+        matcher.MatchWord("छीनेगा", VisualPreference.EmojiOnly)!.ConceptName.Should().Be("broken_heart");
+
+        using var fonts = new FontAssetRegistry();
+        var devFallback = fonts.MatchFallbackForCodepoint('त');
+        devFallback.ContainsGlyph('त').Should().BeTrue("Devanagari fallback typeface must render Devanagari glyphs cleanly");
+        if (devFallback.FamilyName.Contains("Nirmala", StringComparison.OrdinalIgnoreCase))
+        {
+            devFallback.FontWeight.Should().BeGreaterThanOrEqualTo((int)SKFontStyleWeight.SemiBold);
+        }
+
+        var track = new TrackIdentity("Tum Ho", "Mohit Chauhan", "tum ho", "mohit chauhan", "Rockstar", TimeSpan.FromSeconds(318), "mohit-tum-ho");
+        var rawDoc = new LyricsParser().ParseLrc(
+            track,
+            "[00:00.50]उतना ही पा भी लूँ\n" +
+            "[00:01.00]किस तरह छीनेगा मुझसे ये जहां तुम्हें\n" +
+            "[00:05.00]तुम भी हो मैं\n" +
+            "[00:08.00]क्या फ़िकर अब हमें\n" +
+            "[00:11.00]तुम हो मेरे लिये",
+            LyricsSourceKind.Demo,
+            "Test",
+            false);
+
+        var annotatedLines = rawDoc.Lines.Select(line =>
+        {
+            var matched = matcher.MatchLine(line.Words, VisualPreference.EmojiOnly);
+            var words = line.Words.Select((w, idx) => w with { Visual = matched[idx] }).ToImmutableArray();
+            return line with { Words = words };
+        }).ToImmutableArray();
+        var doc = rawDoc with { Lines = annotatedLines };
+        var moodVisual = matcher.InferTrackMoodVisual(track, doc, VisualPreference.EmojiOnly);
+
+        using var shaders = new ShaderLibrary();
+        using var pool = new OffscreenSurfacePool();
+        using var legibility = new LegibilityPipeline();
+        using var router = new LyricStyleRouter();
+
+        var redCoverBytes = EncodeCover(128, 128, SKEncodedImageFormat.Png, (_, _) => new SKColor(0x9E, 0x24, 0x24));
+        var albumArt = new AlbumArtPayload("tum-ho-cover", redCoverBytes);
+
+        var settings = AppSettings.Default with
+        {
+            ActiveStyle = OverlayStyleId.VinylGroove,
+            StageBackdropMode = StageBackdropMode.AlbumArtBlur,
+            AudioVisualizerMode = AudioVisualizerMode.FluidWave,
+            VisualPreference = VisualPreference.EmojiOnly,
+            ReducedMotion = false
+        };
+
+        // Warm up lifecycle fade-in & springs over 14 frames so ContentOpacity reaches 1.0 (matches live playback)
+        // Pos 4.5s puts active word on "तुम्हें" (last word of line 1) while "जहां" & "छीनेगा" are already sung -> exercises persistent charms + focus deck + FluidWave
+        FrameRenderPacket pkt = null!;
+        for (var step = 0; step < 14; step++)
+        {
+            pkt = BuildPacket(
+                doc,
+                settings,
+                StageRenderSurfaceMode.StageCanvas,
+                TimeSpan.FromSeconds(4.5),
+                audio: CreateAudio(bass: 0.78f, beat: 0.85f),
+                albumArt: albumArt,
+                moodVisual: moodVisual,
+                renderTime: 1.9 + (step * 0.025));
+            router.AdvancePhysics(in pkt);
+        }
+
+        var info = new SKImageInfo(640, 360, SKColorType.Bgra8888, SKAlphaType.Premul);
+        using (var stageSurface = SKSurface.Create(info))
+        {
+            stageSurface.Canvas.Clear(SKColors.Black);
+            var ctx = new StyleRenderContext(stageSurface.Canvas, null, fonts, shaders, pool, legibility, pkt, false, false);
+            router.Render(in ctx);
+            using var stageBmp = SKBitmap.FromImage(stageSurface.Snapshot());
+
+            var rightBrightPixels = 0;
+            for (var y = 70; y < 300; y += 2)
+            {
+                for (var x = 290; x < 620; x += 2)
+                {
+                    var px = stageBmp.GetPixel(x, y);
+                    if (px.Red > 175 && px.Green > 175 && px.Blue > 175)
+                    {
+                        rightBrightPixels++;
+                    }
+                }
+            }
+
+            rightBrightPixels.Should().BeGreaterThan(80, "Spatial Prism Focus Deck + Bold Devanagari active words must render crisply");
+        }
+
+        var deskPkt = BuildPacket(
+            doc,
+            settings with { EdgeGlowMode = EdgeGlowMode.Off, AudioVisualizerMode = AudioVisualizerMode.None },
+            StageRenderSurfaceMode.DesktopOverlay,
+            TimeSpan.FromSeconds(4.5),
+            audio: CreateAudio(bass: 0.78f, beat: 0.85f),
+            albumArt: albumArt,
+            moodVisual: moodVisual,
+            renderTime: 2.2);
+        router.AdvancePhysics(in deskPkt);
+
+        using var deskSurface = SKSurface.Create(new SKImageInfo(640, 360, SKColorType.Bgra8888, SKAlphaType.Premul));
+        deskSurface.Canvas.Clear(SKColors.Transparent);
+        var deskCtx = new StyleRenderContext(deskSurface.Canvas, null, fonts, shaders, pool, legibility, deskPkt, false, false);
+        router.Render(in deskCtx);
+        using var deskBmp = SKBitmap.FromImage(deskSurface.Snapshot());
+        deskBmp.GetPixel(0, 0).Alpha.Should().Be(0);
+        deskBmp.GetPixel(639, 0).Alpha.Should().Be(0);
+        deskBmp.GetPixel(0, 359).Alpha.Should().Be(0);
+        deskBmp.GetPixel(639, 359).Alpha.Should().Be(0);
+    }
+
     private sealed class FakeSlowArtMediaProvider : IMediaSessionProvider
     {
         private readonly TaskCompletionSource<AlbumArtPayload?> _artTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);

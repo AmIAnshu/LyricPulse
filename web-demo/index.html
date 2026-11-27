@@ -8,7 +8,7 @@
   <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:wght@700;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&family=Jost:wght@600;700;800&family=Mulish:wght@600;700;800&family=Nunito:wght@600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@600;700&family=Bodoni+Moda:wght@700;900&family=Caveat:wght@600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&family=Jost:wght@600;700;800&family=Mulish:wght@600;700;800&family=Nunito:wght@600;700;800&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -227,9 +227,8 @@
         <div class="drawer-body">
           <div class="setting-group">
             <h3>Stage Backdrop</h3>
-            <div class="seg-row seg-3" id="backdropModeRow">
-              <button class="seg active" data-backdrop="AmbientPartyMesh" type="button">Ambient Mesh</button>
-              <button class="seg" data-backdrop="AlbumArtBlur" type="button">Album Art</button>
+            <div class="seg-row" id="backdropModeRow">
+              <button class="seg active" data-backdrop="AlbumArtBlur" type="button">Album Art</button>
               <button class="seg" data-backdrop="PureBlack" type="button">Pure Black</button>
             </div>
           </div>
@@ -237,10 +236,16 @@
           <div class="setting-group">
             <h3>Typography</h3>
             <div class="font-grid" id="fontSelector">
-              <button class="seg active" data-font="Jost" type="button"><strong>Aa</strong><small>Jost</small></button>
-              <button class="seg" data-font="Bodoni Moda" type="button"><strong style="font-family:'Bodoni Moda',serif">Aa</strong><small>Bodoni</small></button>
-              <button class="seg" data-font="Mulish" type="button"><strong style="font-family:'Mulish',sans-serif">Aa</strong><small>Mulish</small></button>
-              <button class="seg" data-font="Nunito" type="button"><strong style="font-family:'Nunito',sans-serif">Aa</strong><small>Nunito</small></button>
+              <button class="seg font-tile active" data-font="Jost" type="button"><strong style="font-family:'Jost',sans-serif">Aa</strong><span><span>Jost</span><small>Geometric</small></span></button>
+              <button class="seg font-tile" data-font="Bodoni Moda" type="button"><strong style="font-family:'Bodoni Moda',serif">Aa</strong><span><span>Bodoni Moda</span><small>Editorial</small></span></button>
+              <button class="seg font-tile" data-font="Mulish" type="button"><strong style="font-family:'Mulish',sans-serif">Aa</strong><span><span>Mulish</span><small>Humanist</small></span></button>
+              <button class="seg font-tile" data-font="Nunito" type="button"><strong style="font-family:'Nunito',sans-serif">Aa</strong><span><span>Nunito</span><small>Rounded</small></span></button>
+              <button class="seg font-tile" data-font="Bahnschrift" type="button"><strong style="font-family:'Bahnschrift','Barlow Condensed',sans-serif">Aa</strong><span><span>Bahnschrift</span><small>Industrial</small></span></button>
+              <button class="seg font-tile" data-font="Georgia" type="button"><strong style="font-family:'Georgia',serif">Aa</strong><span><span>Georgia</span><small>Classic serif</small></span></button>
+              <button class="seg font-tile" data-font="Impact" type="button"><strong style="font-family:'Impact','Anton',sans-serif">Aa</strong><span><span>Impact</span><small>Poster</small></span></button>
+              <button class="seg font-tile" data-font="Sitka Display" type="button"><strong style="font-family:'Sitka Display','Playfair Display',serif">Aa</strong><span><span>Sitka Display</span><small>Lyric serif</small></span></button>
+              <button class="seg font-tile" data-font="Ink Free" type="button"><strong style="font-family:'Ink Free','Caveat',cursive">Aa</strong><span><span>Ink Free</span><small>Handwritten</small></span></button>
+              <button class="seg font-tile" data-font="Cascadia Mono" type="button"><strong style="font-family:'Cascadia Mono','JetBrains Mono',monospace">Aa</strong><span><span>Cascadia</span><small>Studio mono</small></span></button>
             </div>
             <label class="slider-row">
               <span>Lyric Scale <strong id="lyricScaleVal">100%</strong></span>
@@ -297,14 +302,6 @@
               <button class="seg" data-vis="ParticleField" type="button">Particles</button>
               <button class="seg" data-vis="BassHorizon" type="button">Horizon</button>
             </div>
-          </div>
-
-          <div class="setting-group">
-            <h3>Motion Accents</h3>
-            <label class="toggle-row">
-              <span>Following Beat Dot</span>
-              <input id="beatDotToggle" type="checkbox" checked />
-            </label>
           </div>
 
           <div class="setting-group">

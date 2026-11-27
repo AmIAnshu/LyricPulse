@@ -81,7 +81,7 @@ public static class OverlayFrameAdapter
             StageBackdrop: effectiveBackdrop,
             HeroScaleMultiplier: heroScale,
             PartyEnergyLevel: settings.PartyEnergyLevel,
-            ShowFollowingDot: settings.ShowFollowingDot,
+            ShowFollowingDot: false,
             ShowColorSweepLayer: settings.ShowColorSweepLayer,
             SecondaryLineMode: settings.SecondaryLineMode,
             StyleOverride: styleOverride,
@@ -126,8 +126,8 @@ public static class OverlayFrameAdapter
         return surfaceMode switch
         {
             StageRenderSurfaceMode.StageCanvas or StageRenderSurfaceMode.GalleryCard =>
-                settings.StageBackdropMode == StageBackdropMode.TransparentOverlay
-                    ? StageBackdropMode.AmbientPartyMesh
+                settings.StageBackdropMode is StageBackdropMode.TransparentOverlay or StageBackdropMode.AmbientPartyMesh
+                    ? StageBackdropMode.AlbumArtBlur
                     : settings.StageBackdropMode,
             _ => StageBackdropMode.TransparentOverlay
         };

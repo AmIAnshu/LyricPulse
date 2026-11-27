@@ -265,15 +265,14 @@ public sealed class Phase4V2EffectsTests
 
         thickCount.Should().BeGreaterThan(thinCount);
 
-        // Full StageCanvas router pipeline with NeonRush clears backdrop to true #000000 pitch black
-        // and sets ScrimTint to #000000 so neither AmbientPartyMesh nor ScrimTint clouds the dark background
+        // Full StageCanvas router pipeline with NeonRush + PureBlack clears backdrop to true #000000 pitch black
         using var router = new LyricStyleRouter();
         using var pitchSurf = SKSurface.Create(info);
         var stagePkt = CreatePacket(
             AppSettings.Default with
             {
                 EdgeGlowMode = EdgeGlowMode.NeonRush,
-                StageBackdropMode = StageBackdropMode.AmbientPartyMesh,
+                StageBackdropMode = StageBackdropMode.PureBlack,
                 AudioVisualizerMode = AudioVisualizerMode.None,
                 ScrimIntensity = ScrimIntensity.Strong
             },
@@ -294,6 +293,130 @@ public sealed class Phase4V2EffectsTests
         centerPx.Green.Should().Be(0);
         centerPx.Blue.Should().Be(0);
         centerPx.Alpha.Should().Be(255);
+    }
+
+    [Fact]
+    public void EdgeGlowRenderer_NeonRush_HasZeroVisibleStripRidgeAndSmoothInwardFalloff()
+    {
+        using var edgeGlow = new EdgeGlowRenderer();
+        using var fonts = new FontAssetRegistry();
+        using var shaders = new ShaderLibrary();
+        using var pool = new OffscreenSurfacePool();
+        using var legibility = new LegibilityPipeline();
+
+        var info = new SKImageInfo(640, 360, SKColorType.Bgra8888, SKAlphaType.Premul);
+        var audio = CreateLiveAudioMetrics();
+        var settings = AppSettings.Default with
+        {
+            EdgeGlowMode = EdgeGlowMode.NeonRush,
+            EdgeGlowIntensity = 1.15f,
+            EdgeGlowThickness = 1.35f,
+            EdgeGlowSpill = 1.10f
+        };
+
+        using var surf = SKSurface.Create(info);
+        surf.Canvas.Clear(SKColors.Transparent);
+        var pkt = CreatePacket(settings, StageRenderSurfaceMode.StageCanvas, audio, bottomFadeToBlack: false);
+        var ctx = new StyleRenderContext(surf.Canvas, null, fonts, shaders, pool, legibility, pkt, false, false);
+        edgeGlow.Render(in ctx);
+
+        using var bmp = SKBitmap.FromImage(surf.Snapshot());
+
+        // Top edge inward profile: highest at physical bezel (y=0) and strictly decaying inward (no inner bright strip ridge)
+        var aTop0 = bmp.GetPixel(320, 0).Alpha;
+        var aTop4 = bmp.GetPixel(320, 4).Alpha;
+        var aTop12 = bmp.GetPixel(320, 12).Alpha;
+        var aTop28 = bmp.GetPixel(320, 28).Alpha;
+
+        aTop0.Should().BeGreaterThan(60, "outer bezel must emit rich ambient plasma glow");
+        aTop4.Should().BeLessThanOrEqualTo((byte)(aTop0 + 2), "no bright inner strip ridge should rise inside the viewport");
+        aTop12.Should().BeLessThan(aTop4, "inward Gaussian falloff should diffuse smoothly away from the edge");
+        aTop28.Should().BeLessThan(aTop12);
+
+        // Left edge inward profile
+        var aLeft0 = bmp.GetPixel(0, 180).Alpha;
+        var aLeft4 = bmp.GetPixel(4, 180).Alpha;
+        var aLeft14 = bmp.GetPixel(14, 180).Alpha;
+        var aLeft32 = bmp.GetPixel(32, 180).Alpha;
+
+        aLeft0.Should().BeGreaterThan(60);
+        aLeft4.Should().BeLessThanOrEqualTo((byte)(aLeft0 + 2));
+        aLeft14.Should().BeLessThan(aLeft4);
+        aLeft32.Should().BeLessThan(aLeft14);
+
+        // Screen center stays completely clear
+        bmp.GetPixel(320, 180).Alpha.Should().Be(0);
+    }
+
+    [Fact]
+    public void EdgeGlowRenderer_NeonRush_AutomaticallySurgesIntensityAndReachOnBeats()
+    {
+        using var quietGlow = new EdgeGlowRenderer();
+        using var beatGlow = new EdgeGlowRenderer();
+        using var fonts = new FontAssetRegistry();
+        using var shaders = new ShaderLibrary();
+        using var pool = new OffscreenSurfacePool();
+        using var legibility = new LegibilityPipeline();
+
+        var info = new SKImageInfo(640, 360, SKColorType.Bgra8888, SKAlphaType.Premul);
+        var settings = AppSettings.Default with
+        {
+            EdgeGlowMode = EdgeGlowMode.NeonRush,
+            EdgeGlowAnimation = EdgeGlowAnimationMode.MusicSync,
+            EdgeGlowIntensity = 1.0f,
+            EdgeGlowThickness = 1.25f,
+            EdgeGlowSpill = 1.0f
+        };
+
+        var quietBands = ImmutableArray.Create(Enumerable.Repeat(0.05f, AudioFrameMetrics.BandCount).ToArray());
+        var quietAudio = new AudioFrameMetrics(0.06f, 0.05f, 0.04f, 0.05f, 0.0f, true, quietBands, DropTrigger: 0f, ClimaxIntensity: 0f, IsClimaxActive: false);
+
+        var heavyBands = ImmutableArray.Create(Enumerable.Repeat(0.88f, AudioFrameMetrics.BandCount).ToArray());
+        var heavyBeatAudio = new AudioFrameMetrics(0.92f, 0.72f, 0.68f, 0.84f, 0.96f, true, heavyBands, DropTrigger: 0.85f, ClimaxIntensity: 0.80f, IsClimaxActive: true);
+
+        (int LitCount, long TotalAlpha, byte CenterAlpha) MeasureEnergy(EdgeGlowRenderer renderer, AudioFrameMetrics metrics)
+        {
+            SKBitmap? lastBmp = null;
+            for (var step = 0; step < 6; step++)
+            {
+                lastBmp?.Dispose();
+                using var surf = SKSurface.Create(info);
+                surf.Canvas.Clear(SKColors.Transparent);
+                var pkt = CreatePacket(settings, StageRenderSurfaceMode.StageCanvas, metrics, bottomFadeToBlack: false) with
+                {
+                    RenderTimeSeconds = 1.0 + (step * 0.016),
+                    DeltaSeconds = 0.016f
+                };
+                var ctx = new StyleRenderContext(surf.Canvas, null, fonts, shaders, pool, legibility, pkt, false, false);
+                renderer.Render(in ctx);
+                lastBmp = SKBitmap.FromImage(surf.Snapshot());
+            }
+
+            using var bmp = lastBmp!;
+            var lit = 0;
+            long alphaSum = 0;
+            for (var y = 0; y < bmp.Height; y += 2)
+            {
+                for (var x = 0; x < bmp.Width; x += 2)
+                {
+                    var a = bmp.GetPixel(x, y).Alpha;
+                    if (a > 8)
+                    {
+                        lit++;
+                        alphaSum += a;
+                    }
+                }
+            }
+
+            return (lit, alphaSum, bmp.GetPixel(320, 180).Alpha);
+        }
+
+        var quietRes = MeasureEnergy(quietGlow, quietAudio);
+        var beatRes = MeasureEnergy(beatGlow, heavyBeatAudio);
+
+        beatRes.TotalAlpha.Should().BeGreaterThan((long)(quietRes.TotalAlpha * 1.55), "heavy beats and drops must automatically surge glow intensity");
+        beatRes.LitCount.Should().BeGreaterThan((int)(quietRes.LitCount * 1.25), "heavy beats and drops must automatically expand inward plasma reach");
+        beatRes.CenterAlpha.Should().Be(0, "even at peak beat overdrive, screen center remains clear");
     }
 
     [Fact]

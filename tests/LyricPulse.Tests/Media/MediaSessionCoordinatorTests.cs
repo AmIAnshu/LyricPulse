@@ -96,4 +96,56 @@ public sealed class MediaSessionCoordinatorTests
         await using var fakeLarge = new MemoryStream(sampleBytes);
         (await coordinator.ReadAndDeduplicateThumbnailAsync(fakeLarge, MediaSessionCoordinator.MaxThumbnailBytes + 1)).Should().BeNull();
     }
+
+    [Fact]
+    public void ProcessCandidates_HoldsActiveTrackAcrossTransientEmptyTitleWhilePlayingOrPaused()
+    {
+        long ticks = 50 * Frequency;
+        var utc = new DateTimeOffset(2026, 11, 27, 6, 0, 0, TimeSpan.Zero);
+        var clock = new MonotonicPlaybackClock(() => ticks, Frequency, () => utc);
+        var coordinator = new MediaSessionCoordinator(new TitleNormalizer(), new MediaSessionSelector(), clock, () => utc);
+
+        var trackEvents = new List<TrackIdentity?>();
+        coordinator.TrackChanged += (_, t) => trackEvents.Add(t);
+
+        var spotifyId = "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify";
+        var playing = new SessionCandidate(
+            spotifyId,
+            MediaPlayerKind.Spotify,
+            MediaItemKind.Music,
+            MediaPlaybackState.Playing,
+            "Reflections",
+            "The Neighbourhood",
+            "Hard To Imagine",
+            TimeSpan.FromSeconds(18),
+            TimeSpan.Zero,
+            TimeSpan.FromMinutes(4),
+            1.0,
+            utc,
+            true);
+
+        var initialSnap = coordinator.ProcessCandidates([playing]);
+        initialSnap.Should().NotBeNull();
+        initialSnap!.Track!.NormalizedTitle.Should().Be("Reflections");
+        trackEvents.Should().ContainSingle();
+
+        // Simulate transient WinRT COM blank metadata while Spotify keeps Playing (within 1.5s grace)
+        utc = utc.AddMilliseconds(450);
+        ticks += (long)(0.45 * Frequency);
+        var blankPlaying = playing with { Title = string.Empty, Artist = string.Empty, ItemKind = MediaItemKind.Unknown, LastUpdatedUtc = utc };
+        var heldPlaying = coordinator.ProcessCandidates([blankPlaying]);
+        heldPlaying.Should().NotBeNull();
+        heldPlaying!.Track.Should().NotBeNull("transient blank COM read while Playing must not disconnect active song");
+        heldPlaying.Track!.CacheKey.Should().Be(initialSnap.Track.CacheKey);
+        trackEvents.Should().ContainSingle("must not fire spurious disconnect/reconnect TrackChanged events");
+
+        // Also hold cleanly across brief Paused blank metadata inside grace window
+        utc = utc.AddMilliseconds(350);
+        ticks += (long)(0.35 * Frequency);
+        var blankPaused = blankPlaying with { PlaybackState = MediaPlaybackState.Paused, LastUpdatedUtc = utc };
+        var heldPaused = coordinator.ProcessCandidates([blankPaused]);
+        heldPaused.Should().NotBeNull();
+        heldPaused!.Track!.CacheKey.Should().Be(initialSnap.Track.CacheKey);
+        trackEvents.Should().ContainSingle();
+    }
 }

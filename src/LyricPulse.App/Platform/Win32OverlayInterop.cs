@@ -86,6 +86,39 @@ public sealed class Win32OverlayInterop : IOverlayWindowPlatform
             Win32Native.SWP_FRAMECHANGED);
     }
 
+    /// <summary>
+    /// Removes Windows 11 active accent blue window border &amp; caption seam (especially visible along the
+    /// very top monitor edge when maximizing an extended-client-area Stage window).
+    /// </summary>
+    public static void ApplyStageWindowDarkChrome(nint windowHandle)
+    {
+        if (windowHandle == 0 || !OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var darkMode = 1;
+        _ = Win32Native.DwmSetWindowAttribute(
+            windowHandle,
+            Win32Native.DWMWA_USE_IMMERSIVE_DARK_MODE,
+            ref darkMode,
+            sizeof(int));
+
+        var borderNone = Win32Native.DWMWA_COLOR_NONE;
+        _ = Win32Native.DwmSetWindowAttribute(
+            windowHandle,
+            Win32Native.DWMWA_BORDER_COLOR,
+            ref borderNone,
+            sizeof(int));
+
+        var blackCaption = 0x00000000;
+        _ = Win32Native.DwmSetWindowAttribute(
+            windowHandle,
+            Win32Native.DWMWA_CAPTION_COLOR,
+            ref blackCaption,
+            sizeof(int));
+    }
+
     public static double GetEffectiveMonitorScale(int physicalPointX, int physicalPointY, double fallbackScaling)
     {
         var fallback = double.IsFinite(fallbackScaling) && fallbackScaling > 0.25 ? fallbackScaling : 1.0;

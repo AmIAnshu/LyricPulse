@@ -11,6 +11,9 @@
         WindowStartupLocation="CenterScreen"
         ExtendClientAreaToDecorationsHint="True"
         ExtendClientAreaTitleBarHeightHint="40"
+        FontFamily="{DynamicResource LpFontUi}"
+        BorderThickness="0"
+        BorderBrush="Transparent"
         Background="#000000">
   <Window.KeyBindings>
     <KeyBinding Gesture="F11" Command="{Binding ToggleFullscreenCommand}"/>
@@ -20,10 +23,16 @@
 
   <Window.Styles>
     <Style Selector="Button.chip">
-      <Setter Property="Background" Value="{DynamicResource LpSurfaceElevatedBrush}"/>
+      <Setter Property="Background" Value="{DynamicResource LpGlassTileBrush}"/>
       <Setter Property="Foreground" Value="{DynamicResource LpTextSecondaryBrush}"/>
-      <Setter Property="BorderBrush" Value="{DynamicResource LpBorderDefaultBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource LpGlassTileBorderBrush}"/>
       <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Cursor" Value="Hand"/>
+    </Style>
+    <Style Selector="Button.chip:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource LpGlassTileHoverBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource LpTextPrimaryBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource LpGlassTileBorderHoverBrush}"/>
     </Style>
     <Style Selector="Button.chip.active">
       <Setter Property="Background" Value="{DynamicResource LpAccentSoftBgBrush}"/>
@@ -31,19 +40,34 @@
       <Setter Property="BorderBrush" Value="{DynamicResource LpAccentBorderBrush}"/>
       <Setter Property="BorderThickness" Value="1.5"/>
     </Style>
+    <Style Selector="Button.chip.active:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource LpAccentSoftBgBrush}"/>
+      <Setter Property="Foreground" Value="#FFFFFF"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource LpAccentBorderBrush}"/>
+    </Style>
+
     <Style Selector="Button.pill-nav">
       <Setter Property="Background" Value="Transparent"/>
-      <Setter Property="Foreground" Value="#CBD5E1"/>
+      <Setter Property="Foreground" Value="#D6DEE9"/>
       <Setter Property="BorderBrush" Value="Transparent"/>
-      <Setter Property="BorderThickness" Value="0"/>
-      <Setter Property="Padding" Value="11,6"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="12,6"/>
       <Setter Property="CornerRadius" Value="999"/>
       <Setter Property="FontSize" Value="12"/>
+      <Setter Property="FontWeight" Value="Medium"/>
       <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="RenderTransform" Value="scale(1)"/>
+    </Style>
+    <Style Selector="Button.pill-nav:pointerover">
+      <Setter Property="RenderTransform" Value="translateY(-1px) scale(1.03)"/>
     </Style>
     <Style Selector="Button.pill-nav:pointerover /template/ ContentPresenter">
-      <Setter Property="Background" Value="#24FFFFFF"/>
+      <Setter Property="Background" Value="#2EFFFFFF"/>
+      <Setter Property="BorderBrush" Value="#5CFFFFFF"/>
       <Setter Property="Foreground" Value="#FFFFFF"/>
+    </Style>
+    <Style Selector="Button.pill-nav:pressed">
+      <Setter Property="RenderTransform" Value="scale(0.97)"/>
     </Style>
     <Style Selector="Button.pill-nav.active">
       <Setter Property="Background" Value="{DynamicResource LpAccentSoftBgBrush}"/>
@@ -51,6 +75,119 @@
       <Setter Property="BorderBrush" Value="{DynamicResource LpAccentBorderBrush}"/>
       <Setter Property="BorderThickness" Value="1"/>
     </Style>
+    <Style Selector="Button.pill-nav.active:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource LpAccentSoftBgBrush}"/>
+      <Setter Property="BorderBrush" Value="#B4BCFF"/>
+      <Setter Property="Foreground" Value="#FFFFFF"/>
+    </Style>
+
+    <Style Selector="Button.glass-capsule">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="999"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="RenderTransform" Value="scale(1)"/>
+    </Style>
+    <Style Selector="Button.glass-capsule:pointerover">
+      <Setter Property="RenderTransform" Value="translateY(-1px) scale(1.015)"/>
+    </Style>
+    <Style Selector="Button.glass-capsule:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#24FFFFFF"/>
+      <Setter Property="BorderBrush" Value="#48FFFFFF"/>
+    </Style>
+
+    <Style Selector="ToggleButton.glass-toggle">
+      <Setter Property="Background" Value="#14FFFFFF"/>
+      <Setter Property="Foreground" Value="#DCE3EE"/>
+      <Setter Property="BorderBrush" Value="#24FFFFFF"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="FontWeight" Value="Medium"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="RenderTransform" Value="scale(1)"/>
+    </Style>
+    <Style Selector="ToggleButton.glass-toggle:pointerover">
+      <Setter Property="RenderTransform" Value="translateY(-1px) scale(1.03)"/>
+    </Style>
+    <Style Selector="ToggleButton.glass-toggle:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#2EFFFFFF"/>
+      <Setter Property="BorderBrush" Value="#66FFFFFF"/>
+      <Setter Property="Foreground" Value="#FFFFFF"/>
+    </Style>
+    <Style Selector="ToggleButton.glass-toggle:checked /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource LpAccentSoftBgBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource LpAccentBorderBrush}"/>
+      <Setter Property="Foreground" Value="#FFFFFF"/>
+    </Style>
+
+    <Style Selector="ToggleButton.glass-icon-toggle">
+      <Setter Property="Background" Value="#12FFFFFF"/>
+      <Setter Property="Foreground" Value="#DCE3EE"/>
+      <Setter Property="BorderBrush" Value="#24FFFFFF"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="RenderTransform" Value="scale(1)"/>
+    </Style>
+    <Style Selector="ToggleButton.glass-icon-toggle:pointerover">
+      <Setter Property="RenderTransform" Value="translateY(-1px) scale(1.06)"/>
+    </Style>
+    <Style Selector="ToggleButton.glass-icon-toggle:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#2EFFFFFF"/>
+      <Setter Property="BorderBrush" Value="#66FFFFFF"/>
+      <Setter Property="Foreground" Value="#FFFFFF"/>
+    </Style>
+    <Style Selector="ToggleButton.glass-icon-toggle:checked /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource LpAccentSoftBgBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource LpAccentBorderBrush}"/>
+      <Setter Property="Foreground" Value="#FFFFFF"/>
+    </Style>
+
+    <Style Selector="Button.glass-circle">
+      <Setter Property="Background" Value="#9A0B0E17"/>
+      <Setter Property="BorderBrush" Value="#38FFFFFF"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Foreground" Value="#F8FAFC"/>
+      <Setter Property="CornerRadius" Value="999"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="RenderTransform" Value="scale(1)"/>
+    </Style>
+    <Style Selector="Button.glass-circle:pointerover">
+      <Setter Property="RenderTransform" Value="scale(1.07)"/>
+    </Style>
+    <Style Selector="Button.glass-circle:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#34FFFFFF"/>
+      <Setter Property="BorderBrush" Value="#7AFFFFFF"/>
+      <Setter Property="Foreground" Value="#FFFFFF"/>
+    </Style>
+
+    <Style Selector="ToggleButton.pin-pill">
+      <Setter Property="Background" Value="#A010131E"/>
+      <Setter Property="BorderBrush" Value="#32FFFFFF"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Foreground" Value="#CBD5E1"/>
+      <Setter Property="CornerRadius" Value="999"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="RenderTransform" Value="scale(1)"/>
+    </Style>
+    <Style Selector="ToggleButton.pin-pill:pointerover">
+      <Setter Property="RenderTransform" Value="scale(1.08)"/>
+    </Style>
+    <Style Selector="ToggleButton.pin-pill:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#36FFFFFF"/>
+      <Setter Property="BorderBrush" Value="#7AFFFFFF"/>
+      <Setter Property="Foreground" Value="#FFFFFF"/>
+    </Style>
+    <Style Selector="ToggleButton.pin-pill:checked /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource LpAccentSoftBgBrush}"/>
+      <Setter Property="BorderBrush" Value="{DynamicResource LpAccentBorderBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource LpAccentTextBrush}"/>
+    </Style>
+    <Style Selector="ToggleButton.pin-pill:checked:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource LpAccentSoftBgBrush}"/>
+      <Setter Property="BorderBrush" Value="#C7D2FE"/>
+      <Setter Property="Foreground" Value="#FFFFFF"/>
+    </Style>
+
     <Style Selector="Button.page-dot">
       <Setter Property="Width" Value="7"/>
       <Setter Property="Height" Value="7"/>
@@ -76,9 +213,14 @@
       <Setter Property="BorderThickness" Value="0"/>
       <Setter Property="Padding" Value="0"/>
       <Setter Property="CornerRadius" Value="12"/>
+      <Setter Property="RenderTransform" Value="translateY(0px)"/>
+    </Style>
+    <Style Selector="Button.card-btn:pointerover">
+      <Setter Property="RenderTransform" Value="translateY(-3px)"/>
     </Style>
     <Style Selector="Button.card-btn:pointerover Border.card-frame">
-      <Setter Property="BorderBrush" Value="#66FFFFFF"/>
+      <Setter Property="BorderBrush" Value="#78FFFFFF"/>
+      <Setter Property="BoxShadow" Value="{DynamicResource LpShadowCardHover}"/>
     </Style>
     <Style Selector="Button.card-btn.active Border.card-frame">
       <Setter Property="BorderBrush" Value="{DynamicResource LpAccentBorderBrush}"/>
@@ -161,51 +303,57 @@
             </Canvas>
 
             <!-- Minimalist Carousel Chevrons (< / >) -->
-            <Button IsVisible="{Binding ShowHeroCarouselChrome}"
+            <Button Classes="glass-circle"
+                    IsVisible="{Binding ShowHeroCarouselChrome}"
                     HorizontalAlignment="Left" VerticalAlignment="Center" Margin="22,0,0,0"
-                    Width="44" Height="44" CornerRadius="999" Cursor="Hand"
-                    Background="#99090B12" BorderBrush="#2EFFFFFF" BorderThickness="1"
+                    Width="44" Height="44"
                     Command="{Binding PreviousStyleCommand}"
                     ToolTip.Tip="Previous Style"
                     AutomationProperties.Name="Previous style">
-              <PathIcon Data="{StaticResource LpIconChevronLeft}" Width="18" Height="18" Foreground="#F8FAFC"/>
+              <PathIcon Data="{StaticResource LpIconChevronLeft}" Width="18" Height="18"/>
             </Button>
 
-            <Button IsVisible="{Binding ShowHeroCarouselChrome}"
+            <Button Classes="glass-circle"
+                    IsVisible="{Binding ShowHeroCarouselChrome}"
                     HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,22,0"
-                    Width="44" Height="44" CornerRadius="999" Cursor="Hand"
-                    Background="#99090B12" BorderBrush="#2EFFFFFF" BorderThickness="1"
+                    Width="44" Height="44"
                     Command="{Binding NextStyleCommand}"
                     ToolTip.Tip="Next Style"
                     AutomationProperties.Name="Next style">
-              <PathIcon Data="{StaticResource LpIconChevronRight}" Width="18" Height="18" Foreground="#F8FAFC"/>
+              <PathIcon Data="{StaticResource LpIconChevronRight}" Width="18" Height="18"/>
             </Button>
 
-            <!-- Bottom-Left Editorial Callout (Verci-clean) -->
+            <!-- Bottom-Left Editorial Callout (Liquid Glass Polish) -->
             <StackPanel IsVisible="{Binding ShowHeroCarouselChrome}"
                         HorizontalAlignment="Left" VerticalAlignment="Bottom"
-                        Margin="36,0,0,38" MaxWidth="460" Spacing="5">
-              <TextBlock Text="{Binding SelectedStyleInfo.CategoryLabel}" FontSize="11" FontWeight="SemiBold"
-                         Foreground="#A5B4FC"/>
+                        Margin="36,0,0,38" MaxWidth="460" Spacing="6">
+              <Border HorizontalAlignment="Left" Padding="9,3" CornerRadius="999"
+                      Background="#7A0F121D" BorderBrush="#2EFFFFFF" BorderThickness="1">
+                <TextBlock Text="{Binding SelectedStyleInfo.CategoryLabel}" FontSize="10.5" FontWeight="SemiBold"
+                           LetterSpacing="0.6" Foreground="{DynamicResource LpAccentTextBrush}"/>
+              </Border>
               <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                <TextBlock Text="{Binding SelectedStyleInfo.DisplayName}" FontSize="26" FontWeight="Bold"
-                           Foreground="#FFFFFF"/>
-                <ToggleButton Width="36" Height="36" Padding="0" CornerRadius="999" Cursor="Hand"
-                              Background="#B814161F" BorderBrush="#2EFFFFFF" BorderThickness="1"
+                <TextBlock Text="{Binding SelectedStyleInfo.DisplayName}" FontFamily="{StaticResource LpFontDisplay}"
+                           FontSize="28" FontWeight="Bold" LetterSpacing="-0.3" Foreground="#FFFFFF"/>
+                <ToggleButton Classes="pin-pill"
+                              Width="34" Height="34" Padding="0"
                               IsChecked="{Binding IsActiveStylePinned, Mode=OneWay}"
                               Command="{Binding TogglePinStyleCommand}"
                               CommandParameter="{Binding ActiveStyle}"
                               ToolTip.Tip="{Binding ActivePinTooltip}"
                               AutomationProperties.Name="{Binding ActivePinTooltip}">
-                  <PathIcon Data="{StaticResource LpIconPinFilled}" Width="15" Height="15" Foreground="#A5B4FC"/>
+                  <Grid>
+                    <PathIcon IsVisible="{Binding !IsActiveStylePinned}" Data="{StaticResource LpIconPinRegular}" Width="15" Height="15"/>
+                    <PathIcon IsVisible="{Binding IsActiveStylePinned}" Data="{StaticResource LpIconPinFilled}" Width="15" Height="15"/>
+                  </Grid>
                 </ToggleButton>
-                <Border Padding="8,3" CornerRadius="999" Background="#9914161F" BorderBrush="#26FFFFFF" BorderThickness="1">
+                <Border Padding="9,4" CornerRadius="999" Background="#9010131E" BorderBrush="#34FFFFFF" BorderThickness="1">
                   <TextBlock Text="{Binding StyleCounterText}" FontFamily="{StaticResource LpFontMono}"
-                             FontFeatures="tnum" FontSize="11" Foreground="#CBD5E1"/>
+                             FontFeatures="tnum" FontSize="11" FontWeight="SemiBold" Foreground="#E2E8F0"/>
                 </Border>
               </StackPanel>
-              <TextBlock Text="{Binding SelectedStyleInfo.Description}" FontSize="13" TextWrapping="Wrap"
-                         Foreground="#CBD5E1"/>
+              <TextBlock Text="{Binding SelectedStyleInfo.Description}" FontSize="13" LineHeight="18" TextWrapping="Wrap"
+                         Foreground="#D8E0EB"/>
             </StackPanel>
 
             <!-- Centered 10-Dot Clickable Pagination Bar -->
@@ -239,24 +387,23 @@
             <StackPanel Spacing="18">
               <Grid ColumnDefinitions="Auto,*,Auto">
                 <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                  <TextBlock Text="All styles" FontSize="16" FontWeight="SemiBold" Foreground="#F8FAFC"/>
-                  <TextBlock Text="{Binding GalleryCountCaption}" FontSize="12" VerticalAlignment="Center" Foreground="#94A3B8"/>
+                  <TextBlock Text="All styles" FontFamily="{StaticResource LpFontDisplay}" FontSize="18" FontWeight="Bold" Foreground="#F8FAFC"/>
+                  <TextBlock Text="{Binding GalleryCountCaption}" FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="12" VerticalAlignment="Center" Foreground="#94A3B8"/>
                 </StackPanel>
 
                 <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" Spacing="6">
-                  <Button Classes="chip" Classes.active="{Binding IsFilterAll}" Content="All" Padding="11,5" FontSize="12" CornerRadius="999" Cursor="Hand" Command="{Binding SetStyleFilterCommand}" CommandParameter="All"/>
-                  <Button Classes="chip" Classes.active="{Binding IsFilterPinned}" Content="Pinned" Padding="11,5" FontSize="12" CornerRadius="999" Cursor="Hand" Command="{Binding SetStyleFilterCommand}" CommandParameter="Pinned"/>
-                  <Button Classes="chip" Classes.active="{Binding IsFilterVisuals}" Content="With Visuals" Padding="11,5" FontSize="12" CornerRadius="999" Cursor="Hand" Command="{Binding SetStyleFilterCommand}" CommandParameter="With Visuals"/>
-                  <Button Classes="chip" Classes.active="{Binding IsFilterMotion}" Content="Motion" Padding="11,5" FontSize="12" CornerRadius="999" Cursor="Hand" Command="{Binding SetStyleFilterCommand}" CommandParameter="Motion"/>
+                  <Button Classes="chip" Classes.active="{Binding IsFilterAll}" Content="All" Padding="12,6" FontSize="12" FontWeight="Medium" CornerRadius="999" Command="{Binding SetStyleFilterCommand}" CommandParameter="All"/>
+                  <Button Classes="chip" Classes.active="{Binding IsFilterPinned}" Content="Pinned" Padding="12,6" FontSize="12" FontWeight="Medium" CornerRadius="999" Command="{Binding SetStyleFilterCommand}" CommandParameter="Pinned"/>
+                  <Button Classes="chip" Classes.active="{Binding IsFilterVisuals}" Content="With Visuals" Padding="12,6" FontSize="12" FontWeight="Medium" CornerRadius="999" Command="{Binding SetStyleFilterCommand}" CommandParameter="With Visuals"/>
+                  <Button Classes="chip" Classes.active="{Binding IsFilterMotion}" Content="Motion" Padding="12,6" FontSize="12" FontWeight="Medium" CornerRadius="999" Command="{Binding SetStyleFilterCommand}" CommandParameter="Motion"/>
                 </StackPanel>
 
-                <Button Grid.Column="2" Padding="11,5" CornerRadius="999" Cursor="Hand"
-                        Background="#181B26" BorderBrush="#2A2F42" BorderThickness="1"
+                <Button Classes="chip" Grid.Column="2" Padding="12,6" CornerRadius="999"
                         IsEnabled="{Binding IsPreviewsToggleEnabled}"
                         Command="{Binding TogglePreviewsPausedCommand}">
                   <StackPanel Orientation="Horizontal" Spacing="6">
                     <PathIcon Data="{StaticResource LpIconPause}" Width="12" Height="12" Foreground="#CBD5E1"/>
-                    <TextBlock Text="{Binding PausePreviewsLabel}" FontSize="12" Foreground="#E2E8F0"/>
+                    <TextBlock Text="{Binding PausePreviewsLabel}" FontSize="12" FontWeight="Medium" Foreground="#E2E8F0"/>
                   </StackPanel>
                 </Button>
               </Grid>
@@ -311,31 +458,30 @@
                               <TextBlock Text="Selected" FontSize="10" FontWeight="SemiBold"
                                          Foreground="{DynamicResource LpOnAccentPrimaryBrush}"/>
                             </Border>
-                            <ToggleButton HorizontalAlignment="Right" VerticalAlignment="Top"
-                                          Width="38" Height="38" Padding="0" CornerRadius="8"
-                                          Background="Transparent" Cursor="Hand"
+                            <ToggleButton Classes="pin-pill"
+                                          HorizontalAlignment="Right" VerticalAlignment="Top"
+                                          Width="30" Height="30" Margin="8" Padding="0"
                                           IsChecked="{Binding IsPinned, Mode=OneWay}"
                                           Click="OnCardPinClicked"
                                           Tag="{Binding StyleId}"
                                           ToolTip.Tip="{Binding PinToolTip}"
                                           AutomationProperties.Name="{Binding PinToolTip}">
-                              <Border Width="28" Height="28" CornerRadius="7" Background="#B814161F"
-                                      BorderBrush="#2EFFFFFF" BorderThickness="1">
-                                <PathIcon Data="{StaticResource LpIconPinFilled}" Width="14" Height="14"
-                                          Foreground="#A5B4FC"/>
-                              </Border>
+                              <Grid>
+                                <PathIcon IsVisible="{Binding !IsPinned}" Data="{StaticResource LpIconPinRegular}" Width="13" Height="13"/>
+                                <PathIcon IsVisible="{Binding IsPinned}" Data="{StaticResource LpIconPinFilled}" Width="13" Height="13"/>
+                              </Grid>
                             </ToggleButton>
                           </Grid>
                         </Border>
 
                         <Grid Margin="4,0,4,0" ColumnDefinitions="*,Auto">
-                          <TextBlock Text="{Binding DisplayName}" FontSize="13" FontWeight="SemiBold"
+                          <TextBlock Text="{Binding DisplayName}" FontFamily="{StaticResource LpFontDisplay}" FontSize="13.5" FontWeight="SemiBold"
                                      TextTrimming="CharacterEllipsis"
                                      Foreground="#F8FAFC"/>
-                          <Border Grid.Column="1" Padding="7,2" CornerRadius="5"
-                                  Background="#181B26" BorderBrush="#26FFFFFF" BorderThickness="1">
-                            <TextBlock Text="{Binding CapabilityChip}" FontSize="10"
-                                       Foreground="#A6B0C3"/>
+                          <Border Grid.Column="1" Padding="8,2" CornerRadius="999"
+                                  Background="#18FFFFFF" BorderBrush="#26FFFFFF" BorderThickness="1">
+                            <TextBlock Text="{Binding CapabilityChip}" FontSize="10" FontWeight="Medium"
+                                       Foreground="#B9C4D6"/>
                           </Border>
                         </Grid>
                       </StackPanel>
@@ -363,16 +509,17 @@
         <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
           <!-- Left Pill: Brand + Size | Font | Screen | Aesthetics | Visualizer -->
           <Border Grid.Column="0"
-                  Background="#BA10121A"
-                  BorderBrush="#2EFFFFFF"
+                  Background="{DynamicResource LpGlassChromeBrush}"
+                  BorderBrush="{DynamicResource LpGlassChromeBorderBrush}"
                   BorderThickness="1"
+                  BoxShadow="0 10 28 0 #70000000"
                   CornerRadius="999"
                   Padding="8,4">
             <StackPanel Orientation="Horizontal" Spacing="2">
               <StackPanel Orientation="Horizontal" Spacing="6" Margin="6,0,8,0" VerticalAlignment="Center">
                 <PathIcon Data="{StaticResource LpIconWaveform}" Width="14" Height="14"
                           Foreground="{DynamicResource LpAccentTextBrush}"/>
-                <TextBlock Text="LyricPulse" FontWeight="SemiBold" FontSize="12"
+                <TextBlock Text="LyricPulse" FontFamily="{StaticResource LpFontDisplay}" FontWeight="Bold" FontSize="12.5"
                            VerticalAlignment="Center" Foreground="#F8FAFC"/>
               </StackPanel>
               <Border Width="1" Height="18" Background="#2EFFFFFF" Margin="2,0"/>
@@ -392,18 +539,20 @@
           <!-- Center Compact Now-Playing Capsule (Mini Album Art + Health + Title + Sync Offset Badge -> opens Diagnostics/Sync Popover) -->
           <Border Grid.Column="1"
                   HorizontalAlignment="Center"
-                  Background="#BA10121A"
-                  BorderBrush="#2EFFFFFF"
+                  Background="{DynamicResource LpGlassChromeBrush}"
+                  BorderBrush="{DynamicResource LpGlassChromeBorderBrush}"
                   BorderThickness="1"
+                  BoxShadow="0 10 28 0 #70000000"
                   CornerRadius="999"
-                  Padding="6,4">
+                  Padding="5,4">
             <Button x:Name="DiagnosticsPillBtn"
-                    Background="Transparent" Padding="6,3" CornerRadius="999" Cursor="Hand"
+                    Classes="glass-capsule"
+                    Padding="7,3"
                     Command="{Binding ToggleFlyoutCommand}" CommandParameter="{x:Static vm:StageFlyoutKind.Diagnostics}"
                     ToolTip.Tip="Click for Lyrics Sync Offset &amp; Media Diagnostics">
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <Border Width="22" Height="22" CornerRadius="6" ClipToBounds="True"
-                        Background="#1E2232" BorderBrush="#2EFFFFFF" BorderThickness="1">
+                        Background="#1E2232" BorderBrush="#34FFFFFF" BorderThickness="1">
                   <Grid>
                     <Image IsVisible="{Binding HasAlbumArt}"
                            Source="{Binding AlbumArtBitmap}"
@@ -419,10 +568,10 @@
                            FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
                            VerticalAlignment="Center" Foreground="#F8FAFC"/>
                 <TextBlock Text="{Binding AudioStatusLabel}"
-                           FontSize="11" VerticalAlignment="Center" Foreground="#94A3B8"/>
-                <Border Padding="7,2" CornerRadius="999" Background="#222738" BorderBrush="#26FFFFFF" BorderThickness="1">
+                           FontSize="11" VerticalAlignment="Center" Foreground="#A6B0C3"/>
+                <Border Padding="7,2" CornerRadius="999" Background="#24FFFFFF" BorderBrush="#2EFFFFFF" BorderThickness="1">
                   <TextBlock Text="{Binding TimingOffsetDisplay}" FontFamily="{StaticResource LpFontMono}"
-                             FontFeatures="tnum" FontSize="11" FontWeight="SemiBold" Foreground="#E2E8F0"/>
+                             FontFeatures="tnum" FontSize="11" FontWeight="SemiBold" Foreground="#F1F5F9"/>
                 </Border>
                 <Border IsVisible="{Binding ShowTroubleshootingPill}"
                         Padding="6,2" CornerRadius="999"
@@ -436,17 +585,18 @@
 
           <!-- Right Pill: Demo + Desktop Overlay + Settings + Fullscreen F11 -->
           <Border Grid.Column="2"
-                  Background="#BA10121A"
-                  BorderBrush="#2EFFFFFF"
+                  Background="{DynamicResource LpGlassChromeBrush}"
+                  BorderBrush="{DynamicResource LpGlassChromeBorderBrush}"
                   BorderThickness="1"
+                  BoxShadow="0 10 28 0 #70000000"
                   CornerRadius="999"
                   Padding="6,4">
-            <StackPanel Orientation="Horizontal" Spacing="4">
-              <ToggleButton Content="Demo" FontSize="11" Padding="10,6" MinHeight="34" CornerRadius="999" Cursor="Hand"
+            <StackPanel Orientation="Horizontal" Spacing="5">
+              <ToggleButton Classes="glass-toggle" Content="Demo" FontSize="11.5" Padding="11,6" MinHeight="34" CornerRadius="999"
                             IsChecked="{Binding IsDemoMode, Mode=OneWay}"
                             Command="{Binding ToggleDemoModeCommand}"
                             ToolTip.Tip="Toggle looping Neon Horizon demo preview"/>
-              <ToggleButton Width="36" Height="36" Padding="0" CornerRadius="999" Cursor="Hand"
+              <ToggleButton Classes="glass-icon-toggle" Width="36" Height="36" Padding="0" CornerRadius="999"
                             IsChecked="{Binding DesktopOverlayEnabled, Mode=OneWay}"
                             Command="{Binding ToggleDesktopOverlayCommand}"
                             ToolTip.Tip="Toggle transparent click-through desktop overlay"
@@ -454,15 +604,18 @@
                 <PathIcon Data="{StaticResource LpIconEyeRegular}" Width="16" Height="16"/>
               </ToggleButton>
               <ToggleButton x:Name="SettingsToggleBtn"
-                            Width="36" Height="36" Padding="0" CornerRadius="999" Cursor="Hand"
+                            Classes="glass-icon-toggle"
+                            Width="36" Height="36" Padding="0" CornerRadius="999"
                             IsChecked="{Binding IsSettingsDrawerOpen, Mode=OneWay}"
                             Command="{Binding ToggleSettingsDrawerCommand}"
                             ToolTip.Tip="Settings (Ctrl+,)"
                             AutomationProperties.Name="Toggle Settings drawer">
                 <PathIcon Data="{StaticResource LpIconSettingsRegular}" Width="16" Height="16"/>
               </ToggleButton>
-              <Button Width="36" Height="36" Padding="0" CornerRadius="999" Cursor="Hand"
+              <Button Classes="glass-circle"
+                      Width="36" Height="36" Padding="0"
                       Background="{DynamicResource LpAccentPrimaryBrush}"
+                      BorderBrush="#66FFFFFF"
                       Command="{Binding ToggleFullscreenCommand}"
                       ToolTip.Tip="Toggle Pure Fullscreen Party Stage (F11)"
                       AutomationProperties.Name="Toggle Fullscreen Party Mode">
@@ -474,8 +627,10 @@
         </Grid>
       </Grid>
 
-      <!-- Loading hairline along top bar -->
-      <ProgressBar VerticalAlignment="Top" Height="2" IsIndeterminate="True"
+      <!-- Subtle centered loading hairline tucked cleanly away from top monitor border -->
+      <ProgressBar VerticalAlignment="Top" HorizontalAlignment="Center"
+                   Width="180" Height="1.5" Margin="0,4,0,0" Opacity="0.65"
+                   CornerRadius="1" IsIndeterminate="True"
                    IsVisible="{Binding IsLoadingLyrics}"
                    Foreground="{DynamicResource LpAccentPrimaryBrush}"/>
 
@@ -483,17 +638,17 @@
       <Border x:Name="FlyoutCard"
               IsVisible="{Binding IsAnyFlyoutOpen}"
               HorizontalAlignment="Center" VerticalAlignment="Top"
-              Margin="0,92,0,0" Width="392" Padding="16"
-              CornerRadius="16"
-              Background="{DynamicResource LpSurfaceBrush}"
-              BorderBrush="{DynamicResource LpBorderStrongBrush}" BorderThickness="1"
+              Margin="0,92,0,0" Width="408" Padding="18"
+              CornerRadius="18"
+              Background="{DynamicResource LpGlassPopoverBrush}"
+              BorderBrush="{DynamicResource LpGlassChromeBorderBrush}" BorderThickness="1"
               BoxShadow="{DynamicResource LpShadowPopover}">
         <StackPanel Spacing="12">
           <!-- Size Flyout -->
           <StackPanel IsVisible="{Binding IsSizeFlyoutOpen}" Spacing="10">
             <Grid ColumnDefinitions="*,Auto">
-              <TextBlock Text="Typography &amp; Stage Size" FontWeight="SemiBold" FontSize="14" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
-              <Button Grid.Column="1" Content="Done" FontSize="11" Padding="8,3" Command="{Binding ClosePopupsCommand}"/>
+              <TextBlock Text="Typography &amp; Stage Size" FontFamily="{StaticResource LpFontDisplay}" FontWeight="Bold" FontSize="15" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+              <Button Classes="chip" Grid.Column="1" Content="Done" FontSize="11" FontWeight="SemiBold" Padding="11,4" CornerRadius="999" Command="{Binding ClosePopupsCommand}"/>
             </Grid>
             <Grid ColumnDefinitions="*,Auto">
               <TextBlock Text="Stage Hero Size (Concert Scale)" FontSize="12" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
@@ -507,24 +662,92 @@
             <Slider Minimum="60" Maximum="160" TickFrequency="5" IsSnapToTickEnabled="True" Value="{Binding FontScalePercent}"/>
           </StackPanel>
 
-          <!-- Font Flyout -->
+          <!-- Font Flyout (10 Studio Typefaces) -->
           <StackPanel IsVisible="{Binding IsFontFlyoutOpen}" Spacing="10">
             <Grid ColumnDefinitions="*,Auto">
-              <TextBlock Text="Stage Typeface" FontWeight="SemiBold" FontSize="14" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
-              <Button Grid.Column="1" Content="Done" FontSize="11" Padding="8,3" Command="{Binding ClosePopupsCommand}"/>
+              <TextBlock Text="Stage Typeface" FontFamily="{StaticResource LpFontDisplay}" FontWeight="Bold" FontSize="15" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+              <Button Classes="chip" Grid.Column="1" Content="Done" FontSize="11" FontWeight="SemiBold" Padding="11,4" CornerRadius="999" Command="{Binding ClosePopupsCommand}"/>
             </Grid>
-            <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="8">
-              <Button Classes="chip" Classes.active="{Binding IsJostSelected}" Grid.Row="0" Grid.Column="0" Padding="10,8" CornerRadius="8" HorizontalAlignment="Stretch" Command="{Binding SelectFontCommand}" CommandParameter="Jost">
-                <StackPanel><TextBlock Text="Aa" FontFamily="{StaticResource LpFontJost}" FontSize="18"/><TextBlock Text="Jost" FontSize="12"/></StackPanel>
+            <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="8">
+              <Button Classes="chip" Classes.active="{Binding IsJostSelected}" Grid.Row="0" Grid.Column="0" Padding="9,7" CornerRadius="10" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Command="{Binding SelectFontCommand}" CommandParameter="Jost">
+                <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                  <Border Width="30" Height="30" CornerRadius="7" Background="{DynamicResource LpGlassTileBrush}" BorderBrush="{DynamicResource LpGlassTileBorderBrush}" BorderThickness="1">
+                    <TextBlock Text="Aa" FontFamily="{StaticResource LpFontJost}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  </Border>
+                  <StackPanel VerticalAlignment="Center"><TextBlock Text="Jost" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="Geometric" FontSize="10" Foreground="{DynamicResource LpTextTertiaryBrush}"/></StackPanel>
+                </StackPanel>
               </Button>
-              <Button Classes="chip" Classes.active="{Binding IsBodoniSelected}" Grid.Row="0" Grid.Column="1" Padding="10,8" CornerRadius="8" HorizontalAlignment="Stretch" Command="{Binding SelectFontCommand}" CommandParameter="Bodoni Moda">
-                <StackPanel><TextBlock Text="Aa" FontFamily="{StaticResource LpFontBodoni}" FontSize="18"/><TextBlock Text="Bodoni Moda" FontSize="12"/></StackPanel>
+              <Button Classes="chip" Classes.active="{Binding IsBodoniSelected}" Grid.Row="0" Grid.Column="1" Padding="9,7" CornerRadius="10" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Command="{Binding SelectFontCommand}" CommandParameter="Bodoni Moda">
+                <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                  <Border Width="30" Height="30" CornerRadius="7" Background="{DynamicResource LpGlassTileBrush}" BorderBrush="{DynamicResource LpGlassTileBorderBrush}" BorderThickness="1">
+                    <TextBlock Text="Aa" FontFamily="{StaticResource LpFontBodoni}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  </Border>
+                  <StackPanel VerticalAlignment="Center"><TextBlock Text="Bodoni Moda" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="Editorial" FontSize="10" Foreground="{DynamicResource LpTextTertiaryBrush}"/></StackPanel>
+                </StackPanel>
               </Button>
-              <Button Classes="chip" Classes.active="{Binding IsMulishSelected}" Grid.Row="1" Grid.Column="0" Padding="10,8" CornerRadius="8" HorizontalAlignment="Stretch" Command="{Binding SelectFontCommand}" CommandParameter="Mulish">
-                <StackPanel><TextBlock Text="Aa" FontFamily="{StaticResource LpFontMulish}" FontSize="18"/><TextBlock Text="Mulish" FontSize="12"/></StackPanel>
+              <Button Classes="chip" Classes.active="{Binding IsMulishSelected}" Grid.Row="1" Grid.Column="0" Padding="9,7" CornerRadius="10" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Command="{Binding SelectFontCommand}" CommandParameter="Mulish">
+                <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                  <Border Width="30" Height="30" CornerRadius="7" Background="{DynamicResource LpGlassTileBrush}" BorderBrush="{DynamicResource LpGlassTileBorderBrush}" BorderThickness="1">
+                    <TextBlock Text="Aa" FontFamily="{StaticResource LpFontMulish}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  </Border>
+                  <StackPanel VerticalAlignment="Center"><TextBlock Text="Mulish" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="Humanist" FontSize="10" Foreground="{DynamicResource LpTextTertiaryBrush}"/></StackPanel>
+                </StackPanel>
               </Button>
-              <Button Classes="chip" Classes.active="{Binding IsNunitoSelected}" Grid.Row="1" Grid.Column="1" Padding="10,8" CornerRadius="8" HorizontalAlignment="Stretch" Command="{Binding SelectFontCommand}" CommandParameter="Nunito">
-                <StackPanel><TextBlock Text="Aa" FontFamily="{StaticResource LpFontNunito}" FontSize="18"/><TextBlock Text="Nunito" FontSize="12"/></StackPanel>
+              <Button Classes="chip" Classes.active="{Binding IsNunitoSelected}" Grid.Row="1" Grid.Column="1" Padding="9,7" CornerRadius="10" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Command="{Binding SelectFontCommand}" CommandParameter="Nunito">
+                <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                  <Border Width="30" Height="30" CornerRadius="7" Background="{DynamicResource LpGlassTileBrush}" BorderBrush="{DynamicResource LpGlassTileBorderBrush}" BorderThickness="1">
+                    <TextBlock Text="Aa" FontFamily="{StaticResource LpFontNunito}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  </Border>
+                  <StackPanel VerticalAlignment="Center"><TextBlock Text="Nunito" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="Rounded" FontSize="10" Foreground="{DynamicResource LpTextTertiaryBrush}"/></StackPanel>
+                </StackPanel>
+              </Button>
+              <Button Classes="chip" Classes.active="{Binding IsBahnschriftSelected}" Grid.Row="2" Grid.Column="0" Padding="9,7" CornerRadius="10" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Command="{Binding SelectFontCommand}" CommandParameter="Bahnschrift">
+                <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                  <Border Width="30" Height="30" CornerRadius="7" Background="{DynamicResource LpGlassTileBrush}" BorderBrush="{DynamicResource LpGlassTileBorderBrush}" BorderThickness="1">
+                    <TextBlock Text="Aa" FontFamily="{StaticResource LpFontBahnschrift}" FontWeight="SemiBold" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  </Border>
+                  <StackPanel VerticalAlignment="Center"><TextBlock Text="Bahnschrift" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="Industrial DIN" FontSize="10" Foreground="{DynamicResource LpTextTertiaryBrush}"/></StackPanel>
+                </StackPanel>
+              </Button>
+              <Button Classes="chip" Classes.active="{Binding IsGeorgiaSelected}" Grid.Row="2" Grid.Column="1" Padding="9,7" CornerRadius="10" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Command="{Binding SelectFontCommand}" CommandParameter="Georgia">
+                <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                  <Border Width="30" Height="30" CornerRadius="7" Background="{DynamicResource LpGlassTileBrush}" BorderBrush="{DynamicResource LpGlassTileBorderBrush}" BorderThickness="1">
+                    <TextBlock Text="Aa" FontFamily="{StaticResource LpFontGeorgia}" FontWeight="Bold" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  </Border>
+                  <StackPanel VerticalAlignment="Center"><TextBlock Text="Georgia" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="Classic serif" FontSize="10" Foreground="{DynamicResource LpTextTertiaryBrush}"/></StackPanel>
+                </StackPanel>
+              </Button>
+              <Button Classes="chip" Classes.active="{Binding IsImpactSelected}" Grid.Row="3" Grid.Column="0" Padding="9,7" CornerRadius="10" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Command="{Binding SelectFontCommand}" CommandParameter="Impact">
+                <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                  <Border Width="30" Height="30" CornerRadius="7" Background="{DynamicResource LpGlassTileBrush}" BorderBrush="{DynamicResource LpGlassTileBorderBrush}" BorderThickness="1">
+                    <TextBlock Text="Aa" FontFamily="{StaticResource LpFontImpact}" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  </Border>
+                  <StackPanel VerticalAlignment="Center"><TextBlock Text="Impact" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="Poster heavy" FontSize="10" Foreground="{DynamicResource LpTextTertiaryBrush}"/></StackPanel>
+                </StackPanel>
+              </Button>
+              <Button Classes="chip" Classes.active="{Binding IsSitkaDisplaySelected}" Grid.Row="3" Grid.Column="1" Padding="9,7" CornerRadius="10" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Command="{Binding SelectFontCommand}" CommandParameter="Sitka Display">
+                <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                  <Border Width="30" Height="30" CornerRadius="7" Background="{DynamicResource LpGlassTileBrush}" BorderBrush="{DynamicResource LpGlassTileBorderBrush}" BorderThickness="1">
+                    <TextBlock Text="Aa" FontFamily="{StaticResource LpFontSitka}" FontWeight="Bold" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  </Border>
+                  <StackPanel VerticalAlignment="Center"><TextBlock Text="Sitka Display" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="Lyric serif" FontSize="10" Foreground="{DynamicResource LpTextTertiaryBrush}"/></StackPanel>
+                </StackPanel>
+              </Button>
+              <Button Classes="chip" Classes.active="{Binding IsInkFreeSelected}" Grid.Row="4" Grid.Column="0" Padding="9,7" CornerRadius="10" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Command="{Binding SelectFontCommand}" CommandParameter="Ink Free">
+                <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                  <Border Width="30" Height="30" CornerRadius="7" Background="{DynamicResource LpGlassTileBrush}" BorderBrush="{DynamicResource LpGlassTileBorderBrush}" BorderThickness="1">
+                    <TextBlock Text="Aa" FontFamily="{StaticResource LpFontInkFree}" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  </Border>
+                  <StackPanel VerticalAlignment="Center"><TextBlock Text="Ink Free" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="Handwritten" FontSize="10" Foreground="{DynamicResource LpTextTertiaryBrush}"/></StackPanel>
+                </StackPanel>
+              </Button>
+              <Button Classes="chip" Classes.active="{Binding IsCascadiaMonoSelected}" Grid.Row="4" Grid.Column="1" Padding="9,7" CornerRadius="10" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Command="{Binding SelectFontCommand}" CommandParameter="Cascadia Mono">
+                <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                  <Border Width="30" Height="30" CornerRadius="7" Background="{DynamicResource LpGlassTileBrush}" BorderBrush="{DynamicResource LpGlassTileBorderBrush}" BorderThickness="1">
+                    <TextBlock Text="Aa" FontFamily="{StaticResource LpFontMono}" FontWeight="SemiBold" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  </Border>
+                  <StackPanel VerticalAlignment="Center"><TextBlock Text="Cascadia" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="Studio mono" FontSize="10" Foreground="{DynamicResource LpTextTertiaryBrush}"/></StackPanel>
+                </StackPanel>
               </Button>
             </Grid>
           </StackPanel>
@@ -532,39 +755,33 @@
           <!-- Screen Flyout -->
           <StackPanel IsVisible="{Binding IsScreenFlyoutOpen}" Spacing="10">
             <Grid ColumnDefinitions="*,Auto">
-              <TextBlock Text="Screen &amp; Overlay Mode" FontWeight="SemiBold" FontSize="14" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
-              <Button Grid.Column="1" Content="Done" FontSize="11" Padding="8,3" Command="{Binding ClosePopupsCommand}"/>
+              <TextBlock Text="Screen &amp; Overlay Mode" FontFamily="{StaticResource LpFontDisplay}" FontWeight="Bold" FontSize="15" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+              <Button Classes="chip" Grid.Column="1" Content="Done" FontSize="11" FontWeight="SemiBold" Padding="11,4" CornerRadius="999" Command="{Binding ClosePopupsCommand}"/>
             </Grid>
-            <Button Content="Enter Fullscreen Party Stage (F11)" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                    Background="{DynamicResource LpAccentPrimaryBrush}" Foreground="{DynamicResource LpOnAccentPrimaryBrush}"
+            <Button Content="Enter Fullscreen Party Stage (F11)" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" CornerRadius="10" Padding="10,9"
+                    Background="{DynamicResource LpAccentPrimaryBrush}" Foreground="{DynamicResource LpOnAccentPrimaryBrush}" FontWeight="SemiBold"
                     Command="{Binding ToggleFullscreenCommand}"/>
             <Grid ColumnDefinitions="*,Auto">
               <TextBlock Text="Transparent Desktop Overlay" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
               <ToggleSwitch Grid.Column="1" IsChecked="{Binding DesktopOverlayEnabled}" OnContent="" OffContent=""/>
             </Grid>
-            <Button Content="Open OBS Chroma-Key Window" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+            <Button Classes="chip" Content="Open OBS Chroma-Key Window" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" CornerRadius="9"
                     Command="{Binding ToggleObsWindowCommand}"/>
-            <Button Content="All Monitor &amp; Safe-Zone Options..." HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+            <Button Classes="chip" Content="All Monitor &amp; Safe-Zone Options..." HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" CornerRadius="9"
                     Command="{Binding ToggleSettingsDrawerCommand}"/>
           </StackPanel>
 
           <!-- Aesthetics Flyout -->
           <StackPanel IsVisible="{Binding IsAestheticsFlyoutOpen}" Spacing="10">
             <Grid ColumnDefinitions="*,Auto">
-              <TextBlock Text="Party Aesthetics &amp; Backdrop" FontWeight="SemiBold" FontSize="14" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
-              <Button Grid.Column="1" Content="Done" FontSize="11" Padding="8,3" Command="{Binding ClosePopupsCommand}"/>
+              <TextBlock Text="Aesthetics &amp; Backdrop" FontFamily="{StaticResource LpFontDisplay}" FontWeight="Bold" FontSize="15" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+              <Button Classes="chip" Grid.Column="1" Content="Done" FontSize="11" FontWeight="SemiBold" Padding="11,4" CornerRadius="999" Command="{Binding ClosePopupsCommand}"/>
             </Grid>
-            <Grid ColumnDefinitions="*,*,*" ColumnSpacing="6">
-              <Button Classes="chip" Classes.active="{Binding IsAmbientPartyMesh}" Grid.Column="0" Content="Ambient Mesh" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" CornerRadius="8"
-                      Command="{Binding SelectBackdropModeCommand}" CommandParameter="{x:Static m:StageBackdropMode.AmbientPartyMesh}"/>
-              <Button Classes="chip" Classes.active="{Binding IsAlbumArtBackdrop}" Grid.Column="1" Content="Album Art" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" CornerRadius="8"
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+              <Button Classes="chip" Classes.active="{Binding IsAlbumArtBackdrop}" Grid.Column="0" Content="Album Art" FontSize="12" FontWeight="SemiBold" Padding="8,8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" CornerRadius="9"
                       Command="{Binding SelectBackdropModeCommand}" CommandParameter="{x:Static m:StageBackdropMode.AlbumArtBlur}"/>
-              <Button Classes="chip" Classes.active="{Binding IsPureBlackBackdrop}" Grid.Column="2" Content="Pure Black" FontSize="11" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" CornerRadius="8"
+              <Button Classes="chip" Classes.active="{Binding IsPureBlackBackdrop}" Grid.Column="1" Content="Pure Black" FontSize="12" FontWeight="SemiBold" Padding="8,8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" CornerRadius="9"
                       Command="{Binding SelectBackdropModeCommand}" CommandParameter="{x:Static m:StageBackdropMode.PureBlack}"/>
-            </Grid>
-            <Grid ColumnDefinitions="*,Auto">
-              <TextBlock Text="Following Beat Dot" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
-              <ToggleSwitch Grid.Column="1" IsChecked="{Binding ShowFollowingDot}" OnContent="" OffContent=""/>
             </Grid>
             <Grid ColumnDefinitions="*,Auto">
               <TextBlock Text="Color-Changing Sweep Layer" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
@@ -586,12 +803,12 @@
             <Grid ColumnDefinitions="*,Auto">
               <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <PathIcon Data="{StaticResource LpIconEqualizer}" Width="15" Height="15" Foreground="{DynamicResource LpAccentTextBrush}"/>
-                <TextBlock Text="Visualizer &amp; Edges Glow" FontWeight="SemiBold" FontSize="14" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+                <TextBlock Text="Visualizer &amp; Edges Glow" FontFamily="{StaticResource LpFontDisplay}" FontWeight="Bold" FontSize="15" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
               </StackPanel>
-              <Button Grid.Column="1" Content="Done" FontSize="11" Padding="8,3" Command="{Binding ClosePopupsCommand}"/>
+              <Button Classes="chip" Grid.Column="1" Content="Done" FontSize="11" FontWeight="SemiBold" Padding="11,4" CornerRadius="999" Command="{Binding ClosePopupsCommand}"/>
             </Grid>
 
-            <Border Padding="8,5" CornerRadius="8" Background="{DynamicResource LpSurfaceElevatedBrush}" BorderBrush="{DynamicResource LpBorderDefaultBrush}" BorderThickness="1">
+            <Border Padding="9,6" CornerRadius="9" Background="{DynamicResource LpGlassTileBrush}" BorderBrush="{DynamicResource LpGlassTileBorderBrush}" BorderThickness="1">
               <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Text="Audio Engine" FontSize="11" Foreground="{DynamicResource LpTextSecondaryBrush}" VerticalAlignment="Center"/>
                 <TextBlock Grid.Column="1" Text="{Binding AudioStatusLabel}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource LpAccentTextBrush}"/>
@@ -689,36 +906,37 @@
           <!-- Diagnostics & Sync Offset Flyout -->
           <StackPanel IsVisible="{Binding IsDiagnosticsFlyoutOpen}" Spacing="10">
             <Grid ColumnDefinitions="*,Auto">
-              <TextBlock Text="Media, Sync Offset &amp; Audio" FontWeight="SemiBold" FontSize="14" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
-              <Button Grid.Column="1" Content="Done" FontSize="11" Padding="8,3" Command="{Binding ClosePopupsCommand}"/>
+              <TextBlock Text="Media, Sync Offset &amp; Audio" FontFamily="{StaticResource LpFontDisplay}" FontWeight="Bold" FontSize="15" Foreground="{DynamicResource LpTextPrimaryBrush}"/>
+              <Button Classes="chip" Grid.Column="1" Content="Done" FontSize="11" FontWeight="SemiBold" Padding="11,4" CornerRadius="999" Command="{Binding ClosePopupsCommand}"/>
             </Grid>
 
             <!-- 5-Step Tabular Timing Offset inside Diagnostics Popover -->
-            <Border Padding="8" CornerRadius="10" Background="{DynamicResource LpSurfaceElevatedBrush}" BorderBrush="{DynamicResource LpBorderDefaultBrush}" BorderThickness="1">
+            <Border Padding="9" CornerRadius="10" Background="{DynamicResource LpGlassTileBrush}" BorderBrush="{DynamicResource LpGlassTileBorderBrush}" BorderThickness="1">
               <StackPanel Spacing="6" IsEnabled="{Binding CanAdjustOffset}">
                 <TextBlock Text="Per-Song Lyric Timing Offset" FontSize="11" Foreground="{DynamicResource LpTextSecondaryBrush}"/>
                 <Grid ColumnDefinitions="*,*,Auto,*,*" ColumnSpacing="4">
-                  <Button Grid.Column="0" Content="−1s" FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="11"
-                          Padding="6,5" CornerRadius="8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Cursor="Hand"
+                  <Button Classes="chip" Grid.Column="0" Content="−1s" FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="11"
+                          Padding="6,5" CornerRadius="8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                           Command="{Binding NudgeOffsetCommand}" CommandParameter="-1.0"
                           AutomationProperties.Name="Shift lyrics 1 second earlier"/>
-                  <Button Grid.Column="1" Content="−0.5s" FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="11"
-                          Padding="6,5" CornerRadius="8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Cursor="Hand"
+                  <Button Classes="chip" Grid.Column="1" Content="−0.5s" FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="11"
+                          Padding="6,5" CornerRadius="8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                           Command="{Binding NudgeOffsetCommand}" CommandParameter="-0.5"
                           AutomationProperties.Name="Shift lyrics 0.5 seconds earlier"/>
                   <Button Grid.Column="2" Content="{Binding TimingOffsetDisplay}"
                           FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="11" FontWeight="SemiBold"
                           Padding="10,5" CornerRadius="8" Cursor="Hand"
                           Background="{DynamicResource LpAccentSoftBgBrush}"
+                          BorderBrush="{DynamicResource LpAccentBorderBrush}" BorderThickness="1"
                           Foreground="{DynamicResource LpAccentTextBrush}"
                           Command="{Binding ResetOffsetCommand}"
                           ToolTip.Tip="Click to reset per-song timing offset to 0.0s"/>
-                  <Button Grid.Column="3" Content="+0.5s" FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="11"
-                          Padding="6,5" CornerRadius="8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Cursor="Hand"
+                  <Button Classes="chip" Grid.Column="3" Content="+0.5s" FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="11"
+                          Padding="6,5" CornerRadius="8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                           Command="{Binding NudgeOffsetCommand}" CommandParameter="0.5"
                           AutomationProperties.Name="Shift lyrics 0.5 seconds later"/>
-                  <Button Grid.Column="4" Content="+1s" FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="11"
-                          Padding="6,5" CornerRadius="8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Cursor="Hand"
+                  <Button Classes="chip" Grid.Column="4" Content="+1s" FontFamily="{StaticResource LpFontMono}" FontFeatures="tnum" FontSize="11"
+                          Padding="6,5" CornerRadius="8" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
                           Command="{Binding NudgeOffsetCommand}" CommandParameter="1.0"
                           AutomationProperties.Name="Shift lyrics 1 second later"/>
                 </Grid>
@@ -736,9 +954,9 @@
               <ToggleSwitch Grid.Column="1" IsChecked="{Binding UniversalPlayerMode}" OnContent="" OffContent=""/>
             </Grid>
             <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
-              <Button Grid.Column="0" Content="Retry Lyrics" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+              <Button Classes="chip" Grid.Column="0" Content="Retry Lyrics" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" CornerRadius="9"
                       Command="{Binding RetryLyricsCommand}"/>
-              <Button Grid.Column="1" Content="Toggle Demo" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+              <Button Classes="chip" Grid.Column="1" Content="Toggle Demo" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" CornerRadius="9"
                       Command="{Binding ToggleDemoModeCommand}"/>
             </Grid>
           </StackPanel>

@@ -341,21 +341,40 @@ export function extractPaletteFromCanvas(canvas) {
 }
 
 const KEYWORD_ICON_MAP = [
-  ['star', 'star'], ['stars', 'star'], ['tonight', 'moon'], ['night', 'moon'],
-  ['midnight', 'moon'], ['fire', 'flame'], ['burn', 'flame'], ['sparks', 'spark'],
-  ['bright', 'sun'], ['light', 'sun'], ['lights', 'sun'], ['beam', 'sun'],
-  ['ocean', 'wave'], ['tide', 'wave'], ['rain', 'drop'], ['silver', 'gem'],
-  ['glass', 'gem'], ['shadows', 'cloud'], ['quiet', 'note'], ['rhythm', 'pulse'],
-  ['heart', 'heart'], ['code', 'code'], ['writing', 'code'], ['dark', 'moon'],
-  ['neon', 'bolt'], ['electric', 'bolt'], ['sudden', 'bolt'], ['city', 'city'],
-  ['flight', 'plane'], ['time', 'clock'], ['hold', 'shield'], ['dream', 'orbit'],
-  ['follow', 'compass'], ['chasing', 'compass'],
+  ['star', 'star'], ['stars', 'star'], ['taara', 'star'], ['tara', 'star'], ['taare', 'star'], ['sitara', 'star'], ['sitare', 'star'], ['तारा', 'star'], ['तारे', 'star'], ['सितारा', 'star'], ['सितारे', 'star'], ['sajda', 'star'], ['सजदा', 'star'], ['hasrat', 'star'], ['हसरत', 'star'],
+  ['tonight', 'moon'], ['night', 'moon'], ['midnight', 'moon'], ['dark', 'moon'], ['raat', 'moon'], ['chaand', 'moon'], ['chand', 'moon'], ['chandni', 'moon'], ['shaam', 'moon'], ['रात', 'moon'], ['चांद', 'moon'], ['चांदनी', 'moon'], ['शाम', 'moon'],
+  ['fire', 'flame'], ['burn', 'flame'], ['aag', 'flame'], ['shola', 'flame'], ['jwala', 'flame'], ['jalna', 'flame'], ['आग', 'flame'], ['शोला', 'flame'], ['ज्वाला', 'flame'],
+  ['sparks', 'spark'], ['chingari', 'spark'], ['chamak', 'spark'], ['चिंगारी', 'spark'], ['चमक', 'spark'], ['fikar', 'spark'], ['फिकर', 'spark'], ['बेफिकर', 'spark'],
+  ['bright', 'sun'], ['light', 'sun'], ['lights', 'sun'], ['beam', 'sun'], ['suraj', 'sun'], ['sooraj', 'sun'], ['subah', 'sun'], ['dhoop', 'sun'], ['roshni', 'sun'], ['ujala', 'sun'], ['सूरज', 'sun'], ['सुबह', 'sun'], ['धूप', 'sun'], ['रोशनी', 'sun'],
+  ['ocean', 'wave'], ['tide', 'wave'], ['samundar', 'wave'], ['samandar', 'wave'], ['sagar', 'wave'], ['lehar', 'wave'], ['lehrein', 'wave'], ['nadi', 'wave'], ['समंदर', 'wave'], ['सागर', 'wave'], ['लहर', 'wave'], ['नदी', 'wave'],
+  ['rain', 'drop'], ['baarish', 'drop'], ['barish', 'drop'], ['barsaat', 'drop'], ['saawan', 'drop'], ['aansu', 'drop'], ['ansu', 'drop'], ['paani', 'drop'], ['boond', 'drop'], ['बारिश', 'drop'], ['बरसात', 'drop'], ['आंसू', 'drop'], ['पानी', 'drop'], ['बूंद', 'drop'],
+  ['silver', 'gem'], ['glass', 'gem'], ['heera', 'gem'], ['hira', 'gem'], ['sona', 'gem'], ['chaandi', 'gem'], ['हीरा', 'gem'], ['सोना', 'gem'], ['चांदी', 'gem'],
+  ['shadows', 'cloud'], ['baadal', 'cloud'], ['badal', 'cloud'], ['aasmaan', 'cloud'], ['asman', 'cloud'], ['hawa', 'cloud'], ['बादल', 'cloud'], ['आसमान', 'cloud'], ['हवा', 'cloud'],
+  ['quiet', 'note'], ['geet', 'note'], ['gaana', 'note'], ['sangeet', 'note'], ['dhun', 'note'], ['गीत', 'note'], ['गाना', 'note'], ['संगीत', 'note'], ['धुन', 'note'],
+  ['rhythm', 'pulse'], ['dhadkan', 'pulse'], ['dhol', 'pulse'], ['tabla', 'pulse'], ['zindagi', 'pulse'], ['saans', 'pulse'], ['mehsoos', 'pulse'], ['धड़कन', 'pulse'], ['ढोल', 'pulse'], ['जिंदगी', 'pulse'], ['सांस', 'pulse'], ['महसूस', 'pulse'],
+  ['heart', 'heart'], ['dil', 'heart'], ['pyar', 'heart'], ['pyaar', 'heart'], ['ishq', 'heart'], ['ishk', 'heart'], ['mohabbat', 'heart'], ['sanam', 'heart'], ['jaan', 'heart'], ['mehboob', 'heart'], ['deewana', 'heart'], ['dard', 'heart'], ['phool', 'heart'], ['gulab', 'heart'], ['wafa', 'heart'], ['fida', 'heart'], ['दिल', 'heart'], ['प्यार', 'heart'], ['इश्क', 'heart'], ['मोहब्बत', 'heart'], ['जान', 'heart'], ['सनम', 'heart'], ['दर्द', 'heart'], ['फूल', 'heart'], ['गुलाब', 'heart'], ['वफा', 'heart'], ['फिदा', 'heart'],
+  ['code', 'code'], ['writing', 'code'], ['shayari', 'code'], ['shayar', 'code'], ['kahaani', 'code'], ['शायरी', 'code'], ['कहानी', 'code'],
+  ['neon', 'bolt'], ['electric', 'bolt'], ['sudden', 'bolt'], ['bijli', 'bolt'], ['toofan', 'bolt'], ['junoon', 'bolt'], ['बिजली', 'bolt'], ['तूफान', 'bolt'], ['जुनून', 'bolt'],
+  ['city', 'city'], ['sheher', 'city'], ['shahar', 'city'], ['gali', 'city'], ['duniya', 'city'], ['शहर', 'city'], ['गली', 'city'], ['दुनिया', 'city'],
+  ['flight', 'plane'], ['udaan', 'plane'], ['pankh', 'plane'], ['parinda', 'plane'], ['aazaad', 'plane'], ['उड़ान', 'plane'], ['पंख', 'plane'], ['परिंदा', 'plane'], ['आजाद', 'plane'],
+  ['time', 'clock'], ['waqt', 'clock'], ['wakt', 'clock'], ['samay', 'clock'], ['pal', 'clock'], ['lamha', 'clock'], ['intezaar', 'clock'], ['वक्त', 'clock'], ['समय', 'clock'], ['पल', 'clock'], ['इंतजार', 'clock'],
+  ['hold', 'shield'], ['yaar', 'shield'], ['dost', 'shield'], ['humsafar', 'shield'], ['यार', 'shield'], ['दोस्त', 'shield'], ['हमसफर', 'shield'],
+  ['dream', 'orbit'], ['sapna', 'orbit'], ['sapne', 'orbit'], ['khwaab', 'orbit'], ['khwab', 'orbit'], ['jaadu', 'orbit'], ['jannat', 'orbit'], ['सपना', 'orbit'], ['सपने', 'orbit'], ['ख्वाब', 'orbit'], ['जादू', 'orbit'], ['जन्नत', 'orbit'],
+  ['follow', 'compass'], ['chasing', 'compass'], ['safar', 'compass'], ['raasta', 'compass'], ['manzil', 'compass'], ['सफर', 'compass'], ['रास्ता', 'compass'], ['मंजिल', 'compass'],
 ];
 
 export function matchSemanticIcon(wordText) {
-  const clean = wordText.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const found = KEYWORD_ICON_MAP.find(([k]) => clean === k || clean.includes(k));
-  return found ? found[1] : null;
+  if (!wordText) return null;
+  const clean = wordText
+    .toLowerCase()
+    .replace(/\u093C/g, '')
+    .replace(/\u0901/g, '\u0902')
+    .replace(/[^a-z0-9\u0900-\u0963]/g, '');
+  if (clean.length < 2) return null;
+  const exact = KEYWORD_ICON_MAP.find(([k]) => clean === k);
+  if (exact) return exact[1];
+  const partial = KEYWORD_ICON_MAP.find(([k]) => k.length >= 4 && clean.includes(k));
+  return partial ? partial[1] : null;
 }
 
 export function drawSemanticIcon(ctx, iconName, cx, cy, radius, color, glow = false) {

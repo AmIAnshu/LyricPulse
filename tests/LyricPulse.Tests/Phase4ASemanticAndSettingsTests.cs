@@ -42,8 +42,8 @@ public sealed class Phase4ASemanticAndSettingsTests : IDisposable
     public async Task AppSettings_Phase4AStageAndAestheticDefaultsRoundTripAndClampCleanly()
     {
         var defaults = AppSettings.Default;
-        defaults.StageBackdropMode.Should().Be(StageBackdropMode.AmbientPartyMesh);
-        defaults.ShowFollowingDot.Should().BeTrue();
+        defaults.StageBackdropMode.Should().Be(StageBackdropMode.AlbumArtBlur);
+        defaults.ShowFollowingDot.Should().BeFalse();
         defaults.ShowColorSweepLayer.Should().BeTrue();
         defaults.PartyEnergyLevel.Should().Be(1.0f);
         defaults.FullscreenStageScale.Should().Be(1.85f);
@@ -54,17 +54,23 @@ public sealed class Phase4ASemanticAndSettingsTests : IDisposable
             OverlayStyleId.Constellation,
             OverlayStyleId.KineticWall);
 
-        // Clamping & invalid enum/NaN defense
+        // Clamping & invalid/removed enum/NaN defense
         var invalid = defaults with
         {
             StageBackdropMode = (StageBackdropMode)999,
+            ShowFollowingDot = true,
             PartyEnergyLevel = float.NaN,
             FullscreenStageScale = 9.5f
         };
         var normalized = invalid.ValidateAndNormalize();
-        normalized.StageBackdropMode.Should().Be(StageBackdropMode.AmbientPartyMesh);
+        normalized.StageBackdropMode.Should().Be(StageBackdropMode.AlbumArtBlur);
+        normalized.ShowFollowingDot.Should().BeFalse();
         normalized.PartyEnergyLevel.Should().Be(1.0f);
         normalized.FullscreenStageScale.Should().Be(2.6f);
+
+        // Legacy AmbientPartyMesh settings normalize cleanly to AlbumArtBlur
+        var legacy = (defaults with { StageBackdropMode = StageBackdropMode.AmbientPartyMesh }).ValidateAndNormalize();
+        legacy.StageBackdropMode.Should().Be(StageBackdropMode.AlbumArtBlur);
 
         var lowClamped = (defaults with { PartyEnergyLevel = 0.1f, FullscreenStageScale = 0.4f }).ValidateAndNormalize();
         lowClamped.PartyEnergyLevel.Should().Be(0.5f);
@@ -454,7 +460,6 @@ public sealed class Phase4ASemanticAndSettingsTests : IDisposable
 
         // Stage & aesthetic setting commands persist cleanly
         await controller.SetStageBackdropModeAsync(StageBackdropMode.PureBlack);
-        await controller.ToggleFollowingDotAsync();
         await controller.ToggleColorSweepLayerAsync();
         await controller.ToggleDesktopOverlayAsync();
         await controller.SetPartyEnergyLevelAsync(1.4f);

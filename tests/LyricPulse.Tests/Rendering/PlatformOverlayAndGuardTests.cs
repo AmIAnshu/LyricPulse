@@ -192,7 +192,9 @@ public sealed class PlatformOverlayAndGuardTests
         exitedFullscreen.Wait(TimeSpan.FromSeconds(2)).Should().BeTrue();
         monitor.IsCurrentlyFullscreen.Should().BeFalse();
 
-        FullscreenAutoHideMonitor.IsFullscreenState(QueryUserNotificationState.Busy).Should().BeTrue();
+        // QUNS_BUSY fires frequently on Windows 11 for non-fullscreen Electron/browser/maximized windows;
+        // only true exclusive D3D / Presentation modes may hide desktop overlays and edge glow.
+        FullscreenAutoHideMonitor.IsFullscreenState(QueryUserNotificationState.Busy).Should().BeFalse();
         FullscreenAutoHideMonitor.IsFullscreenState(QueryUserNotificationState.RunningD3DFullScreen).Should().BeTrue();
         FullscreenAutoHideMonitor.IsFullscreenState(QueryUserNotificationState.PresentationMode).Should().BeTrue();
         FullscreenAutoHideMonitor.IsFullscreenState(QueryUserNotificationState.AcceptsNotifications).Should().BeFalse();

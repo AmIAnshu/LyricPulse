@@ -211,11 +211,13 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
         {
             if (p is StageBackdropMode m)
             {
-                _ = SafeRunAsync(() => _runtime.SetStageBackdropModeAsync(m));
+                var safe = m == StageBackdropMode.AmbientPartyMesh ? StageBackdropMode.AlbumArtBlur : m;
+                _ = SafeRunAsync(() => _runtime.SetStageBackdropModeAsync(safe));
             }
             else if (p is string s && Enum.TryParse<StageBackdropMode>(s, ignoreCase: true, out var parsed))
             {
-                _ = SafeRunAsync(() => _runtime.SetStageBackdropModeAsync(parsed));
+                var safe = parsed == StageBackdropMode.AmbientPartyMesh ? StageBackdropMode.AlbumArtBlur : parsed;
+                _ = SafeRunAsync(() => _runtime.SetStageBackdropModeAsync(safe));
             }
         });
         SelectThemeVariantCommand = new RelayCommand(p =>
@@ -596,10 +598,17 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
 
     // Settings properties bound directly in UI
     public string FontFamily => _snapshot.Settings.FontFamily;
+    private bool IsFontMatch(string token) => FontFamily.Contains(token, StringComparison.OrdinalIgnoreCase);
     public bool IsJostSelected => FontFamily.Equals("Jost", StringComparison.OrdinalIgnoreCase);
-    public bool IsBodoniSelected => FontFamily.Contains("Bodoni", StringComparison.OrdinalIgnoreCase);
+    public bool IsBodoniSelected => IsFontMatch("Bodoni");
     public bool IsMulishSelected => FontFamily.Equals("Mulish", StringComparison.OrdinalIgnoreCase);
     public bool IsNunitoSelected => FontFamily.Equals("Nunito", StringComparison.OrdinalIgnoreCase);
+    public bool IsBahnschriftSelected => IsFontMatch("Bahnschrift");
+    public bool IsImpactSelected => IsFontMatch("Impact");
+    public bool IsGeorgiaSelected => IsFontMatch("Georgia");
+    public bool IsSitkaDisplaySelected => IsFontMatch("Sitka");
+    public bool IsInkFreeSelected => IsFontMatch("Ink");
+    public bool IsCascadiaMonoSelected => IsFontMatch("Cascadia") || IsFontMatch("Mono");
 
     public int FontScalePercent
     {
@@ -704,21 +713,8 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
     public Color ActivePaletteColor2 => ToAvaloniaColor(_snapshot.ActivePalette.AccentColor2);
     public Color ActivePaletteColor3 => ToAvaloniaColor(_snapshot.ActivePalette.AccentColor3);
 
-    public bool IsAmbientPartyMesh => _snapshot.Settings.StageBackdropMode == StageBackdropMode.AmbientPartyMesh;
-    public bool IsAlbumArtBackdrop => _snapshot.Settings.StageBackdropMode == StageBackdropMode.AlbumArtBlur;
+    public bool IsAlbumArtBackdrop => _snapshot.Settings.StageBackdropMode != StageBackdropMode.PureBlack;
     public bool IsPureBlackBackdrop => _snapshot.Settings.StageBackdropMode == StageBackdropMode.PureBlack;
-
-    public bool ShowFollowingDot
-    {
-        get => _snapshot.Settings.ShowFollowingDot;
-        set
-        {
-            if (_snapshot.Settings.ShowFollowingDot != value)
-            {
-                _ = SafeRunAsync(() => _runtime.ToggleFollowingDotAsync());
-            }
-        }
-    }
 
     public bool ShowColorSweepLayer
     {
@@ -1173,6 +1169,12 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(IsBodoniSelected));
             OnPropertyChanged(nameof(IsMulishSelected));
             OnPropertyChanged(nameof(IsNunitoSelected));
+            OnPropertyChanged(nameof(IsBahnschriftSelected));
+            OnPropertyChanged(nameof(IsImpactSelected));
+            OnPropertyChanged(nameof(IsGeorgiaSelected));
+            OnPropertyChanged(nameof(IsSitkaDisplaySelected));
+            OnPropertyChanged(nameof(IsInkFreeSelected));
+            OnPropertyChanged(nameof(IsCascadiaMonoSelected));
             OnPropertyChanged(nameof(FontScalePercent));
             OnPropertyChanged(nameof(FullscreenStageScalePercent));
             OnPropertyChanged(nameof(PartyEnergyPercent));
@@ -1185,10 +1187,8 @@ public sealed class StageViewModel : ViewModelBase, IDisposable
             OnPropertyChanged(nameof(ManualHex1));
             OnPropertyChanged(nameof(ManualHex2));
             OnPropertyChanged(nameof(ManualHex3));
-            OnPropertyChanged(nameof(IsAmbientPartyMesh));
             OnPropertyChanged(nameof(IsAlbumArtBackdrop));
             OnPropertyChanged(nameof(IsPureBlackBackdrop));
-            OnPropertyChanged(nameof(ShowFollowingDot));
             OnPropertyChanged(nameof(ShowColorSweepLayer));
             OnPropertyChanged(nameof(DesktopOverlayEnabled));
             OnPropertyChanged(nameof(LyricsVisible));

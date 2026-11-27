@@ -178,8 +178,8 @@ public sealed record AppSettings
     public SecondaryLineMode SecondaryLineMode { get; init; } = SecondaryLineMode.Off;
     public bool LyricsVisible { get; init; } = true;
     public VisualPreference VisualPreference { get; init; } = VisualPreference.Balanced;
-    public StageBackdropMode StageBackdropMode { get; init; } = StageBackdropMode.AmbientPartyMesh;
-    public bool ShowFollowingDot { get; init; } = true;
+    public StageBackdropMode StageBackdropMode { get; init; } = StageBackdropMode.AlbumArtBlur;
+    public bool ShowFollowingDot { get; init; }
     public bool ShowColorSweepLayer { get; init; } = true;
     public float PartyEnergyLevel { get; init; } = DefaultPartyEnergyLevel;
     public float FullscreenStageScale { get; init; } = DefaultFullscreenStageScale;
@@ -236,9 +236,10 @@ public sealed record AppSettings
         var normalizedStageScale = float.IsFinite(FullscreenStageScale)
             ? Math.Clamp(FullscreenStageScale, MinFullscreenStageScale, MaxFullscreenStageScale)
             : DefaultFullscreenStageScale;
-        var normalizedBackdrop = Enum.IsDefined(StageBackdropMode)
+        var normalizedBackdrop = Enum.IsDefined(StageBackdropMode) &&
+                                 StageBackdropMode != StageBackdropMode.AmbientPartyMesh
             ? StageBackdropMode
-            : StageBackdropMode.AmbientPartyMesh;
+            : StageBackdropMode.AlbumArtBlur;
         var normalizedEdgeGlowMode = Enum.IsDefined(EdgeGlowMode)
             ? EdgeGlowMode
             : EdgeGlowMode.NeonRush;
@@ -291,6 +292,7 @@ public sealed record AppSettings
             OverlayOpacity = normalizedOpacity,
             SafeMarginPx = normalizedMargin,
             StageBackdropMode = normalizedBackdrop,
+            ShowFollowingDot = false,
             PartyEnergyLevel = normalizedEnergy,
             FullscreenStageScale = normalizedStageScale,
             EdgeGlowMode = normalizedEdgeGlowMode,

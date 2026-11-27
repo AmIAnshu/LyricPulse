@@ -18,6 +18,7 @@ namespace LyricPulse.Core.Media;
 public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
 {
     private static readonly TimeSpan CoalescingWindow = TimeSpan.FromMilliseconds(15);
+    private static readonly TimeSpan TransientDisconnectGrace = TimeSpan.FromMilliseconds(1600);
     private static readonly TimeSpan[] InitBackoffDelays =
     [
         TimeSpan.FromSeconds(1),
@@ -40,6 +41,7 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
     private CancellationTokenSource? _cts;
     private Task? _pumpTask;
+    private DateTimeOffset? _transientEmptyStartUtc;
     private bool _disposed;
 
     public WindowsGsmtcSessionProvider(
@@ -256,7 +258,8 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
             while (!ct.IsCancellationRequested)
             {
                 var current = _coordinator.CurrentSession;
-                var pollDelayMs = current is { PlaybackState: MediaPlaybackState.Changing } ||
+                var pollDelayMs = _transientEmptyStartUtc.HasValue ||
+                                  current is { PlaybackState: MediaPlaybackState.Changing } ||
                                   (current?.PlaybackState == MediaPlaybackState.Playing && string.IsNullOrWhiteSpace(current.Track?.RawTitle))
                     ? 200
                     : current?.PlaybackState == MediaPlaybackState.Playing
@@ -306,19 +309,25 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
         await _refreshLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var sessions = SyncTrackedSessions();
+            var handles = SyncTrackedSessions();
             var systemCurrentAumid = TryReadSystemCurrentAumid();
+            var nowUtc = DateTimeOffset.UtcNow;
 
-            if (sessions.Length == 0)
+            if (handles.Length == 0)
             {
+                if (ShouldHoldTransientDisconnect(nowUtc))
+                {
+                    return;
+                }
+
                 _coordinator.ProcessCandidates(ImmutableArray<SessionCandidate>.Empty);
                 return;
             }
 
-            var tasks = new Task<SessionCandidate?>[sessions.Length];
-            for (var i = 0; i < sessions.Length; i++)
+            var tasks = new Task<SessionCandidate?>[handles.Length];
+            for (var i = 0; i < handles.Length; i++)
             {
-                tasks[i] = BuildCandidateAsync(sessions[i], systemCurrentAumid, ct);
+                tasks[i] = BuildCandidateAsync(handles[i], systemCurrentAumid, nowUtc, ct);
             }
 
             var resolved = await Task.WhenAll(tasks).ConfigureAwait(false);
@@ -331,7 +340,16 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
                 }
             }
 
-            _coordinator.ProcessCandidates(candidates.ToImmutable());
+            if (candidates.Count == 0 && ShouldHoldTransientDisconnect(nowUtc))
+            {
+                return;
+            }
+
+            var selected = _coordinator.ProcessCandidates(candidates.ToImmutable());
+            if (selected is not null)
+            {
+                _transientEmptyStartUtc = null;
+            }
         }
         finally
         {
@@ -339,7 +357,26 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
         }
     }
 
-    private GlobalSystemMediaTransportControlsSession[] SyncTrackedSessions()
+    private bool ShouldHoldTransientDisconnect(DateTimeOffset nowUtc)
+    {
+        var current = _coordinator.CurrentSession;
+        if (current is null || current.PlaybackState == MediaPlaybackState.Closed)
+        {
+            _transientEmptyStartUtc = null;
+            return false;
+        }
+
+        _transientEmptyStartUtc ??= nowUtc;
+        if ((nowUtc - _transientEmptyStartUtc.Value) < TransientDisconnectGrace)
+        {
+            return true;
+        }
+
+        _transientEmptyStartUtc = null;
+        return false;
+    }
+
+    private GsmtcSessionHandle[] SyncTrackedSessions()
     {
         if (_manager is null)
         {
@@ -356,7 +393,7 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
             _logger.LogGsmtcEnumerateError(ex);
             lock (_sessionsLock)
             {
-                return _trackedSessions.Values.Select(static h => h.Session).ToArray();
+                return _trackedSessions.Values.ToArray();
             }
         }
 
@@ -371,7 +408,7 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
         }
 
         List<GsmtcSessionHandle>? detached = null;
-        GlobalSystemMediaTransportControlsSession[] snapshot;
+        GsmtcSessionHandle[] snapshot;
         lock (_sessionsLock)
         {
             var removedKeys = _trackedSessions.Keys.Where(k => !liveMap.ContainsKey(k)).ToList();
@@ -384,7 +421,18 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
 
             foreach (var (aumid, session) in liveMap)
             {
-                if (!_trackedSessions.ContainsKey(aumid))
+                if (_trackedSessions.TryGetValue(aumid, out var existing))
+                {
+                    if (!ReferenceEquals(existing.Session, session))
+                    {
+                        detached ??= new List<GsmtcSessionHandle>();
+                        detached.Add(existing);
+                        var replacement = new GsmtcSessionHandle(session, SignalRefresh);
+                        replacement.Attach();
+                        _trackedSessions[aumid] = replacement;
+                    }
+                }
+                else
                 {
                     var handle = new GsmtcSessionHandle(session, SignalRefresh);
                     handle.Attach();
@@ -392,7 +440,7 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
                 }
             }
 
-            snapshot = _trackedSessions.Values.Select(static h => h.Session).ToArray();
+            snapshot = _trackedSessions.Values.ToArray();
         }
 
         if (detached is not null)
@@ -407,32 +455,52 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
     }
 
     private async Task<SessionCandidate?> BuildCandidateAsync(
-        GlobalSystemMediaTransportControlsSession session,
+        GsmtcSessionHandle handle,
         string? systemCurrentAumid,
+        DateTimeOffset nowUtc,
         CancellationToken ct)
     {
+        var session = handle.Session;
         var aumid = SafeGetAumid(session);
         if (string.IsNullOrWhiteSpace(aumid))
         {
             return null;
         }
 
-        var mediaProps = await TryInvokeWinRtAsync(
-            () => session.TryGetMediaPropertiesAsync().AsTask(ct),
-            "TryGetMediaPropertiesAsync").ConfigureAwait(false);
-
-        // Read playback status & timeline position AFTER awaiting media properties so WinRT COM latency doesn't stale-shift position
         var playbackInfo = TryInvokeWinRt(() => session.GetPlaybackInfo(), "GetPlaybackInfo");
-        var timeline = TryInvokeWinRt(() => session.GetTimelineProperties(), "GetTimelineProperties");
-
         if (playbackInfo is null)
         {
             return null;
         }
 
-        var rawTitle = mediaProps?.Title ?? string.Empty;
-        var rawArtist = mediaProps?.Artist ?? string.Empty;
-        var album = mediaProps?.AlbumTitle ?? string.Empty;
+        var mappedState = MapPlaybackStatus(playbackInfo.PlaybackStatus);
+        var shouldFetchProps = handle.ShouldFetchMediaProperties(nowUtc, mappedState == MediaPlaybackState.Changing);
+        GlobalSystemMediaTransportControlsSessionMediaProperties? mediaProps = null;
+        if (shouldFetchProps)
+        {
+            mediaProps = await TryInvokeWinRtAsync(
+                () => session.TryGetMediaPropertiesAsync().AsTask(ct),
+                "TryGetMediaPropertiesAsync").ConfigureAwait(false);
+        }
+
+        // Read playback status & timeline position AFTER awaiting media properties so WinRT COM latency doesn't stale-shift position
+        if (shouldFetchProps)
+        {
+            playbackInfo = TryInvokeWinRt(() => session.GetPlaybackInfo(), "GetPlaybackInfo") ?? playbackInfo;
+            mappedState = MapPlaybackStatus(playbackInfo.PlaybackStatus);
+        }
+
+        var timeline = TryInvokeWinRt(() => session.GetTimelineProperties(), "GetTimelineProperties");
+
+        if (mediaProps is not null && !string.IsNullOrWhiteSpace(mediaProps.Title))
+        {
+            handle.UpdateCachedMediaProperties(mediaProps.Title, mediaProps.Artist, mediaProps.AlbumTitle, nowUtc);
+        }
+
+        var cached = handle.GetCachedMediaProperties();
+        var rawTitle = !string.IsNullOrWhiteSpace(mediaProps?.Title) ? mediaProps.Title : cached.Title;
+        var rawArtist = !string.IsNullOrWhiteSpace(mediaProps?.Title) ? (mediaProps.Artist ?? string.Empty) : cached.Artist;
+        var album = !string.IsNullOrWhiteSpace(mediaProps?.Title) ? (mediaProps.AlbumTitle ?? string.Empty) : cached.Album;
         var endTime = timeline?.EndTime ?? TimeSpan.Zero;
         var itemKind = PlayerClassifier.ClassifyItem(rawTitle, rawArtist, album, endTime, playbackInfo.PlaybackType == MediaPlaybackType.Video);
         PlayerClassifier.CleanDetectedMetadata(rawTitle, rawArtist, out var title, out var artist);
@@ -441,7 +509,7 @@ public sealed partial class WindowsGsmtcSessionProvider : IMediaSessionProvider
             SourceAppUserModelId: aumid,
             PlayerKind: PlayerClassifier.ClassifyPlayer(aumid, _coordinator.BlockedAppIds),
             ItemKind: itemKind,
-            PlaybackState: MapPlaybackStatus(playbackInfo.PlaybackStatus),
+            PlaybackState: mappedState,
             Title: title,
             Artist: artist,
             AlbumTitle: album,

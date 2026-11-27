@@ -104,12 +104,38 @@ function hsla(h, s, l, a = 1) {
   return `hsla(${hh.toFixed(1)}, ${ss}%, ${ll}%, ${clamp(a, 0, 1).toFixed(3)})`;
 }
 
+const FONT_STACKS = {
+  Jost: "'Jost', sans-serif",
+  'Bodoni Moda': "'Bodoni Moda', Georgia, serif",
+  Mulish: "'Mulish', sans-serif",
+  Nunito: "'Nunito', sans-serif",
+  Bahnschrift: "'Bahnschrift', 'Barlow Condensed', sans-serif",
+  Georgia: "'Georgia', serif",
+  Impact: "'Impact', 'Anton', sans-serif",
+  'Sitka Display': "'Sitka Display', 'Playfair Display', Georgia, serif",
+  'Ink Free': "'Ink Free', 'Caveat', cursive",
+  'Cascadia Mono': "'Cascadia Mono', 'JetBrains Mono', monospace",
+};
+
+function resolveFontCss(weight, sizePx, fontFamily) {
+  const stack = FONT_STACKS[fontFamily] || `'${fontFamily || 'Jost'}', sans-serif`;
+  return `${weight} ${sizePx}px ${stack}`;
+}
+
 export class StudioRenderer {
   constructor() {
     this.rushPhase = 0;
+    this.counterPhase = 0.37;
+    this._edgeBeatEnv = 0;
+    this._edgeBassSwell = 0;
+    this._edgeRollingEnergy = 0.25;
+    this._edgeDropSurge = 0;
+    this._edgePrevBass = 0;
     this._cachedCoverSrc = null;
     this._circularCoverCanvas = null;
     this._blurredBgCanvas = null;
+    this._glassLastLineIdx = -1;
+    this._glassLineScrollY = 0;
     this.particles = Array.from({ length: 42 }, (_, i) => ({
       x: ((i * 73) % 100) / 100,
       y: ((i * 41) % 100) / 100,
@@ -200,27 +226,15 @@ export class StudioRenderer {
       this._ensureGlassCoverTextures(coverCanvas);
     }
 
-    // 1. Backdrop (Ambient Mesh, selectable Album Art Blur for ALL 11 styles, or Pure Black)
+    // 1. Backdrop (Album Art Blur or Pure Black; Ambient Mesh removed)
     if (style.id !== 'VinylGroove' && (!settings.overlaySim || isCompact)) {
-      if (settings.backdropMode === 'AlbumArtBlur' && (this._lightBlurBgCanvas || this._glassCoverCanvas)) {
-        this.drawAlbumArtBackdrop(ctx, width, height, realTimeSec, metrics, settings, theme, isCompact);
-      } else if (settings.backdropMode === 'PureBlack' || isNeonRushBlack) {
+      if (settings.backdropMode === 'PureBlack' || isNeonRushBlack) {
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, width, height);
+      } else if (this._lightBlurBgCanvas || this._glassCoverCanvas) {
+        this.drawAlbumArtBackdrop(ctx, width, height, realTimeSec, metrics, settings, theme, isCompact);
       } else {
-        ctx.fillStyle = '#08090D';
-        ctx.fillRect(0, 0, width, height);
-        const pulseBoost = settings.reducedMotion ? 0 : metrics.beatPulse * 0.14;
-        const g1 = ctx.createRadialGradient(width * 0.28, height * 0.35, 10, width * 0.28, height * 0.35, width * 0.65);
-        g1.addColorStop(0, hexToRgba(palette.a2, 0.19 + pulseBoost));
-        g1.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = g1;
-        ctx.fillRect(0, 0, width, height);
-
-        const g2 = ctx.createRadialGradient(width * 0.74, height * 0.68, 10, width * 0.74, height * 0.68, width * 0.6);
-        g2.addColorStop(0, hexToRgba(palette.a3, 0.15 + pulseBoost * 0.7));
-        g2.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = g2;
+        ctx.fillStyle = '#07080D';
         ctx.fillRect(0, 0, width, height);
       }
     }
@@ -347,87 +361,151 @@ export class StudioRenderer {
     const cSecondary = twoColor
       ? (settings.edgeOverrideColors ? (settings.edgeSecondaryColor || palette.a2) : palette.a2)
       : cPrimary;
+    const cTertiary = twoColor ? (palette.a3 || cSecondary) : cPrimary;
 
-    if (animMode !== 'Still') {
-      const musicDrive = animMode === 'MusicSync' ? (0.85 + metrics.bass * 1.15 + metrics.beatPulse * 0.70) : 0.62;
-      this.rushPhase = (this.rushPhase + dt * 0.42 * speed * musicDrive) % 1;
+    // Asymmetric beat kick + adaptive drop surge envelope (fast attack, silky release)
+    const bassRaw = clamp(metrics.bass || 0, 0, 1.5);
+    const midRaw = clamp(metrics.mid || 0, 0, 1.5);
+    const trebleRaw = clamp(metrics.treble || 0, 0, 1.5);
+    const beatRaw = clamp(metrics.beatPulse || 0, 0, 1.5);
+    const safeDt = clamp(dt || 0.016, 0.001, 0.05);
+
+    if (animMode === 'MusicSync') {
+      const bassFlux = Math.max(0, bassRaw - this._edgePrevBass);
+      this._edgePrevBass = bassRaw;
+      const kickTarget = clamp(Math.max(beatRaw, bassFlux * 3.0), 0, 1.45);
+      const kickCoeff = kickTarget > this._edgeBeatEnv ? (1 - Math.exp(-safeDt * 42)) : (1 - Math.exp(-safeDt * 5.6));
+      const bassCoeff = bassRaw > this._edgeBassSwell ? (1 - Math.exp(-safeDt * 24)) : (1 - Math.exp(-safeDt * 5.2));
+      this._edgeBeatEnv += (kickTarget - this._edgeBeatEnv) * kickCoeff;
+      this._edgeBassSwell += (bassRaw - this._edgeBassSwell) * bassCoeff;
+
+      const instantEnergy = bassRaw * 0.5 + midRaw * 0.3 + trebleRaw * 0.2;
+      this._edgeRollingEnergy += (instantEnergy - this._edgeRollingEnergy) * (1 - Math.exp(-safeDt * 0.45));
+      const surgeTarget = clamp((instantEnergy - this._edgeRollingEnergy) * 2.5, 0, 1.2);
+      const surgeCoeff = surgeTarget > this._edgeDropSurge ? (1 - Math.exp(-safeDt * 24)) : (1 - Math.exp(-safeDt * 2.8));
+      this._edgeDropSurge += (surgeTarget - this._edgeDropSurge) * surgeCoeff;
+    } else {
+      this._edgeBeatEnv *= 0.9;
+      this._edgeBassSwell *= 0.9;
+      this._edgeDropSurge *= 0.9;
     }
 
-    const pulseScale = animMode === 'MusicSync'
-      ? (1.0 + metrics.bass * 0.36 + metrics.beatPulse * 0.48)
+    if (animMode !== 'Still') {
+      const pReact = animMode === 'MusicSync'
+        ? (0.58 + this._edgeBassSwell * 1.1 + this._edgeBeatEnv * 1.38 + this._edgeDropSurge * 0.75)
+        : 0.62;
+      const cReact = animMode === 'MusicSync'
+        ? (0.42 + midRaw * 0.85 + trebleRaw * 0.65 + this._edgeBeatEnv * 0.55)
+        : 0.42;
+      this.rushPhase = (this.rushPhase + safeDt * 0.36 * speed * pReact) % 1;
+      this.counterPhase = (this.counterPhase - safeDt * 0.24 * speed * cReact + 1) % 1;
+    }
+
+    const beatImpact = animMode === 'MusicSync'
+      ? clamp(this._edgeBeatEnv * 0.82 + this._edgeDropSurge * 0.65, 0, 1.55)
       : animMode === 'AmbientDrift'
-        ? (1.0 + 0.08 * Math.sin(this.rushPhase * Math.PI * 2))
-        : 1.0;
+        ? 0.14 + 0.12 * Math.sin(this.rushPhase * Math.PI * 2)
+        : 0;
+    const autoIntensity = animMode === 'MusicSync'
+      ? clamp(0.56 + this._edgeBassSwell * 0.48 + this._edgeBeatEnv * 0.66 + this._edgeDropSurge * 0.44, 0.44, 1.85)
+      : animMode === 'AmbientDrift'
+        ? 0.94 + 0.14 * Math.sin(this.rushPhase * Math.PI * 2)
+        : 0.94;
+    const autoReach = animMode === 'MusicSync'
+      ? clamp(0.82 + this._edgeBassSwell * 0.36 + this._edgeBeatEnv * 0.42 + this._edgeDropSurge * 0.32, 0.78, 1.58)
+      : 1.0;
 
     const minSide = Math.min(w, h);
-    const radius = clamp(minSide * 0.026, 12, 28);
     const mode = settings.edgeGlowMode;
     const isRush = mode === 'NeonRush';
-    const isRim = mode === 'NeonRim';
+    const isPulse = mode === 'BeatPulse';
+    const isSoft = mode === 'SoftAmbient';
 
-    const buildRevolvingBeamGradient = (lowAlpha, peakAlpha, withWhiteCrest) => {
-      const grad = ctx.createConicGradient(this.rushPhase * Math.PI * 2, w * 0.5, h * 0.5);
-      if (isRush && animMode !== 'Still') {
-        grad.addColorStop(0.00, hexToRgba(cPrimary, peakAlpha));
-        grad.addColorStop(0.08, withWhiteCrest ? 'rgba(255, 255, 255, 0.98)' : hexToRgba(cPrimary, peakAlpha));
-        grad.addColorStop(0.18, hexToRgba(cSecondary, peakAlpha * 0.78));
-        grad.addColorStop(0.32, hexToRgba(cPrimary, lowAlpha));
-        grad.addColorStop(0.46, hexToRgba(cSecondary, lowAlpha * 1.15));
-        grad.addColorStop(0.54, hexToRgba(cSecondary, peakAlpha * 0.92));
-        grad.addColorStop(0.62, withWhiteCrest ? 'rgba(255, 255, 255, 0.92)' : hexToRgba(cSecondary, peakAlpha));
-        grad.addColorStop(0.72, hexToRgba(cPrimary, peakAlpha * 0.72));
-        grad.addColorStop(0.86, hexToRgba(cSecondary, lowAlpha));
-        grad.addColorStop(1.00, hexToRgba(cPrimary, peakAlpha));
-      } else {
-        grad.addColorStop(0.00, hexToRgba(cPrimary, peakAlpha));
-        grad.addColorStop(0.32, hexToRgba(cPrimary, peakAlpha * 0.92));
-        grad.addColorStop(0.58, hexToRgba(cSecondary, peakAlpha * 0.92));
-        grad.addColorStop(0.84, hexToRgba(cSecondary, peakAlpha * 0.88));
-        grad.addColorStop(1.00, hexToRgba(cPrimary, peakAlpha));
+    const modeGain = isSoft ? 0.64 : isPulse ? clamp(0.32 + this._edgeBassSwell * 0.7 + this._edgeBeatEnv * 0.95, 0.28, 1.8) : isRush ? 1.05 : 0.88;
+    const reach = clamp(minSide * (0.095 + 0.045 * spill) * (0.58 + 0.42 * thick) * autoReach, 20, minSide * 0.26);
+    const baseAlpha = clamp(0.34 * modeGain * autoIntensity, 0.06, 0.68);
+
+    const drawEdgeCurtain = (x0, y0, x1, y1, rx, ry, rw, rh, col, alpha) => {
+      const g = ctx.createLinearGradient(x0, y0, x1, y1);
+      g.addColorStop(0.00, hexToRgba(col, alpha));
+      g.addColorStop(0.26, hexToRgba(col, alpha * 0.52));
+      g.addColorStop(0.62, hexToRgba(col, alpha * 0.14));
+      g.addColorStop(1.00, hexToRgba(col, 0));
+      ctx.fillStyle = g;
+      ctx.fillRect(rx, ry, rw, rh);
+    };
+
+    const perimeterPoint = (angleRad) => {
+      const hw = w * 0.5;
+      const hh = h * 0.5;
+      const dx = Math.cos(angleRad);
+      const dy = Math.sin(angleRad);
+      const tx = hw / Math.max(1e-5, Math.abs(dx));
+      const ty = hh / Math.max(1e-5, Math.abs(dy));
+      if (tx <= ty) {
+        const sx = dx >= 0 ? 1 : -1;
+        return { x: hw + sx * hw, y: hh + dy * tx, nx: sx, ny: 0 };
       }
-      return grad;
+      const sy = dy >= 0 ? 1 : -1;
+      return { x: hw + dx * ty, y: hh + sy * hh, nx: 0, ny: sy };
+    };
+
+    const drawPlasmaOrb = (cx, cy, rad, col, alpha) => {
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
+      g.addColorStop(0.00, hexToRgba(col, alpha));
+      g.addColorStop(0.32, hexToRgba(col, alpha * 0.50));
+      g.addColorStop(0.68, hexToRgba(col, alpha * 0.13));
+      g.addColorStop(1.00, hexToRgba(col, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+      ctx.fill();
     };
 
     ctx.save();
     ctx.beginPath();
-    ctx.roundRect(0, 0, w, h, radius);
+    ctx.rect(0, 0, w, h);
     ctx.clip();
 
-    // Pass 1: Wide inward Lumn Gaussian glow wash hugging rounded edges (revolving orbital hotspots in NeonRush)
-    const spillReach = clamp(minSide * 0.08 * spill * pulseScale, 16, minSide * 0.22);
-    const baseGrad = buildRevolvingBeamGradient(isRush ? 0.12 : 0.36, isRush ? 0.78 : isRim ? 0.56 : 0.44, false);
+    // Pass 1: Strip-free feathered inward ambient aurora curtains along all 4 edges (zero visible border line!)
+    drawEdgeCurtain(0, 0, 0, reach, 0, 0, w, reach, cPrimary, baseAlpha);
+    drawEdgeCurtain(0, h, 0, h - reach, 0, h - reach, w, reach, cSecondary, baseAlpha);
+    drawEdgeCurtain(0, 0, reach, 0, 0, 0, reach, h, cSecondary, baseAlpha * 0.92);
+    drawEdgeCurtain(w, 0, w - reach, 0, w - reach, 0, reach, h, cPrimary, baseAlpha * 0.92);
 
-    ctx.strokeStyle = baseGrad;
-    ctx.lineWidth = clamp(12 * thick * spill * pulseScale, 6, 48);
-    ctx.shadowColor = cPrimary;
-    ctx.shadowBlur = spillReach;
-    ctx.beginPath();
-    ctx.roundRect(2, 2, w - 4, h - 4, Math.max(6, radius - 2));
-    ctx.stroke();
+    // Pass 2: Additive counter-revolving off-bezel plasma orbs & beat-reactive corner blooms
+    ctx.globalCompositeOperation = 'screen';
+    const orbRad = clamp(minSide * (0.18 + 0.06 * spill) * (0.62 + 0.38 * thick) * autoReach, 34, minSide * 0.35);
+    const orbAlpha = clamp((isRush ? 0.56 : 0.38) * modeGain * autoIntensity, 0.08, 0.84);
 
-    // Pass 2: Luminous bezel tube + Revolving Neon Rush comet tails
-    if (isRush || isRim) {
-      const tubeGrad = buildRevolvingBeamGradient(isRush ? 0.09 : 0.72, 0.96, isRush);
-      ctx.shadowBlur = clamp(minSide * 0.025 * thick, 6, 22);
-      ctx.shadowColor = cSecondary;
-      ctx.strokeStyle = tubeGrad;
-      ctx.lineWidth = clamp(3.4 * thick * (0.95 + metrics.beatPulse * 0.28), 2, 12);
-      ctx.beginPath();
-      ctx.roundRect(3, 3, w - 6, h - 6, Math.max(4, radius - 3));
-      ctx.stroke();
+    if (isRush && animMode !== 'Still') {
+      const a1 = this.rushPhase * Math.PI * 2;
+      const a2 = a1 + Math.PI;
+      const p1 = perimeterPoint(a1);
+      const p2 = perimeterPoint(a2);
+      drawPlasmaOrb(p1.x + p1.nx * orbRad * 0.22, p1.y + p1.ny * orbRad * 0.22, orbRad * 1.12, cPrimary, orbAlpha);
+      drawPlasmaOrb(p2.x + p2.nx * orbRad * 0.22, p2.y + p2.ny * orbRad * 0.22, orbRad * 1.06, cSecondary, orbAlpha * 0.92);
+
+      // Counter-orbiting harmonic plasma stream creates living crossing swells on beats
+      const a3 = this.counterPhase * Math.PI * 2;
+      const a4 = a3 + Math.PI;
+      const p3 = perimeterPoint(a3);
+      const p4 = perimeterPoint(a4);
+      const cAlpha = clamp(orbAlpha * (0.48 + beatImpact * 0.32), 0.06, 0.72);
+      drawPlasmaOrb(p3.x + p3.nx * orbRad * 0.25, p3.y + p3.ny * orbRad * 0.25, orbRad * 0.94, cTertiary, cAlpha);
+      drawPlasmaOrb(p4.x + p4.nx * orbRad * 0.25, p4.y + p4.ny * orbRad * 0.25, orbRad * 0.88, cPrimary, cAlpha * 0.82);
     }
 
-    // Pass 3: Razor-sharp Neon Rush orbital rim filament
-    if (isRush) {
-      const coreGrad = buildRevolvingBeamGradient(0.05, 1.0, true);
-      ctx.shadowBlur = 4;
-      ctx.shadowColor = '#FFFFFF';
-      ctx.strokeStyle = coreGrad;
-      ctx.lineWidth = clamp(1.5 * thick, 1.2, 4.2);
-      ctx.beginPath();
-      ctx.roundRect(2, 2, w - 4, h - 4, Math.max(4, radius - 2));
-      ctx.stroke();
+    if (!isSoft || beatImpact > 0.20) {
+      const cRad = clamp(orbRad * 0.88, 28, minSide * 0.30);
+      const cAlpha = clamp(orbAlpha * (isRush ? 0.36 : 0.62) * (0.55 + beatImpact * 0.55), 0.04, 0.64);
+      const off = cRad * 0.26;
+      drawPlasmaOrb(-off, -off, cRad, cPrimary, cAlpha);
+      drawPlasmaOrb(w + off, -off, cRad, cSecondary, cAlpha);
+      drawPlasmaOrb(w + off, h + off, cRad, cPrimary, cAlpha);
+      drawPlasmaOrb(-off, h + off, cRad, cSecondary, cAlpha);
     }
+
     ctx.restore();
   }
 
@@ -459,7 +537,7 @@ export class StudioRenderer {
       const bulgeScale = item.rel === 0 ? 1.24 + metrics.beatPulse * 0.14 : 0.72;
       const y = cy + item.rel * baseSize * 1.18;
       const fSize = Math.round(baseSize * bulgeScale);
-      const font = `800 ${fSize}px '${fontFamily}', sans-serif`;
+      const font = resolveFontCss(800, fSize, fontFamily);
 
       // Chromatic RGB split on beat pulse for active word
       if (item.rel === 0 && !settings.reducedMotion && metrics.beatPulse > 0.35) {
@@ -557,8 +635,8 @@ export class StudioRenderer {
     ctx.restore();
 
     drawSemanticIcon(ctx, icon, cx, cy - baseSize * 0.95, iconR, palette.a2, true);
-    drawLegibleWord(ctx, active.text, cx, cy + baseSize * 0.25, `800 ${Math.round(baseSize * 1.15)}px '${fontFamily}', sans-serif`, palette.a1);
-    drawLegibleWord(ctx, slice.line.text, cx, cy + baseSize * 1.28, `600 ${Math.round(baseSize * 0.42)}px '${fontFamily}', sans-serif`, hexToRgba(palette.a3, 0.75));
+    drawLegibleWord(ctx, active.text, cx, cy + baseSize * 0.25, resolveFontCss(800, Math.round(baseSize * 1.15), fontFamily), palette.a1);
+    drawLegibleWord(ctx, slice.line.text, cx, cy + baseSize * 1.28, resolveFontCss(600, Math.round(baseSize * 0.42), fontFamily), hexToRgba(palette.a3, 0.75));
   }
 
   // Style 6: Constellation
@@ -612,7 +690,7 @@ export class StudioRenderer {
       const flare = p.active ? 9 + metrics.beatPulse * 4 : p.lit ? 5 : 3;
       drawSemanticIcon(ctx, 'star', p.x, p.y, flare, p.active ? palette.a1 : p.lit ? palette.a2 : hexToRgba(palette.a3, 0.5), p.lit);
       const fs = Math.round(baseSize * (p.active ? 0.72 : 0.45));
-      drawLegibleWord(ctx, p.word, p.x, p.y - flare - fs * 0.75, `700 ${fs}px '${fontFamily}', sans-serif`, p.active ? palette.a1 : hexToRgba(palette.a3, p.lit ? 0.9 : 0.48));
+      drawLegibleWord(ctx, p.word, p.x, p.y - flare - fs * 0.75, resolveFontCss(700, fs, fontFamily), p.active ? palette.a1 : hexToRgba(palette.a3, p.lit ? 0.9 : 0.48));
     });
   }
 
@@ -656,7 +734,7 @@ export class StudioRenderer {
       const wx = cx + Math.cos(a) * rad;
       const wy = cy + Math.sin(a) * rad;
       const fs = Math.round(baseSize * (i === slice.wordIdx ? 0.78 : 0.44));
-      drawLegibleWord(ctx, w.text, wx, wy, `700 ${fs}px '${fontFamily}', sans-serif`, i === slice.wordIdx ? palette.a1 : hexToRgba(palette.a2, i < slice.wordIdx ? 0.85 : 0.45));
+      drawLegibleWord(ctx, w.text, wx, wy, resolveFontCss(700, fs, fontFamily), i === slice.wordIdx ? palette.a1 : hexToRgba(palette.a2, i < slice.wordIdx ? 0.85 : 0.45));
     });
   }
 
@@ -707,7 +785,7 @@ export class StudioRenderer {
 
       const offsetY = i % 2 === 0 ? -nr - baseSize * 0.52 : nr + baseSize * 0.62;
       const fs = Math.round(baseSize * (p.active ? 0.76 : 0.44));
-      drawLegibleWord(ctx, p.word, p.x, p.y + offsetY, `700 ${fs}px '${fontFamily}', sans-serif`, p.active ? palette.a1 : hexToRgba(palette.a3, p.lit ? 0.85 : 0.45));
+      drawLegibleWord(ctx, p.word, p.x, p.y + offsetY, resolveFontCss(700, fs, fontFamily), p.active ? palette.a1 : hexToRgba(palette.a3, p.lit ? 0.85 : 0.45));
     });
   }
 
@@ -728,7 +806,7 @@ export class StudioRenderer {
       ctx.save();
       ctx.translate(wmProj.x, wmProj.y);
       ctx.scale(wmProj.scale, wmProj.scale);
-      drawLegibleWord(ctx, words[slice.wordIdx].text.toUpperCase(), 0, 0, `900 ${Math.round(baseSize * 2.5)}px '${fontFamily}', sans-serif`, hexToRgba(palette.a2, 0.1), 0);
+      drawLegibleWord(ctx, words[slice.wordIdx].text.toUpperCase(), 0, 0, resolveFontCss(900, Math.round(baseSize * 2.5), fontFamily), hexToRgba(palette.a2, 0.1), 0);
       ctx.restore();
     }
 
@@ -746,10 +824,10 @@ export class StudioRenderer {
       const fs = Math.round(baseSize * scale);
       if (row.active) {
         // Soft extruded 3D shadow layers strictly using affine translates
-        drawLegibleWord(ctx, row.text, p.x + 5, p.y + 5, `800 ${fs}px '${fontFamily}', sans-serif`, hexToRgba(palette.a3, 0.35), 0);
-        drawLegibleWord(ctx, row.text, p.x, p.y, `800 ${fs}px '${fontFamily}', sans-serif`, palette.a1, 0.86);
+        drawLegibleWord(ctx, row.text, p.x + 5, p.y + 5, resolveFontCss(800, fs, fontFamily), hexToRgba(palette.a3, 0.35), 0);
+        drawLegibleWord(ctx, row.text, p.x, p.y, resolveFontCss(800, fs, fontFamily), palette.a1, 0.86);
       } else {
-        drawLegibleWord(ctx, row.text, p.x, p.y, `600 ${fs}px '${fontFamily}', sans-serif`, hexToRgba(palette.a3, 0.45), 0.55);
+        drawLegibleWord(ctx, row.text, p.x, p.y, resolveFontCss(600, fs, fontFamily), hexToRgba(palette.a3, 0.45), 0.55);
       }
     });
   }
@@ -856,10 +934,13 @@ export class StudioRenderer {
     return `${m}:${String(rem).padStart(2, '0')}`;
   }
 
-  // Style 11: Glass Stage v4.1 — Apple-Music-Inspired Split Stage + Left Scrubber Card + Right Scrolling 3D Lyrics
+  // Style 11: Glass Stage v4.2 — Spatial 3D Stage + Orbital Glass Rings + Floating 3D Companion Visual Orbs
   drawVinylGroove({ ctx, width, height, realTimeSec, songTimeSec, doc, slice, palette, metrics, settings, coverCanvas, trackTitle, trackArtist, baseSize, fontFamily, isCompact, theme }) {
     this._ensureGlassCoverTextures(coverCanvas);
 
+    const reduced = !!settings.reducedMotion;
+    const beat = metrics.beatPulse || 0;
+    const bass = metrics.bass || 0;
     const cardSide = isCompact
       ? clamp(Math.min(width * 0.275, height * 0.48), 46, 108)
       : clamp(Math.min(width * 0.275, height * 0.48), 112, 256);
@@ -868,6 +949,11 @@ export class StudioRenderer {
     const cardX = cardCx - cardSide * 0.5;
     const cardY = cardCy - cardSide * 0.5;
     const cardRadius = clamp(cardSide * 0.068, 5, 16);
+
+    const pitchDeg = reduced ? 0 : 5.2 + bass * 2.2;
+    const yawDeg = reduced ? 0 : Math.sin(realTimeSec * 0.68) * 5.2;
+    const rollDeg = reduced ? 0 : Math.sin(realTimeSec * 0.52) * 1.1;
+    const focal = 1120;
 
     // Pass 0: Lightly-blurred playing album cover background
     if (!settings.overlaySim || isCompact) {
@@ -879,11 +965,142 @@ export class StudioRenderer {
       }
     }
 
-    // Pass 1: Sleek Square Rounded Album Cover Card (with subtle beat glow & GlassOS rim)
+    // Pass 0.5: Spatial 3D Stage Atmosphere — reflective horizon floor, perspective rays & 3D parallax bokeh motes
+    if (!isCompact && !settings.overlaySim) {
+      const horizonY = height * 0.78;
+      ctx.save();
+      const floorGrad = ctx.createLinearGradient(0, horizonY, 0, height);
+      floorGrad.addColorStop(0, theme.primaryAlpha(0.0));
+      floorGrad.addColorStop(0.28, theme.primaryAlpha(0.11 + beat * 0.06));
+      floorGrad.addColorStop(1, theme.deepAlpha(0.42));
+      ctx.fillStyle = floorGrad;
+      ctx.fillRect(0, horizonY, width, height - horizonY);
+
+      // Subtle horizon specular line + receding perspective light grid lines
+      const lineGrad = ctx.createLinearGradient(width * 0.06, horizonY, width * 0.94, horizonY);
+      lineGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+      lineGrad.addColorStop(0.26, theme.primaryAlpha(0.24 + beat * 0.14));
+      lineGrad.addColorStop(0.72, theme.secondaryAlpha(0.22 + beat * 0.12));
+      lineGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.strokeStyle = lineGrad;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(width * 0.06, horizonY);
+      ctx.lineTo(width * 0.94, horizonY);
+      ctx.stroke();
+
+      const vpX = width * 0.42 + (reduced ? 0 : Math.sin(realTimeSec * 0.45) * 18);
+      ctx.strokeStyle = theme.primaryAlpha(0.075 + beat * 0.04);
+      ctx.lineWidth = 0.85;
+      for (let g = -4; g <= 4; g++) {
+        ctx.beginPath();
+        ctx.moveTo(vpX + g * width * 0.055, horizonY);
+        ctx.lineTo(vpX + g * width * 0.19, height);
+        ctx.stroke();
+      }
+
+      // 16 deterministic 3D depth-parallax bokeh motes
+      const moteT = reduced ? 0 : realTimeSec;
+      for (let m = 0; m < 16; m++) {
+        const seedA = Math.sin(m * 12.9898 + 1.3) * 43758.5453;
+        const seedB = Math.sin(m * 78.233 + 4.7) * 43758.5453;
+        const fx = seedA - Math.floor(seedA);
+        const fy = seedB - Math.floor(seedB);
+        const depth = 0.25 + ((m * 0.37) % 0.75);
+        const mx = ((fx + moteT * (0.008 + depth * 0.012)) % 1.12 - 0.06) * width;
+        const my = ((fy - moteT * (0.005 + depth * 0.009) + 10) % 1.08 - 0.04) * height;
+        const pr = (1.6 + depth * 4.4) * (1 + beat * 0.28);
+        const pMote = project3D(mx, my, (1 - depth) * 180 - 60, pitchDeg * 0.55, yawDeg * 0.8, 0, focal, width * 0.5, height * 0.5);
+        const alpha = (0.08 + depth * 0.22 + beat * 0.08) * (0.65 + 0.35 * Math.sin(moteT * 1.4 + m * 1.7));
+        const gradM = ctx.createRadialGradient(pMote.x, pMote.y, 0, pMote.x, pMote.y, pr * 2.4);
+        gradM.addColorStop(0, m % 3 === 0 ? `rgba(255, 255, 255, ${(alpha * 1.15).toFixed(3)})` : (m % 2 === 0 ? theme.primaryAlpha(alpha) : theme.secondaryAlpha(alpha)));
+        gradM.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = gradM;
+        ctx.beginPath();
+        ctx.arc(pMote.x, pMote.y, pr * 2.4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Pass 1: Volumetric Backlit Aura + Dual 3D Tilted Orbital Glass Rings + Tilted 3D Album Slab
+    if (!isCompact && !settings.overlaySim) {
+      ctx.save();
+      const auraR = cardSide * (0.86 + beat * 0.14);
+      const aura = ctx.createRadialGradient(cardCx, cardCy, cardSide * 0.18, cardCx, cardCy, auraR);
+      aura.addColorStop(0, theme.primaryAlpha(0.38 + beat * 0.18));
+      aura.addColorStop(0.55, theme.secondaryAlpha(0.16 + bass * 0.09));
+      aura.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = aura;
+      ctx.beginPath();
+      ctx.arc(cardCx, cardCy, auraR, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Dual 3D orbital frosted-glass rings encircling the album slab
+      for (let ring = 0; ring < 2; ring++) {
+        const rx = cardSide * (ring === 0 ? 0.72 : 0.80) * (1 + beat * 0.035);
+        const ry = rx * (ring === 0 ? 0.28 : 0.22);
+        const tilt = (ring === 0 ? -0.34 : 0.31) + (reduced ? 0 : Math.sin(realTimeSec * (ring === 0 ? 0.55 : -0.44)) * 0.06);
+        const phase = reduced ? ring * 2.1 : realTimeSec * (ring === 0 ? 0.95 : -0.72) + ring * 2.4;
+
+        ctx.save();
+        ctx.translate(cardCx, cardCy);
+        ctx.rotate(tilt);
+        ctx.strokeStyle = ring === 0 ? theme.primaryAlpha(0.32 + beat * 0.18) : theme.secondaryAlpha(0.24 + beat * 0.14);
+        ctx.lineWidth = ring === 0 ? 1.5 : 1.1;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Orbiting specular energy node
+        const nx = Math.cos(phase) * rx;
+        const ny = Math.sin(phase) * ry;
+        const nodeGlow = ctx.createRadialGradient(nx, ny, 0, nx, ny, 10 + beat * 5);
+        nodeGlow.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+        nodeGlow.addColorStop(0.38, ring === 0 ? theme.primaryAlpha(0.72) : theme.secondaryAlpha(0.68));
+        nodeGlow.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = nodeGlow;
+        ctx.beginPath();
+        ctx.arc(nx, ny, 10 + beat * 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    // 3D Floating Album Cover Slab with subtle live tilt, extruded glass thickness edge, and diagonal liquid sheen
+    const slabSkewY = isCompact || reduced ? 0 : Math.sin(realTimeSec * 0.62) * 0.024;
+    const slabTiltRot = isCompact || reduced ? 0 : Math.sin(realTimeSec * 0.48) * 0.016;
+    const slabScale = isCompact || reduced ? 1 : 1 + beat * 0.022;
+    const slabShiftX = isCompact || reduced ? 0 : Math.cos(realTimeSec * 0.62) * 2.5;
+    const slabShiftY = isCompact || reduced ? 0 : Math.sin(realTimeSec * 0.85) * 3.0;
+
     ctx.save();
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.58)';
-    ctx.shadowBlur = isCompact ? 14 : 34;
-    ctx.shadowOffsetY = isCompact ? 6 : 14;
+    ctx.translate(cardCx + slabShiftX, cardCy + slabShiftY);
+    if (!isCompact && !reduced) {
+      ctx.rotate(slabTiltRot);
+      ctx.transform(1, slabSkewY, 0, 1, 0, 0);
+      ctx.scale(slabScale, slabScale);
+    }
+    ctx.translate(-cardCx, -cardCy);
+
+    // 3-layer extruded frosted-glass slab thickness edge (gives tangible 3D block depth)
+    if (!isCompact) {
+      const extrudeDirX = reduced ? 3.5 : (3.5 - Math.sin(realTimeSec * 0.62) * 2.2);
+      const extrudeDirY = 3.2;
+      for (let layer = 3; layer >= 1; layer--) {
+        const frac = layer / 3;
+        ctx.fillStyle = layer === 3 ? 'rgba(0, 0, 0, 0.42)' : theme.primaryAlpha(0.16 + (1 - frac) * 0.14);
+        ctx.beginPath();
+        ctx.roundRect(cardX + extrudeDirX * frac * 2.4, cardY + extrudeDirY * frac * 2.0, cardSide, cardSide, cardRadius);
+        ctx.fill();
+      }
+    }
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.62)';
+    ctx.shadowBlur = isCompact ? 14 : 38;
+    ctx.shadowOffsetY = isCompact ? 6 : 16;
     ctx.fillStyle = theme.deepAmbient;
     ctx.beginPath();
     ctx.roundRect(cardX, cardY, cardSide, cardSide, cardRadius);
@@ -898,47 +1115,101 @@ export class StudioRenderer {
       ctx.drawImage(this._glassCoverCanvas, cardX, cardY, cardSide, cardSide);
 
       const glaze = ctx.createLinearGradient(cardX, cardY, cardX + cardSide * 0.45, cardY + cardSide);
-      glaze.addColorStop(0, 'rgba(255, 255, 255, 0.22)');
+      glaze.addColorStop(0, 'rgba(255, 255, 255, 0.24)');
       glaze.addColorStop(0.32, 'rgba(255, 255, 255, 0.04)');
       glaze.addColorStop(1, 'rgba(0, 0, 0, 0.14)');
       ctx.fillStyle = glaze;
       ctx.fillRect(cardX, cardY, cardSide, cardSide);
+
+      // Sweeping diagonal liquid-glass specular sheen
+      if (!isCompact && !reduced) {
+        const sheenCycle = ((realTimeSec * 0.22) % 1.8) - 0.4;
+        const sheenX = cardX + sheenCycle * cardSide * 1.4;
+        const sheenGrad = ctx.createLinearGradient(sheenX - cardSide * 0.28, cardY, sheenX + cardSide * 0.28, cardY + cardSide);
+        sheenGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+        sheenGrad.addColorStop(0.48, `rgba(255, 255, 255, ${(0.14 + beat * 0.12).toFixed(3)})`);
+        sheenGrad.addColorStop(0.54, 'rgba(255, 255, 255, 0.04)');
+        sheenGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = sheenGrad;
+        ctx.fillRect(cardX, cardY, cardSide, cardSide);
+      }
       ctx.restore();
     }
 
     const rimGrad = ctx.createLinearGradient(cardX, cardY, cardX + cardSide, cardY + cardSide);
-    rimGrad.addColorStop(0, 'rgba(255, 255, 255, 0.58)');
-    rimGrad.addColorStop(1, theme.primaryAlpha(0.34));
+    rimGrad.addColorStop(0, 'rgba(255, 255, 255, 0.68)');
+    rimGrad.addColorStop(0.5, theme.primaryAlpha(0.45));
+    rimGrad.addColorStop(1, theme.secondaryAlpha(0.38));
     ctx.strokeStyle = rimGrad;
-    ctx.lineWidth = isCompact ? 1.0 : 1.4;
+    ctx.lineWidth = isCompact ? 1.0 : 1.6;
     ctx.beginPath();
     ctx.roundRect(cardX, cardY, cardSide, cardSide, cardRadius);
     ctx.stroke();
+    ctx.restore();
 
-    // Pass 2: Left Column Scrubber Bar, Timestamps & Track Metadata directly under cover card
+    // Wet-glass mirror reflection fading gently directly beneath the album slab
+    if (!isCompact && !settings.overlaySim && this._glassCoverCanvas) {
+      const reflH = Math.min(26, cardSide * 0.12);
+      const reflY = cardY + cardSide + 4;
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(cardX + 2, reflY, cardSide - 4, reflH, 6);
+      ctx.clip();
+      ctx.globalAlpha = 0.16;
+      ctx.translate(0, reflY + cardSide);
+      ctx.scale(1, -1);
+      ctx.drawImage(this._glassCoverCanvas, cardX, 0, cardSide, cardSide);
+      ctx.restore();
+
+      ctx.save();
+      const maskGrad = ctx.createLinearGradient(0, reflY, 0, reflY + reflH);
+      maskGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+      maskGrad.addColorStop(1, theme.deepAlpha(0.85));
+      ctx.fillStyle = maskGrad;
+      ctx.fillRect(cardX, reflY, cardSide, reflH);
+      ctx.restore();
+    }
+
+    // Pass 2: Left Column Luminous Scrubber Bar, Timestamps & Track Metadata directly under cover card
     if (!isCompact) {
       const durationSec = Math.max(1, doc?.durationSec || 36);
       const pct = clamp((songTimeSec || 0) / durationSec, 0, 1);
-      const barY = cardY + cardSide + clamp(height * 0.040, 12, 24);
-      const barH = 4;
+      const barY = cardY + cardSide + clamp(height * 0.044, 15, 26);
+      const barH = 4.5;
 
       ctx.save();
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.20)';
       ctx.beginPath();
-      ctx.roundRect(cardX, barY, cardSide, barH, 2);
+      ctx.roundRect(cardX, barY, cardSide, barH, 2.25);
       ctx.fill();
 
-      const fillW = Math.max(4, cardSide * pct);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+      const fillW = Math.max(5, cardSide * pct);
+      const barGrad = ctx.createLinearGradient(cardX, barY, cardX + fillW, barY);
+      barGrad.addColorStop(0, theme.primary);
+      barGrad.addColorStop(0.65, theme.secondary);
+      barGrad.addColorStop(1, '#FFFFFF');
+      ctx.fillStyle = barGrad;
       ctx.beginPath();
-      ctx.roundRect(cardX, barY, fillW, barH, 2);
+      ctx.roundRect(cardX, barY, fillW, barH, 2.25);
+      ctx.fill();
+
+      // Beat-pulsing luminous scrubber knob halo
+      const knobX = cardX + fillW;
+      const knobY = barY + barH * 0.5;
+      const haloR = 8 + beat * 5;
+      const knobHalo = ctx.createRadialGradient(knobX, knobY, 1, knobX, knobY, haloR);
+      knobHalo.addColorStop(0, theme.primaryAlpha(0.65));
+      knobHalo.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.fillStyle = knobHalo;
+      ctx.beginPath();
+      ctx.arc(knobX, knobY, haloR, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = '#FFFFFF';
       ctx.shadowColor = theme.primary;
-      ctx.shadowBlur = 8;
+      ctx.shadowBlur = 10;
       ctx.beginPath();
-      ctx.arc(cardX + fillW, barY + barH * 0.5, 4.2, 0, Math.PI * 2);
+      ctx.arc(knobX, knobY, 4.4 + beat * 0.8, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
 
@@ -956,11 +1227,11 @@ export class StudioRenderer {
       const titleFs = clamp(Math.round(cardSide * 0.088), 14, 21);
       const artistFs = clamp(Math.round(cardSide * 0.068), 11, 16);
       ctx.textAlign = 'center';
-      ctx.font = `700 ${titleFs}px '${fontFamily}', sans-serif`;
+      ctx.font = resolveFontCss(700, titleFs, fontFamily);
       ctx.fillStyle = '#FFFFFF';
       ctx.fillText(trackTitle, metaCenterX, barY + 29, cardSide * 1.18);
 
-      ctx.font = `500 ${artistFs}px '${fontFamily}', sans-serif`;
+      ctx.font = resolveFontCss(500, artistFs, fontFamily);
       ctx.fillStyle = 'rgba(255, 255, 255, 0.74)';
       ctx.fillText(trackArtist, metaCenterX, barY + 29 + titleFs * 1.28, cardSide * 1.18);
       ctx.restore();
@@ -973,7 +1244,7 @@ export class StudioRenderer {
       ctx.fillRect(cardX, barY, cardSide * 0.56, 2);
     }
 
-    // Pass 3: Right Column — Apple-Music-style Left-Aligned Vertical Scrolling 3D Lyrics
+    // Pass 3: Right Column — Apple-Music-style Left-Aligned Vertical Scrolling 3D Lyrics + Spatial Effects
     const lines = doc?.lines || [];
     const activeIdx = slice.lineIndex ?? 0;
     const colX = isCompact ? width * 0.48 : width * 0.475;
@@ -981,10 +1252,23 @@ export class StudioRenderer {
     const activeFontSize = isCompact
       ? clamp(baseSize * 0.76, 11, 18)
       : clamp(baseSize * 0.62 * (settings.lyricScale || 1), 17, 32);
-    const ctxFontActive = `800 ${Math.round(activeFontSize)}px '${fontFamily}', sans-serif`;
-    const ctxFontPassive = `700 ${Math.round(activeFontSize * 0.90)}px '${fontFamily}', sans-serif`;
-    const rowStep = activeFontSize * 1.24;
+    const ctxFontActive = resolveFontCss(800, Math.round(activeFontSize), fontFamily);
+    const ctxFontPassive = resolveFontCss(700, Math.round(activeFontSize * 0.90), fontFamily);
+    const rowStep = activeFontSize * 1.28;
     const lineGap = activeFontSize * (isCompact ? 0.42 : 0.62);
+
+    if (activeIdx !== this._glassLastLineIdx) {
+      if (this._glassLastLineIdx >= 0 && !reduced && !isCompact) {
+        this._glassLineScrollY = clamp(rowStep * 1.1, 14, 42);
+      } else {
+        this._glassLineScrollY = 0;
+      }
+      this._glassLastLineIdx = activeIdx;
+    } else if (!reduced && Math.abs(this._glassLineScrollY) > 0.2) {
+      this._glassLineScrollY *= 0.80;
+    } else {
+      this._glassLineScrollY = 0;
+    }
 
     const offsets = isCompact ? [-1, 0, 1] : [-2, -1, 0, 1, 2, 3];
     const blocks = [];
@@ -998,10 +1282,10 @@ export class StudioRenderer {
     }
 
     const activeBlock = blocks.find((b) => b.rel === 0);
-    const activeAnchorY = height * (isCompact ? 0.50 : 0.45);
+    const activeAnchorY = height * (isCompact ? 0.50 : 0.45) + (isCompact ? 0 : this._glassLineScrollY);
     const activeTopY = activeAnchorY - (activeBlock ? activeBlock.height * 0.5 : 0);
 
-    // Position blocks above and below the vertically centered active lyric line
+    // Position blocks above and below the smoothly gliding active lyric line
     const positioned = [];
     if (activeBlock) positioned.push({ ...activeBlock, topY: activeTopY });
 
@@ -1018,20 +1302,203 @@ export class StudioRenderer {
       cursorDown += b.height + lineGap;
     }
 
-    const yawDeg = settings.reducedMotion ? 0 : Math.sin(realTimeSec * 0.68) * 3.8;
-    const focal = 1120;
+    const activeBottomY = activeTopY + (activeBlock ? activeBlock.height : rowStep);
+    const activeMidY = (activeTopY + activeBottomY) * 0.5;
+    const totalWordsInAct = Math.max(1, slice.line?.words?.length || 1);
+    const actLineProg = clamp(((slice.wordIdx || 0) + (slice.lineProgress ?? 0.5)) / totalWordsInAct, 0.05, 0.98);
+
+    const activeWordText = slice.line?.words?.[slice.wordIdx]?.text?.toUpperCase() || '';
+    if (!isCompact && activeWordText) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(colX - 24, 0, width - (colX - 24), height);
+      ctx.clip();
+      const wmCenterX = colX + colMaxW * 0.54;
+      const wmCenterY = activeAnchorY - activeFontSize * 0.35;
+      const wmFontSize = Math.round(activeFontSize * 2.25);
+      ctx.font = resolveFontCss(900, wmFontSize, fontFamily);
+      const wmMeasured = Math.max(1, ctx.measureText(activeWordText).width);
+      const wmFit = Math.min(1, (colMaxW * 1.05) / wmMeasured);
+      const wmProj = project3D(wmCenterX, wmCenterY, 145, pitchDeg * 0.6, yawDeg * 0.45, 0, focal, wmCenterX, wmCenterY);
+      ctx.translate(wmProj.x, wmProj.y);
+      ctx.scale(wmFit, wmFit);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = theme.secondaryAlpha(reduced ? 0.042 : 0.045 + beat * 0.045);
+      ctx.fillText(activeWordText, 0, 0);
+      ctx.restore();
+    }
+
+    // True Elliptical Volumetric Spotlight + Open-Ended VisionOS Frosted Glass Focus Deck + Sweeping Anamorphic Flare
+    if (!isCompact && !settings.overlaySim) {
+      const deckLeft = colX - 12;
+      const deckRight = colX + colMaxW + 8;
+      const deckTop = activeTopY - 8;
+      const deckBottom = activeBottomY + 10;
+      const spotR = Math.max(140, colMaxW * 0.56);
+      const spotX = colX + colMaxW * 0.42;
+      const ellipseRy = Math.max(38, (activeBottomY - activeTopY) * 0.95 + 24);
+
+      ctx.save();
+      ctx.translate(spotX, activeMidY);
+      ctx.scale(1, ellipseRy / spotR);
+      const spotGrad = ctx.createRadialGradient(0, 0, 4, 0, 0, spotR);
+      spotGrad.addColorStop(0, theme.primaryAlpha(0.16 + beat * 0.10));
+      spotGrad.addColorStop(0.55, theme.secondaryAlpha(0.06 + bass * 0.04));
+      spotGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = spotGrad;
+      ctx.beginPath();
+      ctx.arc(0, 0, spotR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      ctx.save();
+      const deckFill = ctx.createLinearGradient(deckLeft, activeMidY, deckRight, activeMidY);
+      deckFill.addColorStop(0, theme.primaryAlpha(0.18 + beat * 0.07));
+      deckFill.addColorStop(0.55, theme.deepAlpha(0.18));
+      deckFill.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = deckFill;
+      ctx.beginPath();
+      ctx.roundRect(deckLeft, deckTop, deckRight - deckLeft, deckBottom - deckTop, 16);
+      ctx.fill();
+
+      const deckRim = ctx.createLinearGradient(deckLeft, deckTop, deckRight, deckTop);
+      deckRim.addColorStop(0, 'rgba(255, 255, 255, 0.34)');
+      deckRim.addColorStop(0.5, theme.primaryAlpha(0.26));
+      deckRim.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.strokeStyle = deckRim;
+      ctx.lineWidth = 1.1;
+      ctx.stroke();
+
+      // Sweeping anamorphic top edge flare + 4-point star glint
+      const flareX = colX + colMaxW * 0.85 * actLineProg;
+      const flareHalf = clamp(colMaxW * 0.16, 36, 92);
+      const flareGrad = ctx.createLinearGradient(flareX - flareHalf, deckTop, flareX + flareHalf, deckTop);
+      flareGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+      flareGrad.addColorStop(0.5, `rgba(255, 255, 255, ${(0.58 + beat * 0.30).toFixed(2)})`);
+      flareGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.strokeStyle = flareGrad;
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(flareX - flareHalf, deckTop);
+      ctx.lineTo(flareX + flareHalf, deckTop);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    if (!isCompact && lines.length > 0) {
+      const railY = Math.max(54, cardY - 18);
+      ctx.save();
+      // Frosted Telemetry Capsule Header
+      const capX = colX - 18;
+      const capY = railY - 12;
+      const capW = 104;
+      const capGrad = ctx.createLinearGradient(capX, capY, capX + capW, capY + 24);
+      capGrad.addColorStop(0, theme.primaryAlpha(0.24));
+      capGrad.addColorStop(1, theme.deepAlpha(0.66));
+      ctx.fillStyle = capGrad;
+      ctx.beginPath();
+      ctx.roundRect(capX, capY, capW, 24, 12);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.32)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      ctx.font = `600 10.5px 'JetBrains Mono', monospace`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.88)';
+      ctx.fillText(`${String(activeIdx + 1).padStart(2, '0')}/${String(lines.length).padStart(2, '0')}`, capX + 12, railY);
+      const bands = metrics.bands || [];
+      for (let b = 0; b < 6 && b < bands.length; b++) {
+        const mag = clamp(bands[(b * 3) % bands.length], 0.12, 1.0);
+        const barH = 3.5 + mag * 9.5;
+        const bx = capX + 54 + b * 5.2;
+        ctx.fillStyle = b % 2 === 0 ? theme.primaryAlpha(0.55 + mag * 0.4) : theme.secondaryAlpha(0.55 + mag * 0.4);
+        ctx.beginPath();
+        ctx.roundRect(bx, railY - barH * 0.5, 2.8, barH, 1.4);
+        ctx.fill();
+      }
+
+      // Sculpted 3D Harmonic Spine + audio ticks + active-line starburst prism node + horizontal laser bridge
+      const vRailX = Math.max(cardX + cardSide + 18, colX - 20);
+      const vRailTop = Math.max(capY + 40, height * 0.22);
+      const vRailH = Math.max(60, height * 0.56);
+      const vRailBot = vRailTop + vRailH;
+      const linePct = lines.length > 1 ? clamp(activeIdx / (lines.length - 1), 0, 1) : 0.5;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.13)';
+      ctx.beginPath();
+      ctx.roundRect(vRailX - 1.3, vRailTop, 2.6, vRailH, 1.3);
+      ctx.fill();
+
+      const beadY = vRailTop + vRailH * linePct;
+      const vFillGrad = ctx.createLinearGradient(0, vRailTop, 0, beadY);
+      vFillGrad.addColorStop(0, theme.secondaryAlpha(0.32));
+      vFillGrad.addColorStop(1, theme.primary);
+      ctx.fillStyle = vFillGrad;
+      ctx.beginPath();
+      ctx.roundRect(vRailX - 1.4, vRailTop, 2.8, Math.max(4, beadY - vRailTop), 1.4);
+      ctx.fill();
+
+      for (let tk = 0; tk < 10; tk++) {
+        const tkFrac = tk / 9;
+        const tkY = vRailTop + vRailH * tkFrac;
+        const bandMag = clamp(bands[(tk * 3) % Math.max(1, bands.length)] || 0.25, 0.08, 1.0);
+        const tkLen = 2 + bandMag * 9;
+        ctx.fillStyle = tk % 2 === 0 ? theme.primaryAlpha(0.22 + bandMag * 0.28) : theme.secondaryAlpha(0.22 + bandMag * 0.28);
+        ctx.beginPath();
+        ctx.roundRect(vRailX - 4 - tkLen, tkY - 0.9, tkLen, 1.8, 0.9);
+        ctx.fill();
+      }
+
+      const focusSpineY = clamp(activeMidY, vRailTop, vRailBot);
+      const bridgeGrad = ctx.createLinearGradient(vRailX + 3, focusSpineY, colX - 4, focusSpineY);
+      bridgeGrad.addColorStop(0, 'rgba(255, 255, 255, 0.85)');
+      bridgeGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.strokeStyle = bridgeGrad;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(vRailX + 3, focusSpineY);
+      ctx.lineTo(colX - 4, focusSpineY);
+      ctx.stroke();
+
+      ctx.fillStyle = '#FFFFFF';
+      ctx.shadowColor = theme.primary;
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(vRailX, beadY, 2.8, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 4-Point Starburst Prism Node on Spine
+      const sR = 5.8 + beat * 2.2;
+      const iR = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(vRailX, focusSpineY - sR);
+      ctx.lineTo(vRailX + iR, focusSpineY - iR);
+      ctx.lineTo(vRailX + sR, focusSpineY);
+      ctx.lineTo(vRailX + iR, focusSpineY + iR);
+      ctx.lineTo(vRailX, focusSpineY + sR);
+      ctx.lineTo(vRailX - iR, focusSpineY + iR);
+      ctx.lineTo(vRailX - sR, focusSpineY);
+      ctx.lineTo(vRailX - iR, focusSpineY - iR);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
 
     for (const block of positioned) {
       const dist = Math.abs(block.rel);
       const isAct = block.rel === 0;
-      const zBase = isAct ? -14 : dist === 1 ? 65 : dist === 2 ? 135 : 200;
-      const baseAlpha = isAct ? 1.0 : dist === 1 ? 0.40 : dist === 2 ? 0.24 : 0.12;
+      const zBase = isAct ? -22 : dist * 38;
+      const arcIndent = isAct || isCompact ? 0 : Math.min(colMaxW * 0.22, dist * dist * 7.5);
+      const baseAlpha = isAct ? 1.0 : block.rel < 0 ? (dist === 1 ? 0.52 : 0.26) : (dist === 1 ? 0.60 : dist === 2 ? 0.34 : 0.17);
 
       block.rows.forEach((rowTokens, rIdx) => {
         const yRaw = block.topY + rIdx * rowStep + rowStep * 0.5;
         if (yRaw < -rowStep || yRaw > height + rowStep) return;
 
-        const proj = project3D(colX, yRaw, zBase, 0, yawDeg, 0, focal, width * 0.70, activeAnchorY);
+        const xInput = isAct ? colX : colX + arcIndent + (zBase * 0.04);
+        const proj = project3D(xInput, yRaw, zBase, pitchDeg, yawDeg, isAct ? rollDeg : 0, focal, width * 0.70, activeAnchorY);
         const yDraw = proj.y;
         const scale = isAct ? 1.0 : proj.scale;
 
@@ -1041,45 +1508,211 @@ export class StudioRenderer {
         let cursorX = colX;
 
         if (!isAct) {
-          const fs = Math.max(9, Math.round(activeFontSize * 0.90 * scale));
-          ctx.font = `700 ${fs}px '${fontFamily}', sans-serif`;
+          const fs = Math.max(9, Math.round(activeFontSize * 0.88 * scale));
+          ctx.font = resolveFontCss(700, fs, fontFamily);
           const textLine = rowTokens.map((t) => t.text).join(' ');
+          if (!reduced && dist >= 2 && !isCompact) {
+            ctx.filter = dist === 2 ? 'blur(0.75px)' : 'blur(1.5px)';
+          }
           ctx.fillStyle = `rgba(255, 255, 255, ${baseAlpha.toFixed(3)})`;
           ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
           ctx.shadowBlur = 10;
-          ctx.fillText(textLine, cursorX, yDraw);
+          ctx.fillText(textLine, isCompact ? colX : proj.x, yDraw, Math.max(60, colMaxW - arcIndent));
+          ctx.filter = 'none';
         } else {
-          // Active Line: bright crisp white with word-level 3D Z-depth extrusion + chromatic bloom
+          // Active Line: Prism Vocal Spotlight (volumetric aurora + 5-slice 3D + laser glint & star cursor + rising embers + persistent word charms)
           const baseFs = Math.round(activeFontSize);
-          ctx.font = `800 ${baseFs}px '${fontFamily}', sans-serif`;
+          ctx.font = resolveFontCss(800, baseFs, fontFamily);
           const spaceW = ctx.measureText(' ').width;
 
           for (const tok of rowTokens) {
             const isWordActive = tok.wordIdx === slice.wordIdx;
             const isWordSung = tok.wordIdx <= slice.wordIdx;
             const popScale = isWordActive && !isCompact
-              ? (1.07 + (settings.reducedMotion ? 0 : metrics.beatPulse * 0.045))
+              ? (1.12 + (reduced ? 0 : beat * 0.075))
               : 1.0;
             const wordFs = Math.round(baseFs * popScale);
-            const yShift = isWordActive && !isCompact ? -1.5 : 0;
+            const yShift = (isWordActive && !isCompact ? -3.0 - (beat * 1.5) : 0) +
+              (!isCompact && !reduced ? Math.sin(tok.wordIdx * 1.15 + activeIdx * 0.65) * activeFontSize * 0.08 : 0);
+            const wordZ = isWordActive && !isCompact && !reduced
+              ? (-64 - beat * 28)
+              : !isWordSung && !reduced
+                ? (16 + Math.sin(realTimeSec * 1.8 + tok.wordIdx * 1.1) * 16)
+                : -8;
+            const wProj = project3D(cursorX, yDraw + yShift, wordZ, pitchDeg, yawDeg, 0, focal, width * 0.70, activeAnchorY);
+            const drawX = cursorX;
+            const drawY = wProj.y;
 
-            ctx.font = `800 ${wordFs}px '${fontFamily}', sans-serif`;
+            ctx.save();
+            ctx.font = resolveFontCss(800, wordFs, fontFamily);
             const wWidth = ctx.measureText(tok.text).width;
+            const semanticIcon = matchSemanticIcon(tok.text);
 
-            if (isWordActive && !isCompact && !settings.reducedMotion) {
-              // 3D layered chromatic depth shadows behind popping word
-              ctx.fillStyle = theme.secondaryAlpha(0.32);
-              ctx.fillText(tok.text, cursorX + 3.2, yDraw + yShift + 3.2);
-              ctx.fillStyle = theme.primaryAlpha(0.42);
-              ctx.fillText(tok.text, cursorX + 1.6, yDraw + yShift + 1.6);
+            if (isWordActive && !isCompact && !reduced) {
+              const tiltRad = ((tok.wordIdx % 2 === 0 ? 1 : -1) * 0.032) * (0.45 + beat * 0.65);
+              ctx.translate(drawX + wWidth * 0.5, drawY);
+              ctx.rotate(tiltRad);
+
+              // Volumetric radial aurora bloom behind active singing word (zero boxy outline border)
+              const aurR = Math.max(30, wWidth * 0.72);
+              const aurScaleY = (wordFs * 0.78) / aurR;
+              ctx.save();
+              ctx.scale(1, aurScaleY);
+              const aurGrad = ctx.createRadialGradient(0, 0, 2, 0, 0, aurR);
+              aurGrad.addColorStop(0, theme.primaryAlpha(0.28 + beat * 0.16));
+              aurGrad.addColorStop(0.55, theme.secondaryAlpha(0.10));
+              aurGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+              ctx.fillStyle = aurGrad;
+              ctx.beginPath();
+              ctx.arc(0, 0, aurR, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.restore();
+
+              // Chromatic RGB split on beat hits
+              if (beat > 0.18) {
+                const split = clamp(beat * 4.0, 1.2, 4.2);
+                ctx.fillStyle = 'rgba(34, 211, 238, 0.32)';
+                ctx.fillText(tok.text, -wWidth * 0.5 - split, 0);
+                ctx.fillStyle = 'rgba(255, 56, 120, 0.32)';
+                ctx.fillText(tok.text, -wWidth * 0.5 + split, 0);
+              }
+
+              // Deep 3D parallax cast shadow + 5-slice sculpted isometric extrusion
+              const yawDir = clamp(yawDeg / 6.0, -1, 1);
+              const stepX = (1.35 + beat * 0.55) * (0.75 - yawDir * 0.35);
+              const stepY = 1.15 + beat * 0.48;
+              ctx.fillStyle = 'rgba(0, 0, 0, 0.36)';
+              ctx.fillText(tok.text, -wWidth * 0.5 + stepX * 6.5, stepY * 6.2);
+              for (let s = 5; s >= 1; s--) {
+                const frac = s / 5;
+                ctx.fillStyle = s >= 4
+                  ? theme.deepAlpha(0.24 + (1 - frac) * 0.24)
+                  : s >= 2
+                    ? theme.secondaryAlpha(0.34 + (1 - frac) * 0.20)
+                    : theme.primaryAlpha(0.62);
+                ctx.fillText(tok.text, -wWidth * 0.5 + stepX * s, stepY * s);
+              }
+
+              // Dynamic vocal progress linear gradient across glyphs
+              const grad = ctx.createLinearGradient(-wWidth * 0.5, 0, wWidth * 0.5, 0);
+              const prog = clamp(slice.lineProgress ?? 0.5, 0.12, 0.96);
+              grad.addColorStop(0, '#FFFFFF');
+              grad.addColorStop(Math.max(0.05, prog - 0.08), '#FFFFFF');
+              grad.addColorStop(prog, theme.primary);
+              grad.addColorStop(Math.min(1.0, prog + 0.14), '#FFFFFF');
+
+              ctx.shadowColor = theme.primaryAlpha(0.85);
+              ctx.shadowBlur = 18;
+              ctx.fillStyle = grad;
+              ctx.fillText(tok.text, -wWidth * 0.5, 0);
+
+              // Crisp upper-left 3D specular edge gleam
+              ctx.shadowBlur = 0;
+              ctx.fillStyle = 'rgba(255, 255, 255, 0.36)';
+              ctx.fillText(tok.text, -wWidth * 0.5 - 0.7, -0.8);
+
+              // 6 rising vocal embers
+              for (let k = 0; k < 6; k++) {
+                const life = ((realTimeSec * (0.55 + (k % 3) * 0.18)) + k * 0.37) % 1.0;
+                const eAlpha = Math.sin(life * Math.PI) * (0.45 + beat * 0.35);
+                const ex = ((k / 5 - 0.5) * wWidth * 1.15) + Math.sin(realTimeSec * 2.1 + k) * 4;
+                const ey = wordFs * 0.20 - life * wordFs * 1.15;
+                ctx.fillStyle = k % 2 === 0 ? `rgba(255, 255, 255, ${eAlpha.toFixed(2)})` : theme.primaryAlpha(eAlpha);
+                ctx.beginPath();
+                ctx.arc(ex, ey, 1.1 + (k % 2) * 0.65, 0, Math.PI * 2);
+                ctx.fill();
+              }
+
+              // Tapered laser glint + 4-point star singing cursor
+              const barW = Math.max(10, wWidth * 0.96);
+              const barL = -barW * 0.5;
+              const barY = wordFs * 0.60;
+              ctx.fillStyle = theme.primaryAlpha(0.18);
+              ctx.fillRect(barL, barY, barW, 2.0);
+              const fillW = Math.max(4, barW * clamp(beat * 0.4 + 0.55, 0.35, 1.0));
+              const tipX = barL + fillW;
+              const barGrad = ctx.createLinearGradient(barL, barY, tipX, barY);
+              barGrad.addColorStop(0, theme.secondaryAlpha(0.65));
+              barGrad.addColorStop(0.55, theme.primary);
+              barGrad.addColorStop(1, '#FFFFFF');
+              ctx.fillStyle = barGrad;
+              ctx.fillRect(barL, barY, fillW, 2.2);
+
+              const cR = 4.8 + beat * 2.0;
+              ctx.fillStyle = '#FFFFFF';
+              ctx.shadowColor = theme.primary;
+              ctx.shadowBlur = 10;
+              ctx.beginPath();
+              ctx.moveTo(tipX, barY + 1 - cR);
+              ctx.lineTo(tipX + 1.4, barY + 1 - 1.4);
+              ctx.lineTo(tipX + cR, barY + 1);
+              ctx.lineTo(tipX + 1.4, barY + 1 + 1.4);
+              ctx.lineTo(tipX, barY + 1 + cR);
+              ctx.lineTo(tipX - 1.4, barY + 1 + 1.4);
+              ctx.lineTo(tipX - cR, barY + 1);
+              ctx.lineTo(tipX - 1.4, barY + 1 - 1.4);
+              ctx.closePath();
+              ctx.fill();
+              ctx.shadowBlur = 0;
+
+              // 3D Floating Frosted-Glass Companion Visual Orb above active matched words
+              if (semanticIcon) {
+                const orbR = clamp(wordFs * 0.46, 12, 18);
+                const bobY = Math.sin(realTimeSec * 4.4 + tok.wordIdx) * 3.0;
+                const orbY = -(wordFs * 0.72 + orbR + 4) + bobY;
+
+                ctx.strokeStyle = theme.primaryAlpha(0.32 + beat * 0.25);
+                ctx.lineWidth = 1.0;
+                ctx.beginPath();
+                ctx.arc(0, orbY, orbR + 3 + beat * 2, 0, Math.PI * 2);
+                ctx.stroke();
+
+                ctx.save();
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.48)';
+                ctx.shadowBlur = 14;
+                ctx.shadowOffsetY = 5;
+                const orbGrad = ctx.createRadialGradient(-orbR * 0.32, orbY - orbR * 0.32, 1, 0, orbY, orbR);
+                orbGrad.addColorStop(0, 'rgba(255, 255, 255, 0.44)');
+                orbGrad.addColorStop(0.55, theme.primaryAlpha(0.32 + beat * 0.16));
+                orbGrad.addColorStop(1, theme.deepAlpha(0.68));
+                ctx.fillStyle = orbGrad;
+                ctx.beginPath();
+                ctx.arc(0, orbY, orbR, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+
+                ctx.strokeStyle = `rgba(255, 255, 255, ${(0.55 + beat * 0.25).toFixed(2)})`;
+                ctx.lineWidth = 1.25;
+                ctx.beginPath();
+                ctx.arc(0, orbY, orbR, 0, Math.PI * 2);
+                ctx.stroke();
+
+                drawSemanticIcon(ctx, semanticIcon, 0, orbY, orbR * 0.54, '#FFFFFF', true);
+              }
+            } else {
+              ctx.shadowColor = 'rgba(255, 255, 255, 0.25)';
+              ctx.shadowBlur = 6;
+              ctx.fillStyle = isWordSung ? '#FFFFFF' : 'rgba(255, 255, 255, 0.68)';
+              ctx.fillText(tok.text, drawX, drawY);
+
+              // Persistent Jewel Mini-Charm on previously sung matched words in the active line
+              if (semanticIcon && isWordSung && !isCompact) {
+                const charmX = drawX + wWidth * 0.5;
+                const charmY = drawY - wordFs * 0.80;
+                const charmR = clamp(wordFs * 0.28, 8.5, 13);
+                ctx.fillStyle = theme.deepAlpha(0.66);
+                ctx.beginPath();
+                ctx.arc(charmX, charmY, charmR, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.46)';
+                ctx.lineWidth = 0.9;
+                ctx.stroke();
+                drawSemanticIcon(ctx, semanticIcon, charmX, charmY, charmR * 0.55, '#FFFFFF', false);
+              }
             }
+            ctx.restore();
 
-            ctx.shadowColor = isWordActive ? theme.primaryAlpha(0.75) : 'rgba(255, 255, 255, 0.25)';
-            ctx.shadowBlur = isWordActive ? 16 : 6;
-            ctx.fillStyle = isWordSung ? '#FFFFFF' : 'rgba(255, 255, 255, 0.62)';
-            ctx.fillText(tok.text, cursorX, yDraw + yShift);
-
-            ctx.font = `800 ${baseFs}px '${fontFamily}', sans-serif`;
+            ctx.font = resolveFontCss(800, baseFs, fontFamily);
             cursorX += (tok.width || wWidth) + spaceW;
           }
         }

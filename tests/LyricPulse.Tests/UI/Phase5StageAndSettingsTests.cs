@@ -6,6 +6,8 @@ using LyricPulse.Core.Lyrics;
 using LyricPulse.Core.Models;
 using LyricPulse.Core.Runtime;
 using LyricPulse.Core.Visuals;
+using LyricPulse.Rendering.Fonts;
+using LyricPulse.Rendering.Host;
 using LyricPulse.UI.ViewModels;
 using NSubstitute;
 using Xunit;
@@ -348,5 +350,54 @@ public sealed class Phase5StageAndSettingsTests
         await Task.Delay(60);
         vm.ApplySnapshot(runtime.SampleFrame());
         vm.IsEdgeGlowActive.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task StageViewModel_ExpandedFonts_AndRemovedAmbientMeshOrFollowingDot_AreEnforced()
+    {
+        await using var runtime = await CreateStartedControllerAsync();
+        using var vm = new StageViewModel(runtime);
+        vm.ApplySnapshot(runtime.SampleFrame());
+
+        vm.IsAlbumArtBackdrop.Should().BeTrue();
+        vm.IsPureBlackBackdrop.Should().BeFalse();
+
+        // Attempting to pass legacy AmbientPartyMesh selects AlbumArtBlur cleanly
+        vm.SelectBackdropModeCommand.Execute(StageBackdropMode.AmbientPartyMesh);
+        await Task.Delay(60);
+        vm.ApplySnapshot(runtime.SampleFrame());
+        vm.CurrentSnapshot.Settings.StageBackdropMode.Should().Be(StageBackdropMode.AlbumArtBlur);
+
+        // Selecting new expanded fonts updates ViewModel booleans & OverlayFrameAdapter font id
+        var fontChecks = new (string Name, Func<bool> Flag, LyricFontId ExpectedId)[]
+        {
+            ("Bahnschrift", () => vm.IsBahnschriftSelected, LyricFontId.Bahnschrift),
+            ("Georgia", () => vm.IsGeorgiaSelected, LyricFontId.Georgia),
+            ("Impact", () => vm.IsImpactSelected, LyricFontId.Impact),
+            ("Sitka Display", () => vm.IsSitkaDisplaySelected, LyricFontId.SitkaDisplay),
+            ("Ink Free", () => vm.IsInkFreeSelected, LyricFontId.InkFree),
+            ("Cascadia Mono", () => vm.IsCascadiaMonoSelected, LyricFontId.SystemMono)
+        };
+
+        foreach (var (name, flag, expectedId) in fontChecks)
+        {
+            vm.SelectFontCommand.Execute(name);
+            await Task.Delay(60);
+            vm.ApplySnapshot(runtime.SampleFrame());
+            flag().Should().BeTrue($"{name} should activate cleanly");
+
+            var packet = OverlayFrameAdapter.FromPlaybackSnapshot(
+                vm.CurrentSnapshot,
+                viewportWidthDip: 640f,
+                viewportHeightDip: 360f,
+                renderScaling: 1.0f,
+                renderTimeSeconds: 1.0,
+                deltaSeconds: 1f / 60f,
+                surfaceMode: StageRenderSurfaceMode.StageCanvas);
+
+            packet.ActiveFontId.Should().Be(expectedId);
+            packet.ShowFollowingDot.Should().BeFalse();
+            packet.StageBackdrop.Should().Be(StageBackdropMode.AlbumArtBlur);
+        }
     }
 }

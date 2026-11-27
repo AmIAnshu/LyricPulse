@@ -77,7 +77,37 @@ public static class SemanticIdiomLexicon
             ["magic spell"] = "magic_wand",
             ["time machine"] = "clock_retro",
             ["bright light"] = "light",
-            ["secret key"] = "key_golden"
+            ["secret key"] = "key_golden",
+            // Poetic Hindi & Hinglish Bigram Idioms
+            ["dil toota"] = "broken_heart",
+            ["toota dil"] = "broken_heart",
+            ["tuta dil"] = "broken_heart",
+            ["दिल टूटा"] = "broken_heart",
+            ["टूटा दिल"] = "broken_heart",
+            ["dil dhadke"] = "heartbeat_pulse",
+            ["दिल धडके"] = "heartbeat_pulse",
+            ["pehla pyaar"] = "heart_sparkle",
+            ["pehla pyar"] = "heart_sparkle",
+            ["पहला प्यार"] = "heart_sparkle",
+            ["chaand taare"] = "star",
+            ["chand tare"] = "star",
+            ["चांद तारे"] = "star",
+            ["kaali raat"] = "night",
+            ["kali raat"] = "night",
+            ["काली रात"] = "night",
+            ["bheegi raat"] = "rain",
+            ["भीगी रात"] = "rain",
+            ["tez baarish"] = "umbrella_rain",
+            ["तेज बारिश"] = "umbrella_rain",
+            ["khula aasmaan"] = "freedom",
+            ["khula asman"] = "freedom",
+            ["खुला आसमान"] = "freedom",
+            ["laal gulab"] = "flower",
+            ["लाल गुलाब"] = "flower",
+            ["meetha sapna"] = "dream",
+            ["मीठा सपना"] = "dream",
+            ["saat phere"] = "diamond_ring",
+            ["सात फेरे"] = "diamond_ring"
         }.ToFrozenDictionary(StringComparer.Ordinal);
 
     private static readonly ImmutableArray<(string MoodConceptId, FrozenSet<string> Indicators)> MoodBuckets =

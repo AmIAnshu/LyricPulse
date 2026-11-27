@@ -12,7 +12,12 @@ public enum LyricFontId
     FluentIcons = 4,
     SystemMono = 5,
     SystemUi = 6,
-    Emoji = 7
+    Emoji = 7,
+    Bahnschrift = 8,
+    Impact = 9,
+    Georgia = 10,
+    SitkaDisplay = 11,
+    InkFree = 12
 }
 
 /// <summary>

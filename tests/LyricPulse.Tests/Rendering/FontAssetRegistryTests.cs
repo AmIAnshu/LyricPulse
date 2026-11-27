@@ -55,6 +55,11 @@ public sealed class FontAssetRegistryTests
     [InlineData("Jost", LyricFontId.Jost)]
     [InlineData("Mulish", LyricFontId.Mulish)]
     [InlineData("Nunito", LyricFontId.Nunito)]
+    [InlineData("Bahnschrift", LyricFontId.Bahnschrift)]
+    [InlineData("Georgia", LyricFontId.Georgia)]
+    [InlineData("Impact", LyricFontId.Impact)]
+    [InlineData("Sitka Display", LyricFontId.SitkaDisplay)]
+    [InlineData("Ink Free", LyricFontId.InkFree)]
     [InlineData("Cascadia Mono", LyricFontId.SystemMono)]
     [InlineData("Segoe UI Variable", LyricFontId.SystemUi)]
     [InlineData("Segoe UI Emoji", LyricFontId.Emoji)]
@@ -64,6 +69,33 @@ public sealed class FontAssetRegistryTests
     public void ResolveFontId_MapsFamilyNamesDeterministically(string? family, LyricFontId expected)
     {
         FontAssetRegistry.ResolveFontId(family).Should().Be(expected);
+    }
+
+    [Fact]
+    public void ExpandedStudioFonts_ResolveTypefacesAndConfigureAntialiasWithoutTofuOrClearType()
+    {
+        using var registry = new FontAssetRegistry();
+
+        var expanded = new[]
+        {
+            LyricFontId.Bahnschrift,
+            LyricFontId.Georgia,
+            LyricFontId.Impact,
+            LyricFontId.SitkaDisplay,
+            LyricFontId.InkFree
+        };
+
+        foreach (var id in expanded)
+        {
+            var typeface = registry.GetTypeface(id);
+            typeface.Should().NotBeNull();
+
+            var font = registry.GetOrCreateFont(id, 40f);
+            font.Edging.Should().Be(SKFontEdging.Antialias);
+            font.Subpixel.Should().BeTrue();
+            font.LinearMetrics.Should().BeTrue();
+            TextShaperService.MeasureWidth("Midnight Pulse", font).Should().BeGreaterThan(60f);
+        }
     }
 
     [Fact]

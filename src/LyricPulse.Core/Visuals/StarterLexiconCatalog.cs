@@ -186,6 +186,8 @@ public sealed class StarterLexiconCatalog
             }
         }
 
+        HindiVisualLexicon.RegisterAliases(byId, wordMap);
+
         return new StarterLexiconCatalog(
             concepts.ToImmutable(),
             byId.ToFrozenDictionary(StringComparer.Ordinal),

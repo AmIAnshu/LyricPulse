@@ -192,9 +192,27 @@ public sealed class App : Application, IDisposable
         _stageViewModel.SetHotkeyConflicts(_lastHotkeyConflicts);
 
         _stageWindow = new StageWindow(_stageViewModel, fonts, shaders, telemetry, rendererFactory);
+        _stageWindow.Opened += (_, _) => ApplyStageChromeIfHandleReady();
+        _stageWindow.Activated += (_, _) => ApplyStageChromeIfHandleReady();
+        _stageWindow.PropertyChanged += (_, args) =>
+        {
+            if (args.Property == Window.WindowStateProperty)
+            {
+                ApplyStageChromeIfHandleReady();
+            }
+        };
         desktop.MainWindow = _stageWindow;
         _stageWindow.Show();
+        ApplyStageChromeIfHandleReady();
         ApplyRequestedTheme(_runtime.Settings.ThemeVariantMode);
+    }
+
+    private void ApplyStageChromeIfHandleReady()
+    {
+        if (_stageWindow?.TryGetPlatformHandle() is { HandleDescriptor: "HWND", Handle: not 0 } platformHandle)
+        {
+            Win32OverlayInterop.ApplyStageWindowDarkChrome(platformHandle.Handle);
+        }
     }
 
     private void OpenOrFocusStageWindow(bool openSettingsDrawer = false)

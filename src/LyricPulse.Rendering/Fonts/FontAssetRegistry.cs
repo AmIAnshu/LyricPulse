@@ -82,10 +82,60 @@ public sealed class FontAssetRegistry : IDisposable
                 LineHeightMultiplier: 1.00f,
                 StrokeHaloRatio: 0.000f,
                 MinOverlaySizeDip: 20f,
+                BundledAssetUri: null),
+            [LyricFontId.Bahnschrift] = new(
+                LyricFontId.Bahnschrift,
+                "Bahnschrift",
+                TrackingEm: -0.012f,
+                LineHeightMultiplier: 1.12f,
+                StrokeHaloRatio: 0.048f,
+                MinOverlaySizeDip: 24f,
+                BundledAssetUri: null),
+            [LyricFontId.Impact] = new(
+                LyricFontId.Impact,
+                "Impact",
+                TrackingEm: 0.015f,
+                LineHeightMultiplier: 1.08f,
+                StrokeHaloRatio: 0.052f,
+                MinOverlaySizeDip: 26f,
+                BundledAssetUri: null),
+            [LyricFontId.Georgia] = new(
+                LyricFontId.Georgia,
+                "Georgia",
+                TrackingEm: -0.005f,
+                LineHeightMultiplier: 1.18f,
+                StrokeHaloRatio: 0.040f,
+                MinOverlaySizeDip: 24f,
+                BundledAssetUri: null),
+            [LyricFontId.SitkaDisplay] = new(
+                LyricFontId.SitkaDisplay,
+                "Sitka Display",
+                TrackingEm: -0.010f,
+                LineHeightMultiplier: 1.16f,
+                StrokeHaloRatio: 0.038f,
+                MinOverlaySizeDip: 26f,
+                BundledAssetUri: null),
+            [LyricFontId.InkFree] = new(
+                LyricFontId.InkFree,
+                "Ink Free",
+                TrackingEm: 0.005f,
+                LineHeightMultiplier: 1.24f,
+                StrokeHaloRatio: 0.046f,
+                MinOverlaySizeDip: 26f,
                 BundledAssetUri: null)
         }.ToFrozenDictionary();
 
+    private static readonly (LyricFontId Id, SKFontStyleWeight Weight, string[] Families)[] SystemDisplaySpecs =
+    [
+        (LyricFontId.Bahnschrift, SKFontStyleWeight.SemiBold, ["Bahnschrift", "Segoe UI Variable Display", "Segoe UI"]),
+        (LyricFontId.Impact, SKFontStyleWeight.Normal, ["Impact", "Arial Black", "Segoe UI"]),
+        (LyricFontId.Georgia, SKFontStyleWeight.Bold, ["Georgia", "Times New Roman"]),
+        (LyricFontId.SitkaDisplay, SKFontStyleWeight.Bold, ["Sitka Display", "Sitka", "Georgia"]),
+        (LyricFontId.InkFree, SKFontStyleWeight.Normal, ["Ink Free", "Segoe Print", "Segoe Script"])
+    ];
+
     private readonly Dictionary<LyricFontId, SKTypeface> _bundledTypefaces = new(5);
+    private readonly Dictionary<LyricFontId, SKTypeface> _systemDisplayTypefaces = new(5);
     private readonly Dictionary<FontCacheKey, SKFont> _fontCache = new(MaxCachedFonts);
     private readonly Dictionary<FallbackFontCacheKey, SKFont> _fallbackFontCache = new(64);
     private readonly Dictionary<int, SKTypeface> _fallbackCodepointCache = new(64);
@@ -114,6 +164,11 @@ public sealed class FontAssetRegistry : IDisposable
         _fallbackMono = ResolveSystemTypeface(SKFontStyleWeight.SemiBold, "Cascadia Mono", "Consolas", "Courier New");
         _fallbackUi = ResolveSystemTypeface(SKFontStyleWeight.Normal, "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI");
         _fallbackEmoji = ResolveSystemTypeface(SKFontStyleWeight.Normal, "Segoe UI Emoji");
+
+        foreach (var (fontId, weight, families) in SystemDisplaySpecs)
+        {
+            _systemDisplayTypefaces[fontId] = ResolveSystemTypeface(weight, families);
+        }
     }
 
     public static IReadOnlyDictionary<LyricFontId, FontOpticalMetrics> AllOpticalMetrics => OpticalCatalog;
@@ -142,6 +197,31 @@ public sealed class FontAssetRegistry : IDisposable
         if (trimmed.Contains("Nunito", StringComparison.OrdinalIgnoreCase))
         {
             return LyricFontId.Nunito;
+        }
+
+        if (trimmed.Contains("Bahnschrift", StringComparison.OrdinalIgnoreCase))
+        {
+            return LyricFontId.Bahnschrift;
+        }
+
+        if (trimmed.Contains("Impact", StringComparison.OrdinalIgnoreCase))
+        {
+            return LyricFontId.Impact;
+        }
+
+        if (trimmed.Contains("Georgia", StringComparison.OrdinalIgnoreCase))
+        {
+            return LyricFontId.Georgia;
+        }
+
+        if (trimmed.Contains("Sitka", StringComparison.OrdinalIgnoreCase))
+        {
+            return LyricFontId.SitkaDisplay;
+        }
+
+        if (trimmed.Contains("Ink", StringComparison.OrdinalIgnoreCase))
+        {
+            return LyricFontId.InkFree;
         }
 
         if (trimmed.Contains("Fluent", StringComparison.OrdinalIgnoreCase))
@@ -178,6 +258,7 @@ public sealed class FontAssetRegistry : IDisposable
             LyricFontId.SystemMono => _fallbackMono,
             LyricFontId.SystemUi => _fallbackUi,
             LyricFontId.Emoji => _fallbackEmoji,
+            _ when _systemDisplayTypefaces.TryGetValue(id, out var sysTf) => sysTf,
             _ => _bundledTypefaces.TryGetValue(id, out var tf) ? tf : SKTypeface.Default
         };
     }
@@ -353,7 +434,27 @@ public sealed class FontAssetRegistry : IDisposable
                 return cached;
             }
 
-            var matched = SKFontManager.Default.MatchCharacter(codepoint);
+            SKTypeface? matched = null;
+            if (codepoint is >= 0x0900 and <= 0x097F)
+            {
+                matched = SKFontManager.Default.MatchFamily(
+                    "Nirmala UI",
+                    new SKFontStyle(SKFontStyleWeight.Bold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright));
+                if (matched is not null && !matched.ContainsGlyph(codepoint))
+                {
+                    matched.Dispose();
+                    matched = null;
+                }
+            }
+
+            matched ??= SKFontManager.Default.MatchCharacter(
+                null,
+                SKFontStyleWeight.Bold,
+                SKFontStyleWidth.Normal,
+                SKFontStyleSlant.Upright,
+                null,
+                codepoint) ?? SKFontManager.Default.MatchCharacter(codepoint);
+
             if (matched is null)
             {
                 _fallbackCodepointCache[codepoint] = _fallbackEmoji;
@@ -361,7 +462,7 @@ public sealed class FontAssetRegistry : IDisposable
             }
 
             var familyKey = !string.IsNullOrWhiteSpace(matched.FamilyName)
-                ? matched.FamilyName
+                ? $"{matched.FamilyName}_{matched.FontWeight}"
                 : $"cp_{codepoint:X}";
 
             if (_ownedFallbackTypefaces.TryGetValue(familyKey, out var existingFamily))
@@ -512,6 +613,16 @@ public sealed class FontAssetRegistry : IDisposable
         }
 
         _bundledTypefaces.Clear();
+
+        foreach (var tf in _systemDisplayTypefaces.Values)
+        {
+            if (!ReferenceEquals(tf, SKTypeface.Default))
+            {
+                tf.Dispose();
+            }
+        }
+
+        _systemDisplayTypefaces.Clear();
 
         if (!ReferenceEquals(_fallbackMono, SKTypeface.Default))
         {

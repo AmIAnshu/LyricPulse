@@ -148,7 +148,7 @@ public sealed class MediaSessionCoordinator
             previous is not null &&
             previous.Track is not null &&
             selected.SourceAppUserModelId.Equals(previous.SourceAppUserModelId, StringComparison.OrdinalIgnoreCase) &&
-            selected.PlaybackState == MediaPlaybackState.Changing &&
+            selected.PlaybackState is MediaPlaybackState.Changing or MediaPlaybackState.Playing or MediaPlaybackState.Paused &&
             string.IsNullOrWhiteSpace(selected.Title);
 
         var track = isChangingHysteresis

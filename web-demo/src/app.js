@@ -23,7 +23,7 @@ const state = {
   filter: 'All',
   previewsPaused: false,
   settings: {
-    backdropMode: 'AmbientPartyMesh',
+    backdropMode: 'AlbumArtBlur',
     fontFamily: 'Jost',
     lyricScale: 1.0,
     edgeGlowMode: 'NeonRush',

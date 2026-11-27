@@ -29,7 +29,18 @@ internal static class LyricTextNormalizationData
         "cause", "cuz", "cos", "tho", "though", "im", "ive", "id", "ill", "youre", "youve", "youll",
         "hes", "shes", "thats", "theres", "whats", "whos", "dont", "doesnt", "didnt", "cant", "wont",
         "couldnt", "wouldnt", "shouldnt", "isnt", "arent", "wasnt", "werent", "every", "onto", "inside",
-        "across", "take", "feel", "clean", "inch", "sudden"
+        "across", "take", "feel", "clean", "inch", "sudden",
+        // Common Hindi/Hinglish grammatical stopwords (zero conflict with English concepts)
+        "hai", "hain", "hoon", "hun", "mein", "mera", "meri", "mere", "tera", "teri", "tere",
+        "tum", "tumhara", "tumhari", "tumhare", "tumhe", "mujhe", "mujhko", "tujhe", "tujhko",
+        "humein", "hamara", "hamari", "apna", "apni", "apne", "nahi", "nahin", "kya", "kyun",
+        "kyunki", "kaise", "kaisa", "kaisi", "aur", "bhi", "toh", "phir", "kuch", "koi", "woh",
+        "yeh", "lekin", "magar", "agar", "jab", "tab", "yahan", "wahan", "jahan", "kahan",
+        "unka", "unki", "unke", "iska", "iski", "iske", "uska", "uski", "uske",
+        "है", "हैं", "हूं", "हो", "का", "की", "के", "को", "से", "में", "पर", "भी", "तो",
+        "और", "क्या", "क्यों", "कब", "कैसे", "जब", "तब", "अब", "यह", "वह", "मैं", "हम",
+        "तुम", "तू", "तेरा", "तेरी", "तेरे", "मेरा", "मेरी", "मेरे", "अपना", "अपनी", "नहीं",
+        "मत", "बस", "फिर", "कुछ", "सब", "कोई", "मुझे", "तुझे", "लेकिन", "मगर", "अगर"
     ];
 
     public static FrozenSet<string> Stopwords { get; } = StopwordArray.ToFrozenSet(StringComparer.Ordinal);
@@ -126,17 +137,18 @@ internal static class LyricTextNormalizationData
     public static bool TryNormalizeToken(ReadOnlySpan<char> raw, Span<char> destination, out int length)
     {
         length = 0;
-        var trimmed = raw.Trim(".,!?;:\"'()[]{}<>-—–…♪♫`~");
+        var trimmed = raw.Trim(".,!?;:\"'()[]{}<>-—–…♪♫`~।॥");
         if (trimmed.Length < 2 || trimmed.Length > destination.Length)
         {
             return false;
         }
 
         var written = 0;
+        var hasDevanagari = false;
         for (var i = 0; i < trimmed.Length; i++)
         {
             var ch = trimmed[i];
-            if (char.IsDigit(ch))
+            if (char.IsDigit(ch) || ch is >= '\u0966' and <= '\u096F')
             {
                 return false;
             }
@@ -154,7 +166,40 @@ internal static class LyricTextNormalizationData
             if ((ch is >= 'a' and <= 'z') || ch == '\'')
             {
                 destination[written++] = ch;
+                continue;
             }
+
+            // Preserve Devanagari letters and vowel matras while folding nukta & chandrabindu variants
+            if (ch is >= '\u0901' and <= '\u0963')
+            {
+                if (ch == '\u093C') // combining nukta -> strip so इश्क़ == इश्क, ज़िंदगी == जिंदगी
+                {
+                    continue;
+                }
+
+                ch = ch switch
+                {
+                    '\u0901' => '\u0902', // chandrabindu ँ -> anusvara ं (चाँद == चांद, आँसू == आंसू)
+                    '\u0958' => 'क',
+                    '\u0959' => 'ख',
+                    '\u095A' => 'ग',
+                    '\u095B' => 'ज',
+                    '\u095C' => 'ड',
+                    '\u095D' => 'ढ',
+                    '\u095E' => 'फ',
+                    '\u095F' => 'य',
+                    _ => ch
+                };
+
+                destination[written++] = ch;
+                hasDevanagari = true;
+            }
+        }
+
+        if (hasDevanagari)
+        {
+            length = written;
+            return written >= 2;
         }
 
         var span = StripContraction(destination[..written]);

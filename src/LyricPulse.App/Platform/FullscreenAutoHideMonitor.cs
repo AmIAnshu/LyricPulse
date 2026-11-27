@@ -88,8 +88,7 @@ public sealed class FullscreenAutoHideMonitor : IFullscreenDetector, IDisposable
     }
 
     internal static bool IsFullscreenState(QueryUserNotificationState state) =>
-        state is QueryUserNotificationState.Busy
-            or QueryUserNotificationState.RunningD3DFullScreen
+        state is QueryUserNotificationState.RunningD3DFullScreen
             or QueryUserNotificationState.PresentationMode;
 
     private static bool QueryWindowsFullscreenState()

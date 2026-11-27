@@ -8,7 +8,28 @@
       <SolidColorBrush x:Key="LpSurfaceSubtleBrush" Color="#101219"/>
       <SolidColorBrush x:Key="LpStageBackgroundBrush" Color="#08090D"/>
       <SolidColorBrush x:Key="LpGlassPillBrush" Color="#CC14161F"/>
-      <SolidColorBrush x:Key="LpGlassPillBorderBrush" Color="#2EFFFFFF"/>
+      <SolidColorBrush x:Key="LpGlassPillBorderBrush" Color="#38FFFFFF"/>
+      <LinearGradientBrush x:Key="LpGlassChromeBrush" StartPoint="0%,0%" EndPoint="0%,100%">
+        <GradientStop Color="#DF181C2B" Offset="0"/>
+        <GradientStop Color="#C90E111B" Offset="1"/>
+      </LinearGradientBrush>
+      <LinearGradientBrush x:Key="LpGlassChromeBorderBrush" StartPoint="0%,0%" EndPoint="0%,100%">
+        <GradientStop Color="#52FFFFFF" Offset="0"/>
+        <GradientStop Color="#1CFFFFFF" Offset="1"/>
+      </LinearGradientBrush>
+      <LinearGradientBrush x:Key="LpGlassPopoverBrush" StartPoint="0%,0%" EndPoint="0%,100%">
+        <GradientStop Color="#EE171B2A" Offset="0"/>
+        <GradientStop Color="#E20D101A" Offset="1"/>
+      </LinearGradientBrush>
+      <LinearGradientBrush x:Key="LpGlassDrawerBrush" StartPoint="0%,0%" EndPoint="0%,100%">
+        <GradientStop Color="#EB141725" Offset="0"/>
+        <GradientStop Color="#F00C0E17" Offset="1"/>
+      </LinearGradientBrush>
+      <SolidColorBrush x:Key="LpGlassTileBrush" Color="#19FFFFFF"/>
+      <SolidColorBrush x:Key="LpGlassTileHoverBrush" Color="#2CFFFFFF"/>
+      <SolidColorBrush x:Key="LpGlassTileBorderBrush" Color="#28FFFFFF"/>
+      <SolidColorBrush x:Key="LpGlassTileBorderHoverBrush" Color="#60FFFFFF"/>
+      <SolidColorBrush x:Key="LpGlassDividerBrush" Color="#1EFFFFFF"/>
       <SolidColorBrush x:Key="LpTextPrimaryBrush" Color="#F4F6FA"/>
       <SolidColorBrush x:Key="LpTextSecondaryBrush" Color="#A6B0C3"/>
       <SolidColorBrush x:Key="LpTextTertiaryBrush" Color="#8490A7"/>
@@ -48,6 +69,27 @@
       <SolidColorBrush x:Key="LpStageBackgroundBrush" Color="#0E1017"/>
       <SolidColorBrush x:Key="LpGlassPillBrush" Color="#EBFFFFFF"/>
       <SolidColorBrush x:Key="LpGlassPillBorderBrush" Color="#26111420"/>
+      <LinearGradientBrush x:Key="LpGlassChromeBrush" StartPoint="0%,0%" EndPoint="0%,100%">
+        <GradientStop Color="#F0FFFFFF" Offset="0"/>
+        <GradientStop Color="#E0F1F4FA" Offset="1"/>
+      </LinearGradientBrush>
+      <LinearGradientBrush x:Key="LpGlassChromeBorderBrush" StartPoint="0%,0%" EndPoint="0%,100%">
+        <GradientStop Color="#44111420" Offset="0"/>
+        <GradientStop Color="#1C111420" Offset="1"/>
+      </LinearGradientBrush>
+      <LinearGradientBrush x:Key="LpGlassPopoverBrush" StartPoint="0%,0%" EndPoint="0%,100%">
+        <GradientStop Color="#F6FFFFFF" Offset="0"/>
+        <GradientStop Color="#EDF1F4FA" Offset="1"/>
+      </LinearGradientBrush>
+      <LinearGradientBrush x:Key="LpGlassDrawerBrush" StartPoint="0%,0%" EndPoint="0%,100%">
+        <GradientStop Color="#F5FFFFFF" Offset="0"/>
+        <GradientStop Color="#EEF1F4FA" Offset="1"/>
+      </LinearGradientBrush>
+      <SolidColorBrush x:Key="LpGlassTileBrush" Color="#10111420"/>
+      <SolidColorBrush x:Key="LpGlassTileHoverBrush" Color="#1D111420"/>
+      <SolidColorBrush x:Key="LpGlassTileBorderBrush" Color="#24111420"/>
+      <SolidColorBrush x:Key="LpGlassTileBorderHoverBrush" Color="#4D111420"/>
+      <SolidColorBrush x:Key="LpGlassDividerBrush" Color="#1A111420"/>
       <SolidColorBrush x:Key="LpTextPrimaryBrush" Color="#111420"/>
       <SolidColorBrush x:Key="LpTextSecondaryBrush" Color="#475166"/>
       <SolidColorBrush x:Key="LpTextTertiaryBrush" Color="#5B657B"/>
@@ -81,12 +123,17 @@
   </ResourceDictionary.ThemeDictionaries>
 
   <FontFamily x:Key="LpFontUi">Segoe UI Variable Text, Segoe UI, Inter, sans-serif</FontFamily>
-  <FontFamily x:Key="LpFontDisplay">Segoe UI Variable Display, fonts:LyricPulse#Jost, Segoe UI</FontFamily>
+  <FontFamily x:Key="LpFontDisplay">fonts:LyricPulse#Jost, Segoe UI Variable Display, Segoe UI</FontFamily>
   <FontFamily x:Key="LpFontMono">Cascadia Mono, Consolas, monospace</FontFamily>
   <FontFamily x:Key="LpFontJost">fonts:LyricPulse#Jost</FontFamily>
   <FontFamily x:Key="LpFontBodoni">fonts:LyricPulse#Bodoni Moda</FontFamily>
   <FontFamily x:Key="LpFontMulish">fonts:LyricPulse#Mulish</FontFamily>
   <FontFamily x:Key="LpFontNunito">fonts:LyricPulse#Nunito</FontFamily>
+  <FontFamily x:Key="LpFontBahnschrift">Bahnschrift, Arial Narrow, sans-serif</FontFamily>
+  <FontFamily x:Key="LpFontGeorgia">Georgia, Times New Roman, serif</FontFamily>
+  <FontFamily x:Key="LpFontImpact">Impact, Arial Black, sans-serif</FontFamily>
+  <FontFamily x:Key="LpFontSitka">Sitka Display, Sitka, Georgia, serif</FontFamily>
+  <FontFamily x:Key="LpFontInkFree">Ink Free, Segoe Print, Segoe Script, cursive</FontFamily>
 
   <x:Double x:Key="LpSpaceXs">4</x:Double>
   <x:Double x:Key="LpSpaceSm">8</x:Double>

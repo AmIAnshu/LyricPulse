@@ -19,6 +19,7 @@ public sealed class AudioVisualizerRenderer : IDisposable
     private readonly SKPaint _strokePaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round };
     private readonly SKPaint _glowPaint = new() { IsAntialias = true, Style = SKPaintStyle.Stroke, StrokeCap = SKStrokeCap.Round };
     private readonly SKPath _wavePath = new();
+    private readonly SKPath _waveFillPath = new();
     private readonly SKPath _haloPath = new();
     private readonly SKColor[] _gradColors = new SKColor[3];
     private readonly float[] _gradStops = [0f, 0.55f, 1f];
@@ -83,6 +84,7 @@ public sealed class AudioVisualizerRenderer : IDisposable
         _strokePaint.Dispose();
         _glowPaint.Dispose();
         _wavePath.Dispose();
+        _waveFillPath.Dispose();
         _haloPath.Dispose();
     }
 
@@ -191,6 +193,26 @@ public sealed class AudioVisualizerRenderer : IDisposable
         canvas.DrawPath(_haloPath, _strokePaint);
     }
 
+    private static float SampleSmoothBand(ReadOnlySpan<float> bands, float u)
+    {
+        if (bands.Length == 0)
+        {
+            return 0f;
+        }
+
+        if (bands.Length == 1)
+        {
+            return bands[0];
+        }
+
+        var scaled = Math.Clamp(u, 0f, 1f) * (bands.Length - 1);
+        var idx0 = (int)MathF.Floor(scaled);
+        var idx1 = Math.Min(bands.Length - 1, idx0 + 1);
+        var frac = scaled - idx0;
+        var smoothFrac = frac * frac * (3f - (2f * frac));
+        return bands[idx0] + ((bands[idx1] - bands[idx0]) * smoothFrac);
+    }
+
     private void DrawFluidWaves(
         SKCanvas canvas,
         FrameRenderPacket packet,
@@ -201,13 +223,14 @@ public sealed class AudioVisualizerRenderer : IDisposable
         var w = packet.ViewportWidthDip;
         var h = packet.ViewportHeightDip;
         var t = (float)packet.RenderTimeSeconds;
-        var bands = audio.SafeBands;
-        const int segments = 48;
+        var bands = audio.SafeBands.AsSpan();
+        const int segments = 36;
 
         for (var wave = 0; wave < 3; wave++)
         {
-            var baseY = h * (0.48f + (wave * 0.07f));
-            var ampBase = h * (0.045f + (wave * 0.02f)) * intensity * (0.5f + audio.BassEnergy + (audio.MidEnergy * 0.5f));
+            // Anchor waves slightly lower so silky aurora ribbons cradle under active lyrics rather than slicing across them
+            var baseY = h * (0.58f + (wave * 0.075f));
+            var ampBase = h * (0.042f + (wave * 0.018f)) * intensity * (0.45f + (audio.BassEnergy * 0.90f) + (audio.MidEnergy * 0.45f));
             var color = wave switch
             {
                 0 => palette.AccentColor1,
@@ -216,29 +239,78 @@ public sealed class AudioVisualizerRenderer : IDisposable
             };
 
             _wavePath.Rewind();
+            _waveFillPath.Rewind();
+
+            var prevX = 0f;
+            var prevY = baseY;
+            var lastX = w;
+            var lastY = baseY;
+
             for (var s = 0; s <= segments; s++)
             {
                 var u = s / (float)segments;
                 var x = u * w;
-                var bandVal = bands[(s * bands.Length / (segments + 1)) % bands.Length];
-                var envelope = MathF.Sin(u * MathF.PI); // Smooth taper at left/right edges
-                var y = baseY + MathF.Sin((u * 7.5f) + (t * (1.6f + (wave * 0.45f))) + (wave * 1.4f)) * ampBase * envelope * (0.65f + bandVal);
+                var bandVal = SampleSmoothBand(bands, u);
+                var envelope = MathF.Sin(u * MathF.PI);
+                var primaryOsc = MathF.Sin((u * 5.8f) + (t * (1.35f + (wave * 0.38f))) + (wave * 1.45f));
+                var harmonicOsc = 0.28f * MathF.Sin((u * 10.5f) - (t * (0.95f + (wave * 0.25f))) + (wave * 2.1f));
+                var y = baseY + ((primaryOsc + harmonicOsc) * ampBase * envelope * (0.58f + (bandVal * 0.72f)));
+
                 if (s == 0)
                 {
                     _wavePath.MoveTo(x, y);
+                    _waveFillPath.MoveTo(x, y);
                 }
                 else
                 {
-                    _wavePath.LineTo(x, y);
+                    var midX = (prevX + x) * 0.5f;
+                    var midY = (prevY + y) * 0.5f;
+                    _wavePath.QuadTo(prevX, prevY, midX, midY);
+                    _waveFillPath.QuadTo(prevX, prevY, midX, midY);
+                }
+
+                prevX = x;
+                prevY = y;
+                lastX = x;
+                lastY = y;
+            }
+
+            _wavePath.LineTo(lastX, lastY);
+            _waveFillPath.LineTo(lastX, lastY);
+
+            var fillBottom = baseY + (h * 0.14f);
+            _waveFillPath.LineTo(w, fillBottom);
+            _waveFillPath.LineTo(0f, fillBottom);
+            _waveFillPath.Close();
+
+            _gradColors[0] = color.ToSkColorWithAlpha(0.11f * intensity);
+            _gradColors[1] = color.ToSkColorWithAlpha(0.03f * intensity);
+            _gradColors[2] = color.ToSkColorWithAlpha(0f);
+            using (var ribbonFill = SKShader.CreateLinearGradient(
+                       new SKPoint(w * 0.5f, baseY - ampBase),
+                       new SKPoint(w * 0.5f, fillBottom),
+                       _gradColors,
+                       _gradStops,
+                       SKShaderTileMode.Clamp))
+            {
+                _fillPaint.Shader = ribbonFill;
+                _fillPaint.Color = SKColors.White;
+                try
+                {
+                    canvas.DrawPath(_waveFillPath, _fillPaint);
+                }
+                finally
+                {
+                    _fillPaint.Shader = null;
                 }
             }
 
-            _glowPaint.StrokeWidth = packet.IsCompactCard ? 5.0f : 10.5f;
-            _glowPaint.Color = color.ToSkColorWithAlpha(0.18f * intensity);
+            _glowPaint.StrokeWidth = packet.IsCompactCard ? 4.5f : 9.5f;
+            _glowPaint.Color = color.ToSkColorWithAlpha(0.16f * intensity);
             canvas.DrawPath(_wavePath, _glowPaint);
 
-            _strokePaint.StrokeWidth = packet.IsCompactCard ? 1.2f : 2.1f;
-            _strokePaint.Color = color.ToSkColorWithAlpha(0.50f * intensity);
+            _strokePaint.StrokeWidth = packet.IsCompactCard ? 1.1f : 1.9f;
+            _strokePaint.Color = color.ToSkColorWithAlpha(0.40f * intensity);
             canvas.DrawPath(_wavePath, _strokePaint);
         }
     }
