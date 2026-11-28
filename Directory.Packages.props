@@ -32,7 +32,7 @@
 
     <!-- Core WinRT, SIMD, Rate Limiting & Microsoft.Extensions -->
     <PackageVersion Include="Microsoft.Windows.CsWinRT" Version="2.3.1" />
-    <PackageVersion Include="System.Numerics.Tensors" Version="10.0.15" />
+    <PackageVersion Include="System.Numerics.Tensors" Version="11.0.0" />
     <PackageVersion Include="System.Threading.RateLimiting" Version="10.0.15" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.15" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.15" />
