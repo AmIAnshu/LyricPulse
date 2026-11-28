@@ -6,7 +6,7 @@
 
   <ItemGroup>
     <!-- Avalonia 11.3.x (latest stable 11.3 patch) -->
-    <PackageVersion Include="Avalonia" Version="11.3.23" />
+    <PackageVersion Include="Avalonia" Version="12.2.0" />
     <PackageVersion Include="Avalonia.Desktop" Version="11.3.23" />
     <PackageVersion Include="Avalonia.Skia" Version="11.3.23" />
     <PackageVersion Include="Avalonia.Win32" Version="11.3.23" />
