@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using LyricPulse.Core.Lyrics.Dtos;
 using LyricPulse.Core.Models;
@@ -28,7 +29,21 @@ namespace LyricPulse.Core.Serialization;
 [JsonSerializable(typeof(LrclibErrorDto))]
 [JsonSerializable(typeof(NetEaseSearchResponseDto))]
 [JsonSerializable(typeof(NetEaseLyricResponseDto))]
-public sealed partial class LyricPulseJsonContext : JsonSerializerContext;
+public sealed partial class LyricPulseJsonContext : JsonSerializerContext
+{
+    public const int MaxSecureJsonDepth = 16;
+
+    /// <summary>
+    /// Depth-capped (MaxDepth = 16) AOT-safe context for untrusted HTTP payloads and local disk JSON files.
+    /// </summary>
+    public static LyricPulseJsonContext Secure { get; } = new(new JsonSerializerOptions
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        WriteIndented = false,
+        MaxDepth = MaxSecureJsonDepth
+    });
+}
 
 /// <summary>
 /// Pretty-printed AOT-safe JSON context for human-readable settings and offset files.

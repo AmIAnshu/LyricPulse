@@ -754,7 +754,8 @@ public sealed partial class OverlayRuntimeController : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogRuntimeTrackLoadFailed(ex, track.RawTitle);
+            var keyPrefix = track.CacheKey.Length >= 8 ? track.CacheKey[..8] : track.CacheKey;
+            _logger.LogRuntimeTrackLoadFailed(ex, keyPrefix);
         }
     }
 

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using LyricPulse.Core.Abstractions;
 using LyricPulse.Core.Models;
+using LyricPulse.Core.Security;
 using LyricPulse.Core.Serialization;
 
 namespace LyricPulse.Core.Settings;
@@ -36,7 +37,7 @@ public sealed partial class JsonSettingsStore : ISettingsStore, IDisposable
         await _ioLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (!File.Exists(_filePath))
+            if (!SafeFileGuard.TryOpenSafeReadStream(_filePath, SafeFileGuard.MaxSettingsFileBytes, out var stream))
             {
                 _current = AppSettings.Default;
                 return _current;
@@ -44,14 +45,16 @@ public sealed partial class JsonSettingsStore : ISettingsStore, IDisposable
 
             try
             {
-                await using var stream = File.OpenRead(_filePath);
-                var loaded = await JsonSerializer.DeserializeAsync(
-                    stream,
-                    LyricPulseJsonContext.Default.AppSettings,
-                    cancellationToken).ConfigureAwait(false);
+                await using (stream!)
+                {
+                    var loaded = await JsonSerializer.DeserializeAsync(
+                        stream,
+                        LyricPulseJsonContext.Secure.AppSettings,
+                        cancellationToken).ConfigureAwait(false);
 
-                _current = (loaded ?? AppSettings.Default).ValidateAndNormalize();
-                return _current;
+                    _current = (loaded ?? AppSettings.Default).ValidateAndNormalize();
+                    return _current;
+                }
             }
             catch (Exception ex) when (ex is JsonException or IOException)
             {

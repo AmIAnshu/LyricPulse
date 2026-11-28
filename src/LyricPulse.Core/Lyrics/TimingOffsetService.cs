@@ -3,6 +3,7 @@ using System.Text.Json;
 using LyricPulse.Core.Abstractions;
 using LyricPulse.Core.Lyrics.Dtos;
 using LyricPulse.Core.Models;
+using LyricPulse.Core.Security;
 using LyricPulse.Core.Serialization;
 
 namespace LyricPulse.Core.Lyrics;
@@ -122,7 +123,7 @@ public sealed partial class TrackOffsetStore : ITrackOffsetStore, IDisposable
             return _cachedEntries;
         }
 
-        if (!File.Exists(_filePath))
+        if (!SafeFileGuard.TryOpenSafeReadStream(_filePath, SafeFileGuard.MaxTrackOffsetsFileBytes, out var stream))
         {
             _cachedEntries = ImmutableDictionary<string, TrackOffsetEntryDto>.Empty;
             return _cachedEntries;
@@ -130,13 +131,18 @@ public sealed partial class TrackOffsetStore : ITrackOffsetStore, IDisposable
 
         try
         {
-            await using var stream = File.OpenRead(_filePath);
-            var envelope = await JsonSerializer.DeserializeAsync(
-                stream,
-                LyricPulseJsonContext.Default.TrackOffsetsEnvelopeDto,
-                ct).ConfigureAwait(false);
+            await using (stream!)
+            {
+                var envelope = await JsonSerializer.DeserializeAsync(
+                    stream,
+                    LyricPulseJsonContext.Secure.TrackOffsetsEnvelopeDto,
+                    ct).ConfigureAwait(false);
 
-            _cachedEntries = envelope?.Entries ?? ImmutableDictionary<string, TrackOffsetEntryDto>.Empty;
+                var loaded = envelope?.Entries ?? ImmutableDictionary<string, TrackOffsetEntryDto>.Empty;
+                _cachedEntries = loaded.Count > MaxEntries
+                    ? EvictLeastRecentlyUsed(loaded)
+                    : loaded;
+            }
         }
         catch (Exception ex) when (ex is JsonException or IOException)
         {

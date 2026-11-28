@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Collections.Frozen;
 using System.Numerics.Tensors;
 using System.Text;
+using LyricPulse.Core.Security;
 
 namespace LyricPulse.Core.Visuals;
 
@@ -17,6 +18,8 @@ public sealed class QuantizedEmbeddingTable
     public const ushort SupportedVersion = 1;
     public const int MaxDimensions = 4096;
     public const int MaxVocabCount = 500_000;
+    public const long MaxMatrixBytes = 128L * 1024L * 1024L;
+    public const int MaxVocabTokenLength = 128;
     private static readonly byte[] MagicBytes = "LPQV"u8.ToArray();
 
     private readonly FrozenDictionary<string, int> _wordToIndex;
@@ -125,9 +128,35 @@ public sealed class QuantizedEmbeddingTable
         ArgumentException.ThrowIfNullOrWhiteSpace(binaryPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(vocabPath);
 
-        using var binStream = File.OpenRead(binaryPath);
-        using var vocabReader = new StreamReader(vocabPath, Encoding.UTF8);
-        return Load(binStream, vocabReader);
+        if (!File.Exists(binaryPath))
+        {
+            throw new FileNotFoundException("LPQV binary file not found.", binaryPath);
+        }
+
+        if (!File.Exists(vocabPath))
+        {
+            throw new FileNotFoundException("LPQV vocabulary file not found.", vocabPath);
+        }
+
+        const long maxBinaryFileBytes = MaxMatrixBytes + (16L * 1024L * 1024L);
+        if (!SafeFileGuard.TryOpenSafeReadStream(binaryPath, maxBinaryFileBytes, out var binStream))
+        {
+            throw new InvalidDataException("LPQV binary file failed safety validation (symlink or oversized).");
+        }
+
+        using (binStream!)
+        {
+            if (!SafeFileGuard.TryOpenSafeReadStream(vocabPath, SafeFileGuard.MaxGloveVocabFileBytes, out var vocabStream))
+            {
+                throw new InvalidDataException("LPQV vocabulary file failed safety validation (symlink or oversized).");
+            }
+
+            using (vocabStream!)
+            using (var vocabReader = new StreamReader(vocabStream, Encoding.UTF8))
+            {
+                return Load(binStream, vocabReader);
+            }
+        }
     }
 
     public static QuantizedEmbeddingTable Load(Stream binaryInput, TextReader vocabInput)
@@ -311,17 +340,39 @@ public sealed class QuantizedEmbeddingTable
             throw new InvalidDataException($"Invalid LPQV vocabulary count {vocabCount}.");
         }
 
+        var matrixBytes = (long)vocabCount * dimensions;
+        if (matrixBytes > MaxMatrixBytes)
+        {
+            throw new InvalidDataException($"LPQV embedding matrix size ({matrixBytes} bytes) exceeds maximum allowed ({MaxMatrixBytes} bytes).");
+        }
+
+        if (reader.BaseStream.CanSeek)
+        {
+            var requiredPayloadBytes = (long)vocabCount * (4L + dimensions);
+            var remainingBytes = reader.BaseStream.Length - reader.BaseStream.Position;
+            if (remainingBytes < requiredPayloadBytes)
+            {
+                throw new InvalidDataException(
+                    $"LPQV binary stream is truncated: header requires {requiredPayloadBytes} payload bytes, only {remainingBytes} bytes remain.");
+            }
+        }
+
         return (version, dimensions, vocabCount);
     }
 
     private static FrozenDictionary<string, int> ReadAndValidateVocab(TextReader vocabInput, int expectedCount)
     {
-        var map = new Dictionary<string, int>(expectedCount, StringComparer.Ordinal);
+        var map = new Dictionary<string, int>(Math.Min(expectedCount, 16_384), StringComparer.Ordinal);
         string? line;
         var index = 0;
 
         while ((line = vocabInput.ReadLine()) is not null)
         {
+            if (line.Length > MaxVocabTokenLength)
+            {
+                throw new InvalidDataException($"Vocabulary entry at index {index} exceeds max length ({MaxVocabTokenLength}).");
+            }
+
             if (line.Length == 0 && index == expectedCount)
             {
                 break;

@@ -1,0 +1,51 @@
+name: Security Audit & Test
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-security-and-test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore LyricPulse.sln
+
+      - name: Check vulnerable NuGet packages (direct & transitive)
+        shell: pwsh
+        run: |
+          $output = dotnet list LyricPulse.sln package --vulnerable --include-transitive 2>&1 | Out-String
+          Write-Host $output
+          if ($output -match '>\s+\S+\s+\S+\s+(Critical|High|Moderate)') {
+            Write-Error "Vulnerable NuGet package detected!"
+            exit 1
+          }
+
+      - name: Build & test Release with warnings-as-errors
+        run: dotnet test LyricPulse.sln -c Release -p:TreatWarningsAsErrors=true --verbosity minimal
+
+      - name: Verify clean non-self-extracting portable release & smoke test
+        shell: pwsh
+        run: .\scripts\build-windows-release.ps1 -Version 1.2.0
+
+      - name: Guard against accidentally committed scratch/planning directories
+        shell: pwsh
+        run: |
+          $tracked = git ls-files .planning graphify-out
+          if ($tracked) {
+            Write-Error "Internal .planning/ or graphify-out/ files must not be tracked in Git."
+            exit 1
+          }

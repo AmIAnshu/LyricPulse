@@ -88,7 +88,7 @@ function activeStyle() {
 }
 
 function resolvePalette() {
-  if (state.settings.presetName && STUDIO_PRESETS[state.settings.presetName]) {
+  if (state.settings.presetName && Object.hasOwn(STUDIO_PRESETS, state.settings.presetName)) {
     return STUDIO_PRESETS[state.settings.presetName];
   }
   if (state.settings.autoSyncColors && state.extractedPalette) {
@@ -133,7 +133,7 @@ function updatePaletteSwatches() {
 }
 
 function buildPaginationDots() {
-  el.pageDots.innerHTML = '';
+  el.pageDots.replaceChildren();
   STYLE_CATALOG.forEach((st, idx) => {
     const btn = document.createElement('button');
     btn.className = `page-dot ${idx === state.styleIdx ? 'active' : ''}`;
@@ -148,7 +148,7 @@ function buildPaginationDots() {
 const thumbItems = [];
 
 function buildStyleGallery() {
-  el.stylesGrid.innerHTML = '';
+  el.stylesGrid.replaceChildren();
   thumbItems.length = 0;
 
   const filtered = STYLE_CATALOG.map((st, idx) => ({ st, idx })).filter(({ st }) => {
@@ -164,22 +164,30 @@ function buildStyleGallery() {
     card.type = 'button';
     card.className = `style-card ${idx === state.styleIdx ? 'active' : ''}`;
     card.dataset.idx = String(idx);
-    card.innerHTML = `
-      <div class="style-card-frame">
-        <canvas></canvas>
-        <span class="style-card-chip">${st.chip}</span>
-      </div>
-      <div class="style-card-meta">
-        <strong>${st.name}</strong>
-        <small>${st.category}</small>
-      </div>
-    `;
+
+    const frame = document.createElement('div');
+    frame.className = 'style-card-frame';
+
+    const canvas = document.createElement('canvas');
+    const chip = document.createElement('span');
+    chip.className = 'style-card-chip';
+    chip.textContent = st.chip;
+    frame.append(canvas, chip);
+
+    const meta = document.createElement('div');
+    meta.className = 'style-card-meta';
+    const strong = document.createElement('strong');
+    strong.textContent = st.name;
+    const small = document.createElement('small');
+    small.textContent = st.category;
+    meta.append(strong, small);
+
+    card.append(frame, meta);
     card.addEventListener('click', () => {
       selectStyle(idx);
       if (window.scrollY > 120) el.heroStage.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
     el.stylesGrid.appendChild(card);
-    const canvas = card.querySelector('canvas');
     thumbItems.push({ canvas, style: st, visible: true });
   });
 }
@@ -517,27 +525,70 @@ function cropSmartCoverCanvas(img) {
   return out;
 }
 
+const MAX_COVER_BYTES = 10 * 1024 * 1024;
+const MAX_COVER_PIXELS = 64_000_000;
+const MAX_AUDIO_BYTES = 100 * 1024 * 1024;
+const MAX_LRC_BYTES = 512 * 1024;
+const ALLOWED_RASTER_IMAGE_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+  'image/bmp',
+  'image/avif',
+]);
+const ALLOWED_AUDIO_EXT_RE = /\.(mp3|wav|ogg|flac|m4a|aac|opus|webm)$/i;
+
 document.getElementById('coverPickerBtn').addEventListener('click', () => document.getElementById('coverUploadInput').click());
 document.getElementById('coverUploadInput').addEventListener('change', (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
+  const lowerName = (file.name || '').toLowerCase();
+  if (
+    file.size > MAX_COVER_BYTES ||
+    file.type === 'image/svg+xml' ||
+    lowerName.endsWith('.svg') ||
+    (file.type && !ALLOWED_RASTER_IMAGE_TYPES.has(file.type))
+  ) {
+    e.target.value = '';
+    return;
+  }
+
+  const objectUrl = URL.createObjectURL(file);
   const img = new Image();
   img.onload = () => {
-    const c = cropSmartCoverCanvas(img);
-    state.coverCanvas = c;
-    state.customCoverLoaded = true;
-    state.extractedPalette = extractPaletteFromCanvas(c);
-    syncMiniCover();
-    updatePaletteSwatches();
+    try {
+      if (img.width <= 0 || img.height <= 0 || img.width * img.height > MAX_COVER_PIXELS) {
+        return;
+      }
+      const c = cropSmartCoverCanvas(img);
+      state.coverCanvas = c;
+      state.customCoverLoaded = true;
+      state.extractedPalette = extractPaletteFromCanvas(c);
+      syncMiniCover();
+      updatePaletteSwatches();
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
   };
-  img.src = URL.createObjectURL(file);
+  img.onerror = () => {
+    URL.revokeObjectURL(objectUrl);
+  };
+  img.src = objectUrl;
 });
 
 document.getElementById('audioUploadInput').addEventListener('change', (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
+  if (
+    file.size > MAX_AUDIO_BYTES ||
+    (!(file.type && file.type.startsWith('audio/')) && !ALLOWED_AUDIO_EXT_RE.test(file.name || ''))
+  ) {
+    e.target.value = '';
+    return;
+  }
   const audio = engine.loadAudioFile(file);
-  el.trackTitle.textContent = file.name.replace(/\.[^.]+$/, '');
+  el.trackTitle.textContent = (file.name || 'Local Track').replace(/\.[^.]+$/, '').slice(0, 120);
   el.trackArtist.textContent = 'Local Audio · Live Web Audio FFT';
   el.soundToggleBtn.classList.add('active');
   el.soundToggleLabel.textContent = 'Audio On';
@@ -556,6 +607,10 @@ document.getElementById('audioUploadInput').addEventListener('change', (e) => {
 document.getElementById('lrcUploadInput').addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
+  if (file.size > MAX_LRC_BYTES) {
+    e.target.value = '';
+    return;
+  }
   const text = await file.text();
   const parsed = parseLrc(text, state.doc.durationSec);
   if (parsed.lines.length > 0) {

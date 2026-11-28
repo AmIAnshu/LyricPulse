@@ -124,44 +124,45 @@ public sealed class SkiaAlbumColorExtractor : IAlbumColorExtractor
         {
             using var encodedData = SKData.CreateCopy(imageBytes);
             using var codec = SKCodec.Create(encodedData);
-            SKBitmap? decoded = null;
-
-            if (codec is not null && codec.Info.Width > 0 && codec.Info.Height > 0)
+            if (codec is null || codec.Info.Width <= 0 || codec.Info.Height <= 0)
             {
-                var codecInfo = codec.Info;
-                if ((long)codecInfo.Width * codecInfo.Height > MaxDecodedPixels)
-                {
-                    return null;
-                }
-
-                var maxSide = Math.Max(codecInfo.Width, codecInfo.Height);
-                var desiredScale = maxSide > targetDimension * 2
-                    ? Math.Clamp((float)(targetDimension * 2) / maxSide, 0.05f, 1.0f)
-                    : 1.0f;
-
-                var scaledSize = desiredScale < 1.0f
-                    ? codec.GetScaledDimensions(desiredScale)
-                    : new SKSizeI(codecInfo.Width, codecInfo.Height);
-
-                var decodeW = Math.Max(1, scaledSize.Width);
-                var decodeH = Math.Max(1, scaledSize.Height);
-                var decodeInfo = new SKImageInfo(decodeW, decodeH, SKColorType.Bgra8888, SKAlphaType.Premul);
-
-                var candidate = new SKBitmap(decodeInfo);
-                if (codec.GetPixels(decodeInfo, candidate.GetPixels()) is SKCodecResult.Success or SKCodecResult.IncompleteInput)
-                {
-                    decoded = candidate;
-                }
-                else
-                {
-                    candidate.Dispose();
-                }
+                return null;
             }
 
-            decoded ??= SKBitmap.Decode(encodedData);
-            if (decoded is null || decoded.Width <= 0 || decoded.Height <= 0)
+            var codecInfo = codec.Info;
+            if ((long)codecInfo.Width * codecInfo.Height > MaxDecodedPixels)
             {
-                decoded?.Dispose();
+                return null;
+            }
+
+            var maxSide = Math.Max(codecInfo.Width, codecInfo.Height);
+            var desiredScale = maxSide > targetDimension * 2
+                ? Math.Clamp((float)(targetDimension * 2) / maxSide, 0.05f, 1.0f)
+                : 1.0f;
+
+            var scaledSize = desiredScale < 1.0f
+                ? codec.GetScaledDimensions(desiredScale)
+                : new SKSizeI(codecInfo.Width, codecInfo.Height);
+
+            var decodeW = Math.Max(1, scaledSize.Width);
+            var decodeH = Math.Max(1, scaledSize.Height);
+            if ((long)decodeW * decodeH > MaxDecodedPixels)
+            {
+                return null;
+            }
+
+            var decodeInfo = new SKImageInfo(decodeW, decodeH, SKColorType.Bgra8888, SKAlphaType.Premul);
+
+            var decoded = new SKBitmap(decodeInfo);
+            if (codec.GetPixels(decodeInfo, decoded.GetPixels()) is not (SKCodecResult.Success or SKCodecResult.IncompleteInput))
+            {
+                decoded.Dispose();
+                return null;
+            }
+
+            if (decoded.Width <= 0 || decoded.Height <= 0)
+            {
+                decoded.Dispose();
                 return null;
             }
 

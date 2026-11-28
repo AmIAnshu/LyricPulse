@@ -1,3 +1,5 @@
+using System.Net.Security;
+using System.Security.Authentication;
 using LyricPulse.Core.Abstractions;
 using LyricPulse.Core.Lyrics;
 using LyricPulse.Core.Media;
@@ -36,12 +38,13 @@ public static class ServiceCollectionExtensions
         {
             client.BaseAddress = new Uri("https://lrclib.net");
             client.Timeout = TimeSpan.FromSeconds(10);
-        });
+        }).ConfigurePrimaryHttpMessageHandler(CreateHardenedHttpHandler);
+
         services.AddHttpClient(NetEaseLyricsProvider.HttpClientName, client =>
         {
             client.BaseAddress = new Uri("https://music.163.com");
             client.Timeout = TimeSpan.FromSeconds(10);
-        });
+        }).ConfigurePrimaryHttpMessageHandler(CreateHardenedHttpHandler);
 
         services.AddSingleton(sp => new LrcLibLyricsProvider(
             sp.GetRequiredService<IHttpClientFactory>(),
@@ -71,4 +74,17 @@ public static class ServiceCollectionExtensions
 
         return services;
     }
+
+    internal static SocketsHttpHandler CreateHardenedHttpHandler() =>
+        new()
+        {
+            AllowAutoRedirect = false,
+            UseCookies = false,
+            MaxResponseHeadersLength = 16,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            SslOptions = new SslClientAuthenticationOptions
+            {
+                EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13
+            }
+        };
 }

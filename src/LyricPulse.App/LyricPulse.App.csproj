@@ -8,6 +8,16 @@
     <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
     <EnableAotAnalyzer>true</EnableAotAnalyzer>
     <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
+    <AssemblyTitle>LyricPulse</AssemblyTitle>
+    <Product>LyricPulse Desktop Lyrics Overlay</Product>
+    <Company>LyricPulse Contributors</Company>
+    <Authors>LyricPulse Contributors</Authors>
+    <Copyright>Copyright (c) 2026 LyricPulse Contributors</Copyright>
+    <Description>Real-time synced lyrics and ambient stage visualizer for Windows</Description>
+    <Version>1.2.0</Version>
+    <AssemblyVersion>1.2.0.0</AssemblyVersion>
+    <FileVersion>1.2.0.0</FileVersion>
+    <InformationalVersion>1.2.0</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>

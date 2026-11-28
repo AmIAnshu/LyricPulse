@@ -108,7 +108,7 @@ public sealed partial class NetEaseLyricsProvider : ILyricsProvider, IDisposable
             return new LyricsResult(LyricsStatus.Error, null, "NetEase search request failed transiently.");
         }
 
-        if (!searchFetch.Value.HasValue)
+        if (!searchFetch.Value.HasValue || searchFetch.Value.Value <= 0)
         {
             return new LyricsResult(LyricsStatus.NotFound, null);
         }
@@ -164,7 +164,8 @@ public sealed partial class NetEaseLyricsProvider : ILyricsProvider, IDisposable
 
     private async Task<HttpFetchResult<long?>> SearchBestSongIdAsync(TrackIdentity track, CancellationToken ct)
     {
-        var query = $"{track.NormalizedTitle} {track.PrimaryArtist}".Trim();
+        var rawQuery = $"{track.NormalizedTitle} {track.PrimaryArtist}".Trim();
+        var query = rawQuery.Length > 256 ? rawQuery[..256] : rawQuery;
         var body = $"s={Uri.EscapeDataString(query)}&type=1&limit=15&offset=0&total=true";
 
         using var response = await _resilience.SendWithResilienceAsync(
@@ -185,11 +186,17 @@ public sealed partial class NetEaseLyricsProvider : ILyricsProvider, IDisposable
         NetEaseSearchResponseDto? searchDto;
         try
         {
-            await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            searchDto = await JsonSerializer.DeserializeAsync(
-                stream,
-                LyricPulseJsonContext.Default.NetEaseSearchResponseDto,
+            var (exceededLimit, parsed) = await BoundedHttpResponseReader.ReadJsonAsync(
+                response,
+                LyricPulseJsonContext.Secure.NetEaseSearchResponseDto,
                 ct).ConfigureAwait(false);
+            if (exceededLimit)
+            {
+                _logger.LogProviderOversizedResponse(Name, "/api/search/get");
+                return new HttpFetchResult<long?>(null, IsTransientError: false);
+            }
+
+            searchDto = parsed;
         }
         catch (JsonException ex)
         {
@@ -255,11 +262,16 @@ public sealed partial class NetEaseLyricsProvider : ILyricsProvider, IDisposable
 
         try
         {
-            await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            var dto = await JsonSerializer.DeserializeAsync(
-                stream,
-                LyricPulseJsonContext.Default.NetEaseLyricResponseDto,
+            var (exceededLimit, dto) = await BoundedHttpResponseReader.ReadJsonAsync(
+                response,
+                LyricPulseJsonContext.Secure.NetEaseLyricResponseDto,
                 ct).ConfigureAwait(false);
+            if (exceededLimit)
+            {
+                _logger.LogProviderOversizedResponse(Name, "/api/song/lyric/v1");
+                return new HttpFetchResult<NetEaseLyricResponseDto?>(null, IsTransientError: false);
+            }
+
             return new HttpFetchResult<NetEaseLyricResponseDto?>(dto, IsTransientError: false);
         }
         catch (JsonException ex)

@@ -131,6 +131,14 @@ public sealed record AppSettings
     public const float MinVisualizerIntensity = 0.2f;
     public const float MaxVisualizerIntensity = 1.5f;
     public const float DefaultVisualizerIntensity = 0.75f;
+    public const int MaxFontFamilyLength = 80;
+    public const int MaxBlockedAppIds = 64;
+    public const int MaxAppIdLength = 128;
+    public const int MaxDisplays = 32;
+    public const int MaxPerTrackOffsets = 1000;
+    public const int MaxHotkeyGestureLength = 64;
+    public const int MinTrackOffsetMs = -10_000;
+    public const int MaxTrackOffsetMs = 10_000;
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     public OverlayStyleId ActiveStyle { get; init; } = OverlayStyleId.Fisheye;
@@ -221,6 +229,25 @@ public sealed record AppSettings
 
     public AppSettings ValidateAndNormalize()
     {
+        var normalizedStyle = Enum.IsDefined(ActiveStyle)
+            ? ActiveStyle
+            : OverlayStyleId.Fisheye;
+        var normalizedAnchorZone = Enum.IsDefined(AnchorZone)
+            ? AnchorZone
+            : AnchorZone.BottomThird;
+        var normalizedScrim = Enum.IsDefined(ScrimIntensity)
+            ? ScrimIntensity
+            : ScrimIntensity.Balanced;
+        var normalizedThemeVariant = Enum.IsDefined(ThemeVariantMode)
+            ? ThemeVariantMode
+            : ThemeVariantMode.System;
+        var normalizedSecondaryLine = Enum.IsDefined(SecondaryLineMode)
+            ? SecondaryLineMode
+            : SecondaryLineMode.Off;
+        var normalizedVisualPreference = Enum.IsDefined(VisualPreference)
+            ? VisualPreference
+            : VisualPreference.Balanced;
+
         var normalizedScale = double.IsFinite(FontScale)
             ? Math.Clamp(FontScale, MinFontScale, MaxFontScale)
             : 1.00;
@@ -270,27 +297,37 @@ public sealed record AppSettings
         var normalizedVisualizerIntensity = float.IsFinite(AudioVisualizerIntensity)
             ? Math.Clamp(AudioVisualizerIntensity, MinVisualizerIntensity, MaxVisualizerIntensity)
             : DefaultVisualizerIntensity;
-        var normalizedFont = string.IsNullOrWhiteSpace(FontFamily) ? "Jost" : FontFamily.Trim();
-        var pinned = PinnedStyles.IsDefaultOrEmpty
-            ? Default.PinnedStyles
-            : PinnedStyles.Distinct().ToImmutableArray();
+        var normalizedFont = SanitizeShortString(FontFamily, MaxFontFamilyLength, "Jost");
 
-        var disabled = DisabledDisplays.IsDefault ? ImmutableArray<string>.Empty : DisabledDisplays;
-        var blocked = BlockedAppIds.IsDefault ? Default.BlockedAppIds : BlockedAppIds;
-        var bounds = PerDisplayBounds ?? ImmutableDictionary<string, OverlayBoundsConfig>.Empty;
-        var offsets = PerTrackOffsetsMs ?? ImmutableDictionary<string, int>.Empty;
-        var hotkeys = GlobalHotkeys is null || GlobalHotkeys.IsEmpty
-            ? CreateDefaultHotkeys()
-            : GlobalHotkeys;
+        var filteredPinned = PinnedStyles.IsDefaultOrEmpty
+            ? ImmutableArray<OverlayStyleId>.Empty
+            : PinnedStyles.Where(Enum.IsDefined).Distinct().Take(16).ToImmutableArray();
+        var pinned = filteredPinned.IsEmpty ? Default.PinnedStyles : filteredPinned;
+
+        var disabled = DisabledDisplays.IsDefault
+            ? ImmutableArray<string>.Empty
+            : SanitizeBoundedStringList(DisabledDisplays, MaxDisplays, MaxAppIdLength);
+        var blocked = BlockedAppIds.IsDefault
+            ? Default.BlockedAppIds
+            : SanitizeBoundedStringList(BlockedAppIds, MaxBlockedAppIds, MaxAppIdLength);
+        var bounds = SanitizeDisplayBounds(PerDisplayBounds);
+        var offsets = SanitizeTrackOffsets(PerTrackOffsetsMs);
+        var hotkeys = SanitizeHotkeys(GlobalHotkeys);
 
         return this with
         {
             SchemaVersion = SchemaVersion <= 0 ? CurrentSchemaVersion : SchemaVersion,
+            ActiveStyle = normalizedStyle,
             PinnedStyles = pinned,
             FontFamily = normalizedFont,
             FontScale = normalizedScale,
             OverlayOpacity = normalizedOpacity,
+            AnchorZone = normalizedAnchorZone,
             SafeMarginPx = normalizedMargin,
+            ScrimIntensity = normalizedScrim,
+            ThemeVariantMode = normalizedThemeVariant,
+            SecondaryLineMode = normalizedSecondaryLine,
+            VisualPreference = normalizedVisualPreference,
             StageBackdropMode = normalizedBackdrop,
             ShowFollowingDot = false,
             PartyEnergyLevel = normalizedEnergy,
@@ -311,5 +348,136 @@ public sealed record AppSettings
             PerTrackOffsetsMs = offsets,
             GlobalHotkeys = hotkeys
         };
+    }
+
+    private static string SanitizeShortString(string? value, int maxLength, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return fallback;
+        }
+
+        var trimmed = value.Trim();
+        var chars = trimmed.Where(static ch => !char.IsControl(ch)).Take(maxLength).ToArray();
+        var cleaned = new string(chars).Trim();
+        return cleaned.Length > 0 ? cleaned : fallback;
+    }
+
+    private static ImmutableArray<string> SanitizeBoundedStringList(
+        ImmutableArray<string> items,
+        int maxCount,
+        int maxItemLength)
+    {
+        if (items.IsDefaultOrEmpty)
+        {
+            return ImmutableArray<string>.Empty;
+        }
+
+        var builder = ImmutableArray.CreateBuilder<string>(Math.Min(items.Length, maxCount));
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var raw in items)
+        {
+            if (builder.Count >= maxCount)
+            {
+                break;
+            }
+
+            var cleaned = SanitizeShortString(raw, maxItemLength, string.Empty);
+            if (cleaned.Length > 0 && seen.Add(cleaned))
+            {
+                builder.Add(cleaned);
+            }
+        }
+
+        return builder.ToImmutable();
+    }
+
+    private static ImmutableDictionary<string, OverlayBoundsConfig> SanitizeDisplayBounds(
+        ImmutableDictionary<string, OverlayBoundsConfig>? rawBounds)
+    {
+        if (rawBounds is null || rawBounds.IsEmpty)
+        {
+            return ImmutableDictionary<string, OverlayBoundsConfig>.Empty;
+        }
+
+        var builder = ImmutableDictionary.CreateBuilder<string, OverlayBoundsConfig>();
+        foreach (var (rawKey, config) in rawBounds)
+        {
+            if (builder.Count >= MaxDisplays)
+            {
+                break;
+            }
+
+            var key = SanitizeShortString(rawKey, MaxAppIdLength, string.Empty);
+            if (key.Length == 0 || config is null)
+            {
+                continue;
+            }
+
+            var zone = Enum.IsDefined(config.AnchorZone) ? config.AnchorZone : AnchorZone.BottomThird;
+            var margin = Math.Clamp(config.SafeMarginPx, MinSafeMarginPx, MaxSafeMarginPx);
+            var anchorX = double.IsFinite(config.AnchorX) ? Math.Clamp(config.AnchorX, 0.0, 1.0) : 0.50;
+            var anchorY = double.IsFinite(config.AnchorY) ? Math.Clamp(config.AnchorY, 0.0, 1.0) : 0.76;
+            var widthRatio = double.IsFinite(config.WidthRatio) ? Math.Clamp(config.WidthRatio, 0.10, 1.0) : 0.80;
+            var heightRatio = double.IsFinite(config.HeightRatio) ? Math.Clamp(config.HeightRatio, 0.10, 1.0) : 0.35;
+
+            builder[key] = new OverlayBoundsConfig(zone, margin, anchorX, anchorY, widthRatio, heightRatio);
+        }
+
+        return builder.ToImmutable();
+    }
+
+    private static ImmutableDictionary<string, int> SanitizeTrackOffsets(ImmutableDictionary<string, int>? rawOffsets)
+    {
+        if (rawOffsets is null || rawOffsets.IsEmpty)
+        {
+            return ImmutableDictionary<string, int>.Empty;
+        }
+
+        var builder = ImmutableDictionary.CreateBuilder<string, int>();
+        foreach (var (rawKey, ms) in rawOffsets)
+        {
+            if (builder.Count >= MaxPerTrackOffsets)
+            {
+                break;
+            }
+
+            var key = SanitizeShortString(rawKey, MaxAppIdLength, string.Empty);
+            if (key.Length == 0)
+            {
+                continue;
+            }
+
+            builder[key] = Math.Clamp(ms, MinTrackOffsetMs, MaxTrackOffsetMs);
+        }
+
+        return builder.ToImmutable();
+    }
+
+    private static ImmutableDictionary<HotkeyAction, string> SanitizeHotkeys(
+        ImmutableDictionary<HotkeyAction, string>? rawHotkeys)
+    {
+        if (rawHotkeys is null || rawHotkeys.IsEmpty)
+        {
+            return CreateDefaultHotkeys();
+        }
+
+        var builder = ImmutableDictionary.CreateBuilder<HotkeyAction, string>();
+        foreach (var (action, gesture) in rawHotkeys)
+        {
+            if (!Enum.IsDefined(action))
+            {
+                continue;
+            }
+
+            // Preserve empty string "" so users can intentionally clear/unbind an individual hotkey.
+            var cleaned = string.IsNullOrWhiteSpace(gesture)
+                ? string.Empty
+                : SanitizeShortString(gesture, MaxHotkeyGestureLength, string.Empty);
+            builder[action] = cleaned;
+        }
+
+        return builder.Count > 0 ? builder.ToImmutable() : CreateDefaultHotkeys();
     }
 }

@@ -43,12 +43,15 @@ internal static partial class CoreLogMessages
     [LoggerMessage(EventId = 2007, Level = LogLevel.Warning, Message = "Lyrics provider {Provider} threw an unexpected exception")]
     public static partial void LogOrchestratorProviderException(this ILogger logger, Exception ex, string provider);
 
-    [LoggerMessage(EventId = 3001, Level = LogLevel.Warning, Message = "Runtime track load failed unexpectedly for '{TrackTitle}'")]
-    public static partial void LogRuntimeTrackLoadFailed(this ILogger logger, Exception ex, string trackTitle);
+    [LoggerMessage(EventId = 2008, Level = LogLevel.Warning, Message = "{Provider} response exceeded maximum allowed size for {Endpoint}")]
+    public static partial void LogProviderOversizedResponse(this ILogger logger, string provider, string endpoint);
+
+    [LoggerMessage(EventId = 3001, Level = LogLevel.Warning, Message = "Runtime track load failed unexpectedly for key '{TrackKeyPrefix}'")]
+    public static partial void LogRuntimeTrackLoadFailed(this ILogger logger, Exception ex, string trackKeyPrefix);
 
     [LoggerMessage(EventId = 3002, Level = LogLevel.Warning, Message = "Runtime album art palette extraction failed unexpectedly")]
     public static partial void LogRuntimeAlbumArtFailed(this ILogger logger, Exception ex);
 
-    [LoggerMessage(EventId = 4001, Level = LogLevel.Warning, Message = "Failed to load quantized GloVe visual embeddings from '{BinaryPath}'; falling back to StarterLexicon mode")]
-    public static partial void LogGloveEmbeddingLoadFailed(this ILogger logger, Exception ex, string binaryPath);
+    [LoggerMessage(EventId = 4001, Level = LogLevel.Warning, Message = "Failed to load quantized GloVe visual embeddings from '{FileName}'; falling back to StarterLexicon mode")]
+    public static partial void LogGloveEmbeddingLoadFailed(this ILogger logger, Exception ex, string fileName);
 }

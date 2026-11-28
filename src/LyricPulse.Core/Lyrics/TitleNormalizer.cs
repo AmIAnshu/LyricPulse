@@ -12,6 +12,7 @@ namespace LyricPulse.Core.Lyrics;
 /// </summary>
 public sealed partial class TitleNormalizer : ITitleNormalizer
 {
+    public const int MaxInputChars = 512;
     private const int RegexTimeoutMs = 100;
 
     private static readonly HashSet<string> CanonicalCompoundArtists = new(StringComparer.OrdinalIgnoreCase)
@@ -75,33 +76,41 @@ public sealed partial class TitleNormalizer : ITitleNormalizer
             return string.Empty;
         }
 
-        var unicodeCleaned = CleanupUnicodeAndTypography(rawTitle);
+        var boundedRaw = rawTitle.Length > MaxInputChars ? rawTitle[..MaxInputChars] : rawTitle;
+        var unicodeCleaned = CleanupUnicodeAndTypography(boundedRaw);
         if (string.IsNullOrWhiteSpace(unicodeCleaned))
         {
             return string.Empty;
         }
 
-        var current = unicodeCleaned;
-        for (var pass = 0; pass < 2; pass++)
+        try
         {
-            var next = ApplyStrippingRules(current);
-            if (next.Equals(current, StringComparison.Ordinal))
+            var current = unicodeCleaned;
+            for (var pass = 0; pass < 2; pass++)
             {
-                break;
+                var next = ApplyStrippingRules(current);
+                if (next.Equals(current, StringComparison.Ordinal))
+                {
+                    break;
+                }
+
+                current = next;
             }
 
-            current = next;
+            current = CollapseAndTrim(current);
+
+            // Safety guard: if stripping emptied or collapsed title to <2 chars, revert to unicode-cleaned raw title.
+            if (current.Length < 2)
+            {
+                return CollapseAndTrim(unicodeCleaned);
+            }
+
+            return current;
         }
-
-        current = CollapseAndTrim(current);
-
-        // Safety guard: if stripping emptied or collapsed title to <2 chars, revert to unicode-cleaned raw title.
-        if (current.Length < 2)
+        catch (RegexMatchTimeoutException)
         {
-            return CollapseAndTrim(unicodeCleaned);
+            return unicodeCleaned.Trim(' ', '-', '·', '/');
         }
-
-        return current;
     }
 
     public string ExtractPrimaryArtist(string rawArtist)
@@ -111,33 +120,47 @@ public sealed partial class TitleNormalizer : ITitleNormalizer
             return string.Empty;
         }
 
-        var cleaned = CollapseAndTrim(CleanupUnicodeAndTypography(rawArtist));
-        if (cleaned.Length == 0)
+        var boundedRaw = rawArtist.Length > MaxInputChars ? rawArtist[..MaxInputChars] : rawArtist;
+        var unicodeCleaned = CleanupUnicodeAndTypography(boundedRaw);
+        if (string.IsNullOrWhiteSpace(unicodeCleaned))
         {
             return string.Empty;
         }
 
-        if (CanonicalCompoundArtists.Contains(cleaned))
+        try
         {
-            return cleaned;
-        }
-
-        // Preserve canonical band prefix if followed by feature clause (e.g., "Simon & Garfunkel feat. X").
-        var featureSplit = ArtistFeatureSplitRegex().Split(cleaned);
-        if (featureSplit.Length > 1)
-        {
-            var head = CollapseAndTrim(featureSplit[0]);
-            if (CanonicalCompoundArtists.Contains(head))
+            var cleaned = CollapseAndTrim(unicodeCleaned);
+            if (cleaned.Length == 0)
             {
-                return head;
+                return string.Empty;
             }
 
-            cleaned = head;
-        }
+            if (CanonicalCompoundArtists.Contains(cleaned))
+            {
+                return cleaned;
+            }
 
-        var parts = ArtistDelimiterRegex().Split(cleaned);
-        var primary = parts.Length > 0 ? CollapseAndTrim(parts[0]) : cleaned;
-        return primary.Length > 0 ? primary : cleaned;
+            // Preserve canonical band prefix if followed by feature clause (e.g., "Simon & Garfunkel feat. X").
+            var featureSplit = ArtistFeatureSplitRegex().Split(cleaned);
+            if (featureSplit.Length > 1)
+            {
+                var head = CollapseAndTrim(featureSplit[0]);
+                if (CanonicalCompoundArtists.Contains(head))
+                {
+                    return head;
+                }
+
+                cleaned = head;
+            }
+
+            var parts = ArtistDelimiterRegex().Split(cleaned);
+            var primary = parts.Length > 0 ? CollapseAndTrim(parts[0]) : cleaned;
+            return primary.Length > 0 ? primary : cleaned;
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return unicodeCleaned.Trim(' ', '-', '·', '/');
+        }
     }
 
     public static string ComputeCacheKey(string normalizedArtist, string normalizedTitle, TimeSpan duration)
@@ -211,13 +234,13 @@ public sealed partial class TitleNormalizer : ITitleNormalizer
     [GeneratedRegex(@"\s*\((?:(?:music|song|theme|original\s+song|soundtrack)\s+)?from\s+[^()]{1,100}\)\s*", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeoutMs)]
     private static partial Regex ParenSoundtrackOriginRegex();
 
-    [GeneratedRegex(@"\s*\((?:[^()]{0,40}\b(?:remaster(?:ed)?|deluxe|super\s+deluxe|anniversary|expanded|collector'?s?|special\s+edition|bonus(?:\s+track)?|explicit|clean|radio\s+edit|album\s+version|single\s+version|mono|stereo|live(?:\s+(?:at|in|from)\b[^()]*)?|acoustic|unplugged|demo|instrumental|karaoke|sped\s+up|slowed(?:\s*\+\s*reverb)?)\b[^()]{0,40}|\d{4}\s*(?:remaster(?:ed)?|mix|version|edition))\)\s*", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeoutMs)]
+    [GeneratedRegex(@"\s*\((?:[^()]{0,40}\b(?:remaster(?:ed)?|deluxe|super\s+deluxe|anniversary|expanded|collector'?s?|special\s+edition|bonus(?:\s+track)?|explicit|clean|radio\s+edit|album\s+version|single\s+version|mono|stereo|live(?:\s+(?:at|in|from)\b[^()]{0,40})?|acoustic|unplugged|demo|instrumental|karaoke|sped\s+up|slowed(?:\s*\+\s*reverb)?)\b[^()]{0,40}|\d{4}\s*(?:remaster(?:ed)?|mix|version|edition))\)\s*", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeoutMs)]
     private static partial Regex ParenEditionMetadataRegex();
 
-    [GeneratedRegex(@"\s+-\s+(?:\d{4}\s+)?(?:remaster(?:ed)?(?:\s+\d{4})?|remix|version|edit|mix|acoustic|live(?:\s+.*)?|instrumental|radio\s+edit|single\s+version|album\s+version|deluxe\b.*|bonus\b.*|mono|stereo|explicit|clean|from\s+.*|feat\.?\s+.*)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeoutMs)]
+    [GeneratedRegex(@"\s+-\s+(?:\d{4}\s+)?(?:remaster(?:ed)?(?:\s+\d{4})?|remix|version|edit|mix|acoustic|live(?:\s+.{0,120})?|instrumental|radio\s+edit|single\s+version|album\s+version|deluxe\b.{0,120}|bonus\b.{0,120}|mono|stereo|explicit|clean|from\s+.{0,120}|feat\.?\s+.{0,120})$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeoutMs)]
     private static partial Regex TrailingDashEditionRegex();
 
-    [GeneratedRegex(@"\s+(?:feat\.?|ft\.?|featuring)\s+.+$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeoutMs)]
+    [GeneratedRegex(@"\s+(?:feat\.?|ft\.?|featuring)\s+.{1,120}$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, RegexTimeoutMs)]
     private static partial Regex InlineFeatureClauseRegex();
 
     [GeneratedRegex(@"\s{2,}", RegexOptions.CultureInvariant, RegexTimeoutMs)]

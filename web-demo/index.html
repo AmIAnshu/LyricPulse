@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LyricPulse Studio — Interactive Kinetic Lyrics Demo</title>
-  <meta name="description" content="Interactive browser demo of LyricPulseV0.1: 11 real-time kinetic lyric visualization styles, revolving Neon Rush edge glow, selectable Album Art backdrop mode, and Apple-Music-inspired Glass Stage." />
+  <meta name="description" content="Interactive browser demo of LyricPulse V1.2: 11 real-time kinetic lyric visualization styles, beat-reactive Neon Rush edge glow, selectable Album Art backdrop mode, and 3D Glass Stage." />
   <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -23,7 +23,7 @@
           </svg>
         </span>
         <span class="brand-name">LyricPulse</span>
-        <span class="version-pill">LyricPulseV0.1 Demo</span>
+        <span class="version-pill">V1.2 Demo</span>
       </div>
 
       <div class="status-group" aria-live="polite">
@@ -45,8 +45,8 @@
           </svg>
           <span>Settings</span>
         </button>
-        <a class="btn btn-primary" href="https://github.com/AmIAnshu/LyricPulse/releases/tag/LyricPulseV0.1" target="_blank" rel="noopener noreferrer">
-          Download .EXE
+        <a class="btn btn-primary" href="https://github.com/AmIAnshu/LyricPulse/releases/latest" target="_blank" rel="noopener noreferrer">
+          Download V1.2
         </a>
         <a class="btn btn-icon" href="https://github.com/AmIAnshu/LyricPulse" target="_blank" rel="noopener noreferrer" title="View source on GitHub" aria-label="GitHub repository">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true">
@@ -174,7 +174,7 @@
               <span>+ Audio</span>
             </label>
             <label class="btn btn-subtle file-btn" title="Upload album cover photo (auto-extracts palette & vinyl center)">
-              <input type="file" id="coverUploadInput" accept="image/*" hidden />
+              <input type="file" id="coverUploadInput" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" hidden />
               <span>+ Cover</span>
             </label>
             <label class="btn btn-subtle file-btn" title="Load synced .lrc lyrics file">
@@ -210,7 +210,7 @@
             Built &amp; open-sourced under MIT License by <a href="https://github.com/AmIAnshu" target="_blank" rel="noopener noreferrer">AmIAnshu</a>.
           </p>
           <div class="footer-links">
-            <a href="https://github.com/AmIAnshu/LyricPulse/releases/tag/LyricPulseV0.1" target="_blank" rel="noopener noreferrer">Download LyricPulseV0.1 (.exe)</a>
+            <a href="https://github.com/AmIAnshu/LyricPulse/releases/latest" target="_blank" rel="noopener noreferrer">Download LyricPulse V1.2 (Portable)</a>
             <a href="https://github.com/AmIAnshu/LyricPulse" target="_blank" rel="noopener noreferrer">GitHub Source</a>
             <a href="https://github.com/AmIAnshu/LyricPulse/blob/master/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
           </div>
@@ -236,16 +236,16 @@
           <div class="setting-group">
             <h3>Typography</h3>
             <div class="font-grid" id="fontSelector">
-              <button class="seg font-tile active" data-font="Jost" type="button"><strong style="font-family:'Jost',sans-serif">Aa</strong><span><span>Jost</span><small>Geometric</small></span></button>
-              <button class="seg font-tile" data-font="Bodoni Moda" type="button"><strong style="font-family:'Bodoni Moda',serif">Aa</strong><span><span>Bodoni Moda</span><small>Editorial</small></span></button>
-              <button class="seg font-tile" data-font="Mulish" type="button"><strong style="font-family:'Mulish',sans-serif">Aa</strong><span><span>Mulish</span><small>Humanist</small></span></button>
-              <button class="seg font-tile" data-font="Nunito" type="button"><strong style="font-family:'Nunito',sans-serif">Aa</strong><span><span>Nunito</span><small>Rounded</small></span></button>
-              <button class="seg font-tile" data-font="Bahnschrift" type="button"><strong style="font-family:'Bahnschrift','Barlow Condensed',sans-serif">Aa</strong><span><span>Bahnschrift</span><small>Industrial</small></span></button>
-              <button class="seg font-tile" data-font="Georgia" type="button"><strong style="font-family:'Georgia',serif">Aa</strong><span><span>Georgia</span><small>Classic serif</small></span></button>
-              <button class="seg font-tile" data-font="Impact" type="button"><strong style="font-family:'Impact','Anton',sans-serif">Aa</strong><span><span>Impact</span><small>Poster</small></span></button>
-              <button class="seg font-tile" data-font="Sitka Display" type="button"><strong style="font-family:'Sitka Display','Playfair Display',serif">Aa</strong><span><span>Sitka Display</span><small>Lyric serif</small></span></button>
-              <button class="seg font-tile" data-font="Ink Free" type="button"><strong style="font-family:'Ink Free','Caveat',cursive">Aa</strong><span><span>Ink Free</span><small>Handwritten</small></span></button>
-              <button class="seg font-tile" data-font="Cascadia Mono" type="button"><strong style="font-family:'Cascadia Mono','JetBrains Mono',monospace">Aa</strong><span><span>Cascadia</span><small>Studio mono</small></span></button>
+              <button class="seg font-tile active" data-font="Jost" type="button"><strong class="font-preview-jost">Aa</strong><span><span>Jost</span><small>Geometric</small></span></button>
+              <button class="seg font-tile" data-font="Bodoni Moda" type="button"><strong class="font-preview-bodoni">Aa</strong><span><span>Bodoni Moda</span><small>Editorial</small></span></button>
+              <button class="seg font-tile" data-font="Mulish" type="button"><strong class="font-preview-mulish">Aa</strong><span><span>Mulish</span><small>Humanist</small></span></button>
+              <button class="seg font-tile" data-font="Nunito" type="button"><strong class="font-preview-nunito">Aa</strong><span><span>Nunito</span><small>Rounded</small></span></button>
+              <button class="seg font-tile" data-font="Bahnschrift" type="button"><strong class="font-preview-bahnschrift">Aa</strong><span><span>Bahnschrift</span><small>Industrial</small></span></button>
+              <button class="seg font-tile" data-font="Georgia" type="button"><strong class="font-preview-georgia">Aa</strong><span><span>Georgia</span><small>Classic serif</small></span></button>
+              <button class="seg font-tile" data-font="Impact" type="button"><strong class="font-preview-impact">Aa</strong><span><span>Impact</span><small>Poster</small></span></button>
+              <button class="seg font-tile" data-font="Sitka Display" type="button"><strong class="font-preview-sitka">Aa</strong><span><span>Sitka Display</span><small>Lyric serif</small></span></button>
+              <button class="seg font-tile" data-font="Ink Free" type="button"><strong class="font-preview-inkfree">Aa</strong><span><span>Ink Free</span><small>Handwritten</small></span></button>
+              <button class="seg font-tile" data-font="Cascadia Mono" type="button"><strong class="font-preview-cascadia">Aa</strong><span><span>Cascadia</span><small>Studio mono</small></span></button>
             </div>
             <label class="slider-row">
               <span>Lyric Scale <strong id="lyricScaleVal">100%</strong></span>
@@ -261,12 +261,12 @@
               <button class="seg" data-edge="NeonRim" type="button">Neon Rim</button>
               <button class="seg active" data-edge="NeonRush" type="button">Neon Rush</button>
             </div>
-            <div class="seg-row" id="edgeAnimRow" style="margin-top:8px">
+            <div class="seg-row mt-8" id="edgeAnimRow">
               <button class="seg active" data-edgeanim="MusicSync" type="button">Music Sync</button>
               <button class="seg" data-edgeanim="AmbientDrift" type="button">Drift</button>
               <button class="seg" data-edgeanim="Still" type="button">Still</button>
             </div>
-            <label class="toggle-row" style="margin-top:8px">
+            <label class="toggle-row mt-8">
               <span>2-Color Gradient (60% / 40%)</span>
               <input id="edgeTwoColorToggle" type="checkbox" checked />
             </label>

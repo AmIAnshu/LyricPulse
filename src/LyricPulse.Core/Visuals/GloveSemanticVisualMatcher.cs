@@ -234,7 +234,7 @@ public sealed partial class GloveSemanticVisualMatcher : IWordVisualMatcher
                 }
                 catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
                 {
-                    _logger.LogGloveEmbeddingLoadFailed(ex, binPath);
+                    _logger.LogGloveEmbeddingLoadFailed(ex, Path.GetFileName(binPath));
                     _embeddingTable = null;
                     _conceptIndex = null;
                 }

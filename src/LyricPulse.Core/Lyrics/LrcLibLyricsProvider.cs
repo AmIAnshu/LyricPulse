@@ -150,7 +150,7 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
 
         if (!hadTransientError && candidates.IsDefaultOrEmpty)
         {
-            var combinedQuery = $"{track.NormalizedTitle} {track.PrimaryArtist}".Trim();
+            var combinedQuery = BoundQueryValue($"{track.NormalizedTitle} {track.PrimaryArtist}");
             var fallbackSearchUri = $"/api/search?q={Uri.EscapeDataString(combinedQuery)}";
             var fallbackFetch = await FetchSearchDtosAsync(fallbackSearchUri, cancellationToken).ConfigureAwait(false);
             hadTransientError = fallbackFetch.IsTransientError;
@@ -199,9 +199,16 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
 
         try
         {
-            await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            var dto = await JsonSerializer.DeserializeAsync(stream, LyricPulseJsonContext.Default.LrclibTrackDto, ct)
-                .ConfigureAwait(false);
+            var (exceededLimit, dto) = await BoundedHttpResponseReader.ReadJsonAsync(
+                response,
+                LyricPulseJsonContext.Secure.LrclibTrackDto,
+                ct).ConfigureAwait(false);
+            if (exceededLimit)
+            {
+                _logger.LogProviderOversizedResponse(Name, "/api/get");
+                return new HttpFetchResult<LrclibTrackDto?>(null, IsTransientError: false);
+            }
+
             return new HttpFetchResult<LrclibTrackDto?>(dto, IsTransientError: false);
         }
         catch (JsonException ex)
@@ -230,11 +237,16 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
 
         try
         {
-            await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            var results = await JsonSerializer.DeserializeAsync(
-                stream,
-                LyricPulseJsonContext.Default.ImmutableArrayLrclibTrackDto,
+            var (exceededLimit, results) = await BoundedHttpResponseReader.ReadJsonAsync(
+                response,
+                LyricPulseJsonContext.Secure.ImmutableArrayLrclibTrackDto,
                 ct).ConfigureAwait(false);
+            if (exceededLimit)
+            {
+                _logger.LogProviderOversizedResponse(Name, "/api/search");
+                return new HttpFetchResult<ImmutableArray<LrclibTrackDto>>(ImmutableArray<LrclibTrackDto>.Empty, IsTransientError: false);
+            }
+
             return new HttpFetchResult<ImmutableArray<LrclibTrackDto>>(results, IsTransientError: false);
         }
         catch (JsonException ex)
@@ -395,13 +407,13 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
     {
         var parts = new List<string>(4)
         {
-            $"track_name={Uri.EscapeDataString(trackName)}",
-            $"artist_name={Uri.EscapeDataString(artistName)}"
+            $"track_name={Uri.EscapeDataString(BoundQueryValue(trackName))}",
+            $"artist_name={Uri.EscapeDataString(BoundQueryValue(artistName))}"
         };
 
         if (!string.IsNullOrWhiteSpace(albumName))
         {
-            parts.Add($"album_name={Uri.EscapeDataString(albumName)}");
+            parts.Add($"album_name={Uri.EscapeDataString(BoundQueryValue(albumName))}");
         }
 
         if (duration > TimeSpan.Zero)
@@ -417,14 +429,20 @@ public sealed partial class LrcLibLyricsProvider : ILyricsProvider, IDisposable
     {
         var parts = new List<string>(2)
         {
-            $"track_name={Uri.EscapeDataString(normalizedTitle)}"
+            $"track_name={Uri.EscapeDataString(BoundQueryValue(normalizedTitle))}"
         };
 
         if (!string.IsNullOrWhiteSpace(primaryArtist))
         {
-            parts.Add($"artist_name={Uri.EscapeDataString(primaryArtist)}");
+            parts.Add($"artist_name={Uri.EscapeDataString(BoundQueryValue(primaryArtist))}");
         }
 
         return "/api/search?" + string.Join('&', parts);
+    }
+
+    private static string BoundQueryValue(string value)
+    {
+        var trimmed = (value ?? string.Empty).Trim();
+        return trimmed.Length > 256 ? trimmed[..256] : trimmed;
     }
 }

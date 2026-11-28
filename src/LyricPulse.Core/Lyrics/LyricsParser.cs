@@ -13,6 +13,11 @@ namespace LyricPulse.Core.Lyrics;
 /// </summary>
 public sealed partial class LyricsParser : ILyricsParser
 {
+    public const int MaxPayloadChars = 512_000;
+    public const int MaxLines = 2_000;
+    public const int MaxWordsPerLine = 256;
+    private const long MaxTimestampMs = 24L * 60L * 60L * 1000L;
+    private const long MaxWordDurationMs = 10L * 60L * 1000L;
     private const int RegexTimeoutMs = 100;
     private static readonly TimeSpan BilingualMaxDelta = TimeSpan.FromMilliseconds(300);
 
@@ -32,11 +37,12 @@ public sealed partial class LyricsParser : ILyricsParser
             return new LyricsDocument(track, sourceKind, providerName, TimingKind.None, ImmutableArray<LyricLine>.Empty, TimeSpan.Zero, isFromCache);
         }
 
-        var embeddedOffset = ExtractLrcOffset(rawLrc);
-        var entries = ExtractRawLrcEntries(rawLrc, embeddedOffset);
+        var boundedLrc = CapPayload(rawLrc);
+        var embeddedOffset = ExtractLrcOffset(boundedLrc);
+        var entries = ExtractRawLrcEntries(boundedLrc, embeddedOffset);
         if (entries.Count == 0)
         {
-            return CreatePlain(track, rawLrc, sourceKind, providerName, isFromCache);
+            return CreatePlain(track, boundedLrc, sourceKind, providerName, isFromCache);
         }
 
         entries.Sort(static (a, b) =>
@@ -45,7 +51,7 @@ public sealed partial class LyricsParser : ILyricsParser
             return cmp != 0 ? cmp : a.Order.CompareTo(b.Order);
         });
 
-        var hasAnyEnhanced = entries.Any(e => EnhancedWordTagRegex().IsMatch(e.RawPayload));
+        var hasAnyEnhanced = entries.Any(static e => SafeHasEnhancedWordTag(e.RawPayload));
         var translations = ParseSimpleLrcTimestamps(translationLrc);
         var romanizations = ParseSimpleLrcTimestamps(romanizedLrc);
 
@@ -77,13 +83,14 @@ public sealed partial class LyricsParser : ILyricsParser
             return new LyricsDocument(track, sourceKind, providerName, TimingKind.None, ImmutableArray<LyricLine>.Empty, TimeSpan.Zero, isFromCache);
         }
 
+        var boundedYrc = CapPayload(rawYrc);
         var translations = ParseSimpleLrcTimestamps(translationLrc);
         var romanizations = ParseSimpleLrcTimestamps(romanizedLrc);
-        var parsedLines = ParseYrcLines(rawYrc, translations, romanizations);
+        var parsedLines = ParseYrcLines(boundedYrc, translations, romanizations);
 
         if (parsedLines.Count == 0)
         {
-            return ParseLrc(track, rawYrc, sourceKind, providerName, isFromCache, translationLrc, romanizedLrc);
+            return ParseLrc(track, boundedYrc, sourceKind, providerName, isFromCache, translationLrc, romanizedLrc);
         }
 
         parsedLines.Sort(static (a, b) => a.StartTime.CompareTo(b.StartTime));
@@ -100,9 +107,11 @@ public sealed partial class LyricsParser : ILyricsParser
     {
         ArgumentNullException.ThrowIfNull(track);
 
-        var lines = SplitLines(plainText ?? string.Empty)
+        var boundedText = CapPayload(plainText ?? string.Empty);
+        var lines = SplitLines(boundedText)
             .Select(l => l.Trim())
             .Where(l => l.Length > 0)
+            .Take(MaxLines)
             .Select((text, index) => new LyricLine(
                 Index: index,
                 RawText: text,
@@ -131,20 +140,36 @@ public sealed partial class LyricsParser : ILyricsParser
 
         foreach (var rawLine in SplitLines(rawYrc))
         {
+            if (parsedLines.Count >= MaxLines)
+            {
+                break;
+            }
+
             var trimmed = rawLine.Trim();
             if (trimmed.Length == 0 || trimmed.StartsWith('{'))
             {
                 continue;
             }
 
-            var lineMatch = YrcLineRegex().Match(trimmed);
+            Match lineMatch;
+            try
+            {
+                lineMatch = YrcLineRegex().Match(trimmed);
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                continue;
+            }
+
             if (!lineMatch.Success)
             {
                 continue;
             }
 
-            var lineStart = TimeSpan.FromMilliseconds(Math.Max(0L, long.Parse(lineMatch.Groups[1].ValueSpan, CultureInfo.InvariantCulture)));
-            var lineEnd = lineStart + TimeSpan.FromMilliseconds(Math.Max(0L, long.Parse(lineMatch.Groups[2].ValueSpan, CultureInfo.InvariantCulture)));
+            var startMs = TryParseBoundedMilliseconds(lineMatch.Groups[1].ValueSpan, 0L, MaxTimestampMs);
+            var durationMs = TryParseBoundedMilliseconds(lineMatch.Groups[2].ValueSpan, 0L, MaxTimestampMs);
+            var lineStart = TimeSpan.FromMilliseconds(startMs);
+            var lineEnd = TimeSpan.FromMilliseconds(Math.Min(MaxTimestampMs, startMs + durationMs));
             var words = ParseYrcWords(lineMatch.Groups[3].Value, lineStart, ref lineEnd);
             var rawText = ReconstructLineText(words);
             var isInstrumental = IsInstrumentalText(rawText) || words.IsEmpty;
@@ -175,11 +200,18 @@ public sealed partial class LyricsParser : ILyricsParser
     {
         var translation = FindNearestBilingual(translations, startTime);
         var romanized = FindNearestBilingual(romanizations, startTime);
-        var wordMatches = EnhancedWordTagRegex().Matches(rawPayload);
 
-        if (wordMatches.Count > 0)
+        try
         {
-            return BuildEnhancedWordLine(index, startTime, wordMatches, embeddedOffset, nextLineStart, trackDuration, translation, romanized);
+            var wordMatches = EnhancedWordTagRegex().Matches(rawPayload);
+            if (wordMatches.Count > 0)
+            {
+                return BuildEnhancedWordLine(index, startTime, wordMatches, embeddedOffset, nextLineStart, trackDuration, translation, romanized);
+            }
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            // Fall through to plain line handling on catastrophic pattern timeout.
         }
 
         var cleanText = rawPayload.Trim();
@@ -232,9 +264,14 @@ public sealed partial class LyricsParser : ILyricsParser
 
     private static List<(TimeSpan Start, string Text, bool SpaceAfter)> ExtractEnhancedTokens(MatchCollection matches, TimeSpan embeddedOffset)
     {
-        var tokens = new List<(TimeSpan Start, string Text, bool SpaceAfter)>(matches.Count);
+        var tokens = new List<(TimeSpan Start, string Text, bool SpaceAfter)>(Math.Min(matches.Count, MaxWordsPerLine));
         foreach (Match match in matches)
         {
+            if (tokens.Count >= MaxWordsPerLine)
+            {
+                break;
+            }
+
             var ts = ApplyEmbeddedOffset(ParseTimestampGroups(match.Groups[1], match.Groups[2], match.Groups[3]), embeddedOffset);
             var chunk = match.Groups[4].Value;
             var text = chunk.Trim();
@@ -272,7 +309,16 @@ public sealed partial class LyricsParser : ILyricsParser
 
     private static ImmutableArray<LyricWord> ParseYrcWords(string body, TimeSpan lineStart, ref TimeSpan lineEnd)
     {
-        var matches = YrcWordRegex().Matches(body);
+        MatchCollection matches;
+        try
+        {
+            matches = YrcWordRegex().Matches(body);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return ImmutableArray<LyricWord>.Empty;
+        }
+
         if (matches.Count == 0)
         {
             return ImmutableArray<LyricWord>.Empty;
@@ -304,6 +350,11 @@ public sealed partial class LyricsParser : ILyricsParser
 
         foreach (Match match in matches)
         {
+            if (merged.Count >= MaxWordsPerLine)
+            {
+                break;
+            }
+
             var rawChunk = match.Groups[3].Value;
             if (rawChunk.Length == 0)
             {
@@ -322,8 +373,10 @@ public sealed partial class LyricsParser : ILyricsParser
                 continue;
             }
 
-            var start = TimeSpan.FromMilliseconds(Math.Max(0L, long.Parse(match.Groups[1].ValueSpan, CultureInfo.InvariantCulture)));
-            var end = start + TimeSpan.FromMilliseconds(Math.Max(1L, long.Parse(match.Groups[2].ValueSpan, CultureInfo.InvariantCulture)));
+            var startMs = TryParseBoundedMilliseconds(match.Groups[1].ValueSpan, 0L, MaxTimestampMs);
+            var durationMs = TryParseBoundedMilliseconds(match.Groups[2].ValueSpan, 1L, MaxWordDurationMs);
+            var start = TimeSpan.FromMilliseconds(startMs);
+            var end = TimeSpan.FromMilliseconds(Math.Min(MaxTimestampMs, startMs + durationMs));
             var hasLeadingSpace = char.IsWhiteSpace(rawChunk[0]);
             var hasTrailingSpace = char.IsWhiteSpace(rawChunk[^1]);
 
@@ -347,10 +400,17 @@ public sealed partial class LyricsParser : ILyricsParser
 
     private static TimeSpan ExtractLrcOffset(string rawLrc)
     {
-        var match = LrcOffsetTagRegex().Match(rawLrc);
-        return match.Success && int.TryParse(match.Groups[1].ValueSpan, NumberStyles.Integer, CultureInfo.InvariantCulture, out var ms)
-            ? TimeSpan.FromMilliseconds(ms)
-            : TimeSpan.Zero;
+        try
+        {
+            var match = LrcOffsetTagRegex().Match(rawLrc);
+            return match.Success && int.TryParse(match.Groups[1].ValueSpan, NumberStyles.Integer, CultureInfo.InvariantCulture, out var ms)
+                ? TimeSpan.FromMilliseconds(Math.Clamp(ms, -60_000, 60_000))
+                : TimeSpan.Zero;
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return TimeSpan.Zero;
+        }
     }
 
     private static List<(TimeSpan StartTime, int Order, string RawPayload)> ExtractRawLrcEntries(string rawLrc, TimeSpan embeddedOffset)
@@ -360,8 +420,22 @@ public sealed partial class LyricsParser : ILyricsParser
 
         foreach (var line in SplitLines(rawLrc))
         {
+            if (entries.Count >= MaxLines)
+            {
+                break;
+            }
+
             var trimmed = line.Trim();
-            var tagMatches = LrcLineTimestampRegex().Matches(trimmed);
+            MatchCollection tagMatches;
+            try
+            {
+                tagMatches = LrcLineTimestampRegex().Matches(trimmed);
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                continue;
+            }
+
             if (tagMatches.Count == 0)
             {
                 continue;
@@ -372,6 +446,11 @@ public sealed partial class LyricsParser : ILyricsParser
 
             foreach (Match match in tagMatches)
             {
+                if (entries.Count >= MaxLines)
+                {
+                    break;
+                }
+
                 var start = ApplyEmbeddedOffset(ParseTimestampGroups(match.Groups[1], match.Groups[2], match.Groups[3]), embeddedOffset);
                 entries.Add((start, order++, payload));
             }
@@ -388,10 +467,24 @@ public sealed partial class LyricsParser : ILyricsParser
             return list;
         }
 
-        foreach (var line in SplitLines(rawLrc))
+        foreach (var line in SplitLines(CapPayload(rawLrc)))
         {
+            if (list.Count >= MaxLines)
+            {
+                break;
+            }
+
             var trimmed = line.Trim();
-            var matches = LrcLineTimestampRegex().Matches(trimmed);
+            MatchCollection matches;
+            try
+            {
+                matches = LrcLineTimestampRegex().Matches(trimmed);
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                continue;
+            }
+
             if (matches.Count == 0)
             {
                 continue;
@@ -406,25 +499,62 @@ public sealed partial class LyricsParser : ILyricsParser
 
             foreach (Match m in matches)
             {
+                if (list.Count >= MaxLines)
+                {
+                    break;
+                }
+
                 list.Add((ParseTimestampGroups(m.Groups[1], m.Groups[2], m.Groups[3]), text));
             }
         }
 
+        list.Sort(static (a, b) => a.Time.CompareTo(b.Time));
         return list;
     }
 
     private static string? FindNearestBilingual(List<(TimeSpan Time, string Text)> items, TimeSpan target)
     {
+        if (items.Count == 0)
+        {
+            return null;
+        }
+
+        var lo = 0;
+        var hi = items.Count;
+        while (lo < hi)
+        {
+            var mid = lo + ((hi - lo) >> 1);
+            if (items[mid].Time < target)
+            {
+                lo = mid + 1;
+            }
+            else
+            {
+                hi = mid;
+            }
+        }
+
         string? best = null;
         var bestDelta = BilingualMaxDelta + TimeSpan.FromTicks(1);
 
-        foreach (var (time, text) in items)
+        if (lo > 0)
         {
-            var delta = (time - target).Duration();
+            var prev = items[lo - 1];
+            var delta = (prev.Time - target).Duration();
             if (delta <= BilingualMaxDelta && delta < bestDelta)
             {
                 bestDelta = delta;
-                best = text;
+                best = prev.Text;
+            }
+        }
+
+        if (lo < items.Count)
+        {
+            var next = items[lo];
+            var delta = (next.Time - target).Duration();
+            if (delta <= BilingualMaxDelta && delta < bestDelta)
+            {
+                best = next.Text;
             }
         }
 
@@ -433,17 +563,43 @@ public sealed partial class LyricsParser : ILyricsParser
 
     private static TimeSpan ParseTimestampGroups(Group minGroup, Group secGroup, Group fracGroup)
     {
-        var minutes = int.Parse(minGroup.ValueSpan, CultureInfo.InvariantCulture);
-        var seconds = int.Parse(secGroup.ValueSpan, CultureInfo.InvariantCulture);
+        if (!int.TryParse(minGroup.ValueSpan, NumberStyles.None, CultureInfo.InvariantCulture, out var minutes) ||
+            !int.TryParse(secGroup.ValueSpan, NumberStyles.None, CultureInfo.InvariantCulture, out var seconds))
+        {
+            return TimeSpan.Zero;
+        }
+
+        minutes = Math.Clamp(minutes, 0, 1440);
+        seconds = Math.Clamp(seconds, 0, 59);
         var ms = 0;
 
-        if (fracGroup.Success && fracGroup.Length > 0)
+        if (fracGroup.Success && fracGroup.Length > 0 &&
+            int.TryParse(fracGroup.ValueSpan, NumberStyles.None, CultureInfo.InvariantCulture, out var raw))
         {
-            var raw = int.Parse(fracGroup.ValueSpan, CultureInfo.InvariantCulture);
-            ms = fracGroup.Length switch { 1 => raw * 100, 2 => raw * 10, _ => raw };
+            ms = Math.Clamp(fracGroup.Length switch { 1 => raw * 100, 2 => raw * 10, _ => raw }, 0, 999);
         }
 
         return new TimeSpan(0, 0, minutes, seconds, ms);
+    }
+
+    private static long TryParseBoundedMilliseconds(ReadOnlySpan<char> value, long minMs, long maxMs) =>
+        long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
+            ? Math.Clamp(parsed, minMs, maxMs)
+            : minMs;
+
+    private static string CapPayload(string text) =>
+        text.Length > MaxPayloadChars ? text[..MaxPayloadChars] : text;
+
+    private static bool SafeHasEnhancedWordTag(string payload)
+    {
+        try
+        {
+            return EnhancedWordTagRegex().IsMatch(payload);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
     }
 
     private static TimeSpan ApplyEmbeddedOffset(TimeSpan raw, TimeSpan embeddedOffset)

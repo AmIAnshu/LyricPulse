@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Avalonia.Threading;
 
 namespace LyricPulse.App.Platform;
@@ -12,6 +13,7 @@ public sealed class SingleInstanceGuard : IDisposable
     public const string DefaultMutexName = @"Local\LyricPulse.SingleInstance";
     public const string DefaultShowWindowEventName = @"Local\LyricPulse.ShowWindow";
     public const string DefaultStartDemoEventName = @"Local\LyricPulse.StartDemo";
+    private const double MinActivationIntervalMs = 200.0;
 
     private readonly Mutex _mutex;
     private readonly EventWaitHandle _showEvent;
@@ -47,7 +49,25 @@ public sealed class SingleInstanceGuard : IDisposable
             ? $"{showWindowEventName}.Demo"
             : startDemoEventName;
 
-        var mutex = new Mutex(initiallyOwned: true, name: mutexName, out var createdNew);
+        Mutex mutex;
+        bool createdNew;
+        try
+        {
+            mutex = new Mutex(initiallyOwned: true, name: mutexName, out createdNew);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            if (requestDemoMode)
+            {
+                SignalExistingInstance(demoEventName);
+            }
+            else
+            {
+                SignalExistingInstance(showWindowEventName);
+            }
+
+            return null;
+        }
 
         if (!createdNew)
         {
@@ -77,8 +97,19 @@ public sealed class SingleInstanceGuard : IDisposable
             }
         }
 
-        var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, showWindowEventName);
-        var demoEvent = new EventWaitHandle(false, EventResetMode.AutoReset, demoEventName);
+        EventWaitHandle showEvent;
+        EventWaitHandle demoEvent;
+        try
+        {
+            showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, showWindowEventName);
+            demoEvent = new EventWaitHandle(false, EventResetMode.AutoReset, demoEventName);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            mutex.ReleaseMutex();
+            mutex.Dispose();
+            return null;
+        }
 
         return new SingleInstanceGuard(mutex, showEvent, demoEvent, ownsMutex: true);
     }
@@ -87,14 +118,21 @@ public sealed class SingleInstanceGuard : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(eventName);
 
-        if (!EventWaitHandle.TryOpenExisting(eventName, out var existingEvent))
+        try
+        {
+            if (!EventWaitHandle.TryOpenExisting(eventName, out var existingEvent))
+            {
+                return false;
+            }
+
+            using (existingEvent)
+            {
+                return existingEvent.Set();
+            }
+        }
+        catch (UnauthorizedAccessException)
         {
             return false;
-        }
-
-        using (existingEvent)
-        {
-            return existingEvent.Set();
         }
     }
 
@@ -117,6 +155,7 @@ public sealed class SingleInstanceGuard : IDisposable
         _listenerThread = new Thread(() =>
         {
             WaitHandle[] handles = [_showEvent, _demoEvent, _shutdownEvent.WaitHandle];
+            long lastDispatchedTs = 0;
             while (true)
             {
                 var signaled = WaitHandle.WaitAny(handles);
@@ -125,6 +164,13 @@ public sealed class SingleInstanceGuard : IDisposable
                     break;
                 }
 
+                var now = Stopwatch.GetTimestamp();
+                if (lastDispatchedTs != 0 && Stopwatch.GetElapsedTime(lastDispatchedTs, now).TotalMilliseconds < MinActivationIntervalMs)
+                {
+                    continue;
+                }
+
+                lastDispatchedTs = now;
                 dispatch(signaled == 1 ? demoHandler : onShowRequested);
             }
         })

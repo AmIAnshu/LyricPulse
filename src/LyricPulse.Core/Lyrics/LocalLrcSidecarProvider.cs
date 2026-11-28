@@ -1,5 +1,6 @@
 using LyricPulse.Core.Abstractions;
 using LyricPulse.Core.Models;
+using LyricPulse.Core.Security;
 
 namespace LyricPulse.Core.Lyrics;
 
@@ -8,6 +9,8 @@ namespace LyricPulse.Core.Lyrics;
 /// </summary>
 public sealed class LocalLrcSidecarProvider : ILyricsProvider
 {
+    public const int MaxSanitizedStemChars = 160;
+
     private readonly string _rootFullPath;
     private readonly ILyricsParser _parser;
 
@@ -38,12 +41,19 @@ public sealed class LocalLrcSidecarProvider : ILyricsProvider
 
         foreach (var fileName in BuildCandidateFileNames(track))
         {
-            if (!TryResolveSafePath(fileName, out var fullPath) || !File.Exists(fullPath))
+            if (!TryResolveSafePath(fileName, out var fullPath) ||
+                !SafeFileGuard.TryOpenSafeReadStream(fullPath, SafeFileGuard.MaxSidecarLrcFileBytes, out var stream))
             {
                 continue;
             }
 
-            var content = await File.ReadAllTextAsync(fullPath, cancellationToken).ConfigureAwait(false);
+            string content;
+            await using (stream!)
+            using (var reader = new StreamReader(stream))
+            {
+                content = await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             if (string.IsNullOrWhiteSpace(content))
             {
                 continue;
@@ -68,60 +78,91 @@ public sealed class LocalLrcSidecarProvider : ILyricsProvider
 
         if (!string.IsNullOrWhiteSpace(track.CacheKey))
         {
-            var byHash = $"{SanitizeFileName(track.CacheKey)}.lrc";
-            if (seen.Add(byHash))
+            var stem = SanitizeFileName(track.CacheKey);
+            if (stem.Length > 0 && seen.Add($"{stem}.lrc"))
             {
-                yield return byHash;
+                yield return $"{stem}.lrc";
             }
         }
 
         if (!string.IsNullOrWhiteSpace(track.PrimaryArtist) && !string.IsNullOrWhiteSpace(track.NormalizedTitle))
         {
-            var byNorm = $"{SanitizeFileName($"{track.PrimaryArtist} - {track.NormalizedTitle}")}.lrc";
-            if (seen.Add(byNorm))
+            var stem = SanitizeFileName($"{track.PrimaryArtist} - {track.NormalizedTitle}");
+            if (stem.Length > 0 && seen.Add($"{stem}.lrc"))
             {
-                yield return byNorm;
+                yield return $"{stem}.lrc";
             }
         }
 
         if (!string.IsNullOrWhiteSpace(track.RawArtist) && !string.IsNullOrWhiteSpace(track.RawTitle))
         {
-            var byRaw = $"{SanitizeFileName($"{track.RawArtist} - {track.RawTitle}")}.lrc";
-            if (seen.Add(byRaw))
+            var stem = SanitizeFileName($"{track.RawArtist} - {track.RawTitle}");
+            if (stem.Length > 0 && seen.Add($"{stem}.lrc"))
             {
-                yield return byRaw;
+                yield return $"{stem}.lrc";
             }
         }
 
         if (!string.IsNullOrWhiteSpace(track.NormalizedTitle))
         {
-            var byTitle = $"{SanitizeFileName(track.NormalizedTitle)}.lrc";
-            if (seen.Add(byTitle))
+            var stem = SanitizeFileName(track.NormalizedTitle);
+            if (stem.Length > 0 && seen.Add($"{stem}.lrc"))
             {
-                yield return byTitle;
+                yield return $"{stem}.lrc";
             }
         }
     }
 
-    private static string SanitizeFileName(string name)
+    internal static string SanitizeFileName(string name)
     {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return string.Empty;
+        }
+
         var invalid = Path.GetInvalidFileNameChars();
         var chars = name.Trim().ToCharArray();
         for (var i = 0; i < chars.Length; i++)
         {
-            if (Array.IndexOf(invalid, chars[i]) >= 0)
+            var ch = chars[i];
+            if (Array.IndexOf(invalid, ch) >= 0 || char.IsControl(ch) || ch is '/' or '\\')
             {
                 chars[i] = '_';
             }
         }
 
-        return new string(chars);
+        var sanitized = new string(chars);
+        while (sanitized.Contains("..", StringComparison.Ordinal))
+        {
+            sanitized = sanitized.Replace("..", "_", StringComparison.Ordinal);
+        }
+
+        sanitized = sanitized.Trim().TrimEnd('.', ' ');
+        if (sanitized.Length > MaxSanitizedStemChars)
+        {
+            sanitized = sanitized[..MaxSanitizedStemChars].TrimEnd('.', ' ');
+        }
+
+        if (sanitized.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        if (SafeFileGuard.IsReservedWindowsDeviceName(sanitized))
+        {
+            sanitized = "_" + sanitized;
+        }
+
+        return sanitized;
     }
 
     private bool TryResolveSafePath(string fileName, out string fullPath)
     {
         fullPath = string.Empty;
-        if (string.IsNullOrWhiteSpace(fileName))
+        if (string.IsNullOrWhiteSpace(fileName) ||
+            fileName.Contains("..", StringComparison.Ordinal) ||
+            fileName.IndexOfAny(['/', '\\']) >= 0 ||
+            SafeFileGuard.IsReservedWindowsDeviceName(fileName))
         {
             return false;
         }

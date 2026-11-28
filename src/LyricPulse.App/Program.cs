@@ -20,13 +20,25 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+#if DEBUG
         if (args.Length >= 2 && string.Equals(args[0], "--export-icon", StringComparison.OrdinalIgnoreCase))
         {
             var outPath = Path.GetFullPath(args[1]);
-            Directory.CreateDirectory(Path.GetDirectoryName(outPath)!);
+            if (!outPath.EndsWith(".ico", StringComparison.OrdinalIgnoreCase))
+            {
+                return 2;
+            }
+
+            var outDir = Path.GetDirectoryName(outPath);
+            if (!string.IsNullOrEmpty(outDir))
+            {
+                Directory.CreateDirectory(outDir);
+            }
+
             File.WriteAllBytes(outPath, TrayIconFactory.RenderMultiSizeIcoBytes(TrayIconVisualState.Playing, isLightTaskbar: false));
             return 0;
         }
+#endif
 
         var launchOptions = LaunchOptions.Parse(args);
         if (launchOptions.RunSmokeTest)
@@ -86,8 +98,9 @@ public static class Program
         return services.BuildServiceProvider();
     }
 
-    public static AppBuilder BuildAvaloniaApp() =>
-        AppBuilder.Configure<App>()
+    public static AppBuilder BuildAvaloniaApp()
+    {
+        var builder = AppBuilder.Configure<App>()
             .UsePlatformDetect()
             .UseSkia()
             .WithInterFont()
@@ -114,6 +127,10 @@ public static class Program
             .With(new SkiaOptions
             {
                 MaxGpuResourceSizeBytes = MaxSkiaGpuResourceBytes
-            })
-            .LogToTrace();
+            });
+#if DEBUG
+        builder = builder.LogToTrace();
+#endif
+        return builder;
+    }
 }

@@ -152,22 +152,33 @@ function parseTagTime(tag) {
   return Number(m[1]) * 60 + Number(m[2]);
 }
 
+const MAX_LRC_CHARS = 512_000;
+const MAX_LRC_LINES = 2_000;
+const MAX_LRC_WORDS_PER_LINE = 256;
+
 export function parseLrc(rawText, fallbackDurationSec = 36.0) {
   let title = 'Neon Horizon';
   let artist = 'LyricPulse Studio';
   let durationSec = fallbackDurationSec;
   const lines = [];
 
-  for (const rawLine of rawText.split(/\r?\n/)) {
+  if (typeof rawText !== 'string' || !rawText.trim()) {
+    return { title, artist, durationSec, lines };
+  }
+
+  const boundedText = rawText.length > MAX_LRC_CHARS ? rawText.slice(0, MAX_LRC_CHARS) : rawText;
+
+  for (const rawLine of boundedText.split(/\r?\n/)) {
+    if (lines.length >= MAX_LRC_LINES) break;
     const line = rawLine.trim();
     if (!line) continue;
     const metaMatch = /^\[(ti|ar|al|length):(.+)\]$/i.exec(line);
     if (metaMatch) {
       const k = metaMatch[1].toLowerCase();
-      const v = metaMatch[2].trim();
+      const v = metaMatch[2].trim().slice(0, 160);
       if (k === 'ti') title = v;
       if (k === 'ar') artist = v;
-      if (k === 'length') durationSec = Math.max(5, parseTagTime(v));
+      if (k === 'length') durationSec = Math.max(5, Math.min(86400, parseTagTime(v)));
       continue;
     }
 
@@ -181,13 +192,19 @@ export function parseLrc(rawText, fallbackDurationSec = 36.0) {
     const words = [];
     let match;
     while ((match = wordRegex.exec(rest)) !== null) {
+      if (words.length >= MAX_LRC_WORDS_PER_LINE) break;
       const wStart = parseTagTime(match[1]);
       const text = match[2].trim();
       if (text) words.push({ text, start: wStart, end: wStart + 0.55 });
     }
 
     if (words.length === 0) {
-      const plainWords = rest.replace(/<\d{2}:\d{2}(?:\.\d{1,3})?>/g, '').trim().split(/\s+/).filter(Boolean);
+      const plainWords = rest
+        .replace(/<\d{2}:\d{2}(?:\.\d{1,3})?>/g, '')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, MAX_LRC_WORDS_PER_LINE);
       const step = Math.max(0.28, 2.4 / Math.max(1, plainWords.length));
       plainWords.forEach((w, i) => {
         words.push({ text: w, start: lineStart + i * step, end: lineStart + (i + 1) * step });

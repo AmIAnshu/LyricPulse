@@ -4,6 +4,7 @@ using System.Text.Json;
 using LyricPulse.Core.Abstractions;
 using LyricPulse.Core.Lyrics.Dtos;
 using LyricPulse.Core.Models;
+using LyricPulse.Core.Security;
 using LyricPulse.Core.Serialization;
 
 namespace LyricPulse.Core.Lyrics;
@@ -54,14 +55,26 @@ public sealed class DiskLyricsCache : ILyricsCache
             return null;
         }
 
+        if (!SafeFileGuard.TryOpenSafeReadStream(filePath, SafeFileGuard.MaxLyricsCacheFileBytes, out var stream))
+        {
+            if (!SafeFileGuard.IsReparsePointOrSymlink(filePath))
+            {
+                TryDeleteQuietly(filePath);
+            }
+
+            return null;
+        }
+
         CachedLyricsEnvelopeDto? envelope;
         try
         {
-            await using var stream = File.OpenRead(filePath);
-            envelope = await JsonSerializer.DeserializeAsync(
-                stream,
-                LyricPulseJsonContext.Default.CachedLyricsEnvelopeDto,
-                cancellationToken).ConfigureAwait(false);
+            await using (stream!)
+            {
+                envelope = await JsonSerializer.DeserializeAsync(
+                    stream,
+                    LyricPulseJsonContext.Secure.CachedLyricsEnvelopeDto,
+                    cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (Exception ex) when (ex is JsonException or IOException)
         {
@@ -165,7 +178,7 @@ public sealed class DiskLyricsCache : ILyricsCache
         {
             cancellationToken.ThrowIfCancellationRequested();
             var info = new FileInfo(path);
-            if (!info.Exists)
+            if (!info.Exists || (info.Attributes & FileAttributes.ReparsePoint) != 0)
             {
                 continue;
             }
@@ -203,14 +216,21 @@ public sealed class DiskLyricsCache : ILyricsCache
 
     private static async Task<bool> IsExpiredAsync(string path, DateTimeOffset now, CancellationToken ct)
     {
+        if (!SafeFileGuard.TryOpenSafeReadStream(path, SafeFileGuard.MaxLyricsCacheFileBytes, out var stream))
+        {
+            return !SafeFileGuard.IsReparsePointOrSymlink(path);
+        }
+
         try
         {
-            await using var stream = File.OpenRead(path);
-            var envelope = await JsonSerializer.DeserializeAsync(
-                stream,
-                LyricPulseJsonContext.Default.CachedLyricsEnvelopeDto,
-                ct).ConfigureAwait(false);
-            return envelope is null || now >= envelope.ExpiresAtUtc;
+            await using (stream!)
+            {
+                var envelope = await JsonSerializer.DeserializeAsync(
+                    stream,
+                    LyricPulseJsonContext.Secure.CachedLyricsEnvelopeDto,
+                    ct).ConfigureAwait(false);
+                return envelope is null || now >= envelope.ExpiresAtUtc;
+            }
         }
         catch (Exception ex) when (ex is JsonException or IOException)
         {

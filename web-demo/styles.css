@@ -1150,3 +1150,18 @@ button:focus-visible, input:focus-visible, a:focus-visible {
 .hero-stage.is-glass-stage .hero-desc {
   display: none;
 }
+
+.mt-8 {
+  margin-top: 8px;
+}
+
+.font-preview-jost { font-family: 'Jost', sans-serif; }
+.font-preview-bodoni { font-family: 'Bodoni Moda', serif; }
+.font-preview-mulish { font-family: 'Mulish', sans-serif; }
+.font-preview-nunito { font-family: 'Nunito', sans-serif; }
+.font-preview-bahnschrift { font-family: 'Bahnschrift', 'Barlow Condensed', sans-serif; }
+.font-preview-georgia { font-family: 'Georgia', serif; }
+.font-preview-impact { font-family: 'Impact', 'Anton', sans-serif; }
+.font-preview-sitka { font-family: 'Sitka Display', 'Playfair Display', serif; }
+.font-preview-inkfree { font-family: 'Ink Free', 'Caveat', cursive; }
+.font-preview-cascadia { font-family: 'Cascadia Mono', 'JetBrains Mono', monospace; }

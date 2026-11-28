@@ -15,6 +15,7 @@ internal enum QueryUserNotificationState
 
 /// <summary>
 /// Source-generated [LibraryImport] Win32 declarations (zero runtime marshalling, 100% NativeAOT safe).
+/// Every P/Invoke method loads system Win32 libraries exclusively from System32 to block DLL sideloading.
 /// </summary>
 internal static partial class Win32Native
 {
@@ -69,15 +70,19 @@ internal static partial class Win32Native
     public const uint MOD_WIN = 0x0008;
     public const uint MOD_NOREPEAT = 0x4000;
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
     private static partial nint GetWindowLongPtr64(nint hWnd, int nIndex);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
     private static partial nint SetWindowLongPtr64(nint hWnd, int nIndex, nint dwNewLong);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll", EntryPoint = "GetWindowLongW", SetLastError = true)]
     private static partial int GetWindowLong32(nint hWnd, int nIndex);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll", EntryPoint = "SetWindowLongW", SetLastError = true)]
     private static partial int SetWindowLong32(nint hWnd, int nIndex, int dwNewLong);
 
@@ -87,6 +92,7 @@ internal static partial class Win32Native
     public static nint SetWindowLongPtr(nint hWnd, int nIndex, nint dwNewLong) =>
         nint.Size == 8 ? SetWindowLongPtr64(hWnd, nIndex, dwNewLong) : SetWindowLong32(hWnd, nIndex, (int)dwNewLong);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool SetWindowPos(
@@ -98,6 +104,7 @@ internal static partial class Win32Native
         int cy,
         uint uFlags);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool SetLayeredWindowAttributes(
@@ -106,6 +113,7 @@ internal static partial class Win32Native
         byte bAlpha,
         uint dwFlags);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("dwmapi.dll")]
     public static partial int DwmSetWindowAttribute(
         nint hWnd,
@@ -113,12 +121,15 @@ internal static partial class Win32Native
         ref int pvAttribute,
         int cbAttribute);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll")]
     public static partial nint MonitorFromWindow(nint hWnd, uint dwFlags);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll")]
     public static partial nint MonitorFromPoint(PointStruct pt, uint dwFlags);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("shcore.dll")]
     public static partial int GetDpiForMonitor(
         nint hMonitor,
@@ -126,25 +137,31 @@ internal static partial class Win32Native
         out uint dpiX,
         out uint dpiY);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll", EntryPoint = "GetMonitorInfoW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static unsafe partial bool GetMonitorInfo(nint hMonitor, MONITORINFOEXW* lpmi);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool RegisterHotKey(nint hWnd, int id, uint fsModifiers, uint vk);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool UnregisterHotKey(nint hWnd, int id);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("shell32.dll")]
     public static partial int SHQueryUserNotificationState(out QueryUserNotificationState pquns);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool SystemParametersInfo(uint uiAction, uint uiParam, out int pvParam, uint fWinIni);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll", EntryPoint = "CreateWindowExW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     public static partial nint CreateWindowEx(
         uint dwExStyle,
@@ -160,21 +177,26 @@ internal static partial class Win32Native
         nint hInstance,
         nint lpParam);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool DestroyWindow(nint hWnd);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll", EntryPoint = "GetMessageW", SetLastError = true)]
     public static partial int GetMessage(out MsgStruct lpMsg, nint hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll", EntryPoint = "PostMessageW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool PostMessage(nint hWnd, uint msg, nint wParam, nint lParam);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool TranslateMessage(ref MsgStruct lpMsg);
 
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [LibraryImport("user32.dll", EntryPoint = "DispatchMessageW")]
     public static partial nint DispatchMessage(ref MsgStruct lpMsg);
 
